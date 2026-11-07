@@ -8,4 +8,6 @@ Living architectural blueprint: a dark green school plan with warm white typogra
 - Mobile: headline above plan; compact navigation. Reduced-motion preference disables camera movement and continuous crowd animation.
 - Clear demo labelling and honest destination feedback until a real application route exists.
 
+The blocked-exit scene carries the opening magnification into a full-width corridor view, with a responsive fit that keeps both exits visible, with an amber door closure, a cross marking the closed exit, a hatched congestion region, and explicitly labelled scripted crowd movement. Exit-open and exit-closed buttons offer a keyboard-accessible alternative to scrolling.
+
 This is an initial prototype. Browser screenshots and visual review have not yet been completed.

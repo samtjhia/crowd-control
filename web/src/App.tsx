@@ -4,7 +4,7 @@ function Arrow({ diagonal = false }: { diagonal?: boolean }) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={diagonal ? 'M6 18 18 6M6 6h12v12' : 'M4 12h15m-6-6 6 6-6 6'} /></svg>
 }
 
-function SchoolPlan({ progress, reduced }: { progress: number; reduced: boolean }) {
+function SchoolPlan({ progress, reduced, blocked = false, corridor = false }: { progress: number; reduced: boolean; blocked?: boolean; corridor?: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const motion = useRef({ progress, reduced })
   useEffect(() => { motion.current = { progress, reduced } }, [progress, reduced])
@@ -34,11 +34,13 @@ function SchoolPlan({ progress, reduced }: { progress: number; reduced: boolean 
     const draw = (time: number) => {
       context.clearRect(0, 0, width, height)
       const { progress: p, reduced: still } = motion.current
-      const scale = Math.min(width / 870, height / 650) * (still ? 1 : 1 + p * 1.15)
+      const baseScale = Math.min(width / 870, height / 650)
+      // Keep the first scene's magnification, but fit both exits in this wider frame.
+      const scale = corridor ? Math.min(baseScale * 2.15, width / 740) : baseScale * (still ? 1 : 1 + p * 1.15)
       context.save()
       context.translate(width / 2, height / 2)
       context.scale(scale, scale)
-      context.translate(-435 - p * 65, -315)
+      context.translate(corridor ? -435 : -435 - p * 65, -315)
       context.strokeStyle = '#213c35'; context.lineWidth = .6
       for (let x = 30; x < 860; x += 25) { context.beginPath(); context.moveTo(x, 50); context.lineTo(x, 580); context.stroke() }
       for (let y = 55; y < 590; y += 25) { context.beginPath(); context.moveTo(30, y); context.lineTo(855, y); context.stroke() }
@@ -66,17 +68,37 @@ function SchoolPlan({ progress, reduced }: { progress: number; reduced: boolean 
       for (const x of [120, 750]) { context.beginPath(); context.moveTo(x, 280); context.lineTo(x, 320); context.stroke() }
       context.strokeStyle = '#d8f392'; context.lineWidth = 1.5
       for (const x of [85, 770]) { context.beginPath(); context.moveTo(x, 300); context.lineTo(x + 25, 300); context.moveTo(x + 18, 294); context.lineTo(x + 25, 300); context.lineTo(x + 18, 306); context.stroke() }
-      context.fillStyle = '#d8f392'; context.font = '10px monospace'; context.fillText('WEST EXIT', 78, 340); context.fillText('EAST EXIT', 790, 340)
+      if (blocked) {
+        // A hatched corridor marks the illustrative queue independently of color.
+        context.fillStyle = '#b16d3038'; context.fillRect(145, 272, 210, 56)
+        context.save(); context.beginPath(); context.rect(145, 272, 210, 56); context.clip()
+        context.strokeStyle = '#e5b77a55'; context.lineWidth = 1
+        for (let x = 100; x < 370; x += 12) {
+          context.beginPath(); context.moveTo(x, 272); context.lineTo(x + 56, 328); context.stroke()
+        }
+        context.restore()
+        context.strokeStyle = '#edb985'; context.lineWidth = 5
+        context.beginPath(); context.moveTo(750, 280); context.lineTo(750, 320); context.stroke()
+        context.lineWidth = 2
+        context.beginPath(); context.moveTo(770, 290); context.lineTo(790, 310); context.moveTo(790, 290); context.lineTo(770, 310); context.stroke()
+      }
+      context.fillStyle = '#d8f392'; context.font = '10px monospace'; context.fillText('WEST EXIT', 78, 340); context.fillText(blocked ? 'CLOSED' : 'EAST EXIT', 790, 340)
       const t = still ? 4 : time / 1000
       for (let i = 0; i < 160; i++) {
         const room = rooms[i % rooms.length]
         const phase = ((t * .045 + i * .137) % 1)
         const startX = room.x + 24 + ((i * 37) % (room.w - 48))
         const startY = room.y + 42 + ((i * 19) % (room.h - 60))
-        const exitX = i % 3 === 0 ? 95 : 780
-        const x = phase < .4 ? startX + (room.x + room.w / 2 - startX) * phase / .4 : room.x + room.w / 2 + (exitX - room.x - room.w / 2) * (phase - .4) / .6
-        const y = phase < .4 ? startY + (300 - startY) * phase / .4 : 290 + (i % 6) * 4
-        context.fillStyle = i % 7 === 0 ? '#e5b77a' : '#c8da9c'
+        const exitX = blocked || i % 3 === 0 ? 95 : 780
+        let x = phase < .4 ? startX + (room.x + room.w / 2 - startX) * phase / .4 : room.x + room.w / 2 + (exitX - room.x - room.w / 2) * (phase - .4) / .6
+        let y = phase < .4 ? startY + (300 - startY) * phase / .4 : 290 + (i % 6) * 4
+        if (blocked && phase > .68) {
+          // Scripted queue positions demonstrate congestion, not measured physics.
+          const queue = (phase - .68) / .32
+          x = 150 + queue * 195
+          y = 281 + (i % 9) * 4.6
+        }
+        context.fillStyle = blocked && phase > .68 ? '#edb985' : i % 7 === 0 ? '#e5b77a' : '#c8da9c'
         context.beginPath(); context.arc(x, y, 2.2, 0, Math.PI * 2); context.fill()
       }
       context.strokeStyle = '#64816b'; context.lineWidth = .8
@@ -87,8 +109,47 @@ function SchoolPlan({ progress, reduced }: { progress: number; reduced: boolean 
     }
     resize(); frame = requestAnimationFrame(draw)
     return () => { cancelAnimationFrame(frame); observer.disconnect() }
-  }, [reduced])
-  return <canvas ref={canvas} className="school-canvas" role="img" aria-label="Animated architectural school floor plan showing illustrative crowd movement toward two exits" />
+  }, [reduced, blocked, corridor])
+  return <canvas ref={canvas} className="school-canvas" role="img" aria-label={blocked ? "Illustrative school evacuation with east exit closed, people rerouted west, and a hatched congestion area near the west exit" : "Animated architectural school floor plan showing illustrative crowd movement toward two exits"} />
+}
+
+function BlockedExitScene({ reduced }: { reduced: boolean }) {
+  const section = useRef<HTMLElement>(null)
+  const [scrollBlocked, setScrollBlocked] = useState(false)
+  const [override, setOverride] = useState<boolean | null>(null)
+  const blocked = override ?? scrollBlocked
+  useEffect(() => {
+    const update = () => {
+      const bounds = section.current!.getBoundingClientRect()
+      setScrollBlocked(bounds.top < -window.innerHeight * .3)
+    }
+    update()
+    window.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [])
+  return <section className="blocked-experience" id="experiment" ref={section} aria-label="Explore an illustrative blocked-exit scenario">
+    <div className="blocked-stage">
+      <div className="blocked-story">
+        <h2>One exit closes.<br /><em>Everything shifts.</em></h2>
+        <p>The same people. The same school. Change a single door and watch the crowd find another way.</p>
+        <div className="exit-controls" role="group" aria-label="East exit state">
+          <button aria-pressed={!blocked} onClick={() => setOverride(false)}>Exit open</button>
+          <button aria-pressed={blocked} onClick={() => setOverride(true)}>Exit closed</button>
+        </div>
+        <p className="exit-explanation" role="status">{blocked ? 'East exit closed. Both streams now share the west exit. The hatched area shows an illustrative queue.' : 'Both exits are open. The crowd can leave in two directions.'}</p>
+        {override !== null ? <button className="follow-scroll" onClick={() => setOverride(null)}>Follow the scroll again <Arrow /></button> : <span className="scene-hint">Keep scrolling to close the east exit.</span>}
+      </div>
+      <div className="blocked-plan">
+        <div className="plan-heading"><span><span className={blocked ? 'status-dot is-blocked' : 'status-dot'} />{blocked ? 'EAST EXIT CLOSED' : 'BOTH EXITS OPEN'}</span><span>VISUAL DEMO</span></div>
+        <SchoolPlan progress={0} reduced={reduced} blocked={blocked} corridor />
+        <div className="queue-legend"><span className="hatch-swatch" /> Illustrative congestion · scripted crowd movement</div>
+      </div>
+    </div>
+  </section>
 }
 
 function App() {
@@ -104,11 +165,11 @@ function App() {
     window.addEventListener('scroll', scroll, { passive: true })
     return () => { preference.removeEventListener('change', updatePreference); window.removeEventListener('scroll', scroll) }
   }, [])
-  const enter = () => { setDemo(true); document.getElementById('inside')?.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth' }) }
+  const enter = () => { setDemo(true); document.getElementById('experiment')?.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth' }) }
   return <>
     <header className="navigation">
       <a className="wordmark" href="#" aria-label="Crowd Control home"><span className="brand-symbol"><i /><i /><i /><i /></span>Crowd Control<span className="brand-period">.</span></a>
-      <nav aria-label="Main navigation"><a href="#inside" className="explore-link">The experiment</a><button onClick={enter}>Explore the demo <Arrow diagonal /></button></nav>
+      <nav aria-label="Main navigation"><a href="#experiment" className="explore-link">The experiment</a><button onClick={enter}>Explore the demo <Arrow diagonal /></button></nav>
     </header>
     <main>
       <section className="experience" aria-label="Crowd Control introduction">
@@ -125,13 +186,14 @@ function App() {
             <div className="plan-footer"><span>Every dot is a person.<br />Every decision changes their path.</span><span className="compass">N ↑</span></div>
           </div>
           <div className="interior-caption" style={{ opacity: Math.max(0, (progress - .55) / .45), visibility: progress < .55 ? 'hidden' : 'visible' }}><span className="status-dot" /><p>Same school.<br /><strong>Different possibilities.</strong></p></div>
-          <div className="stage-bottom"><span>BUILT AT HACKTRENT 2026</span><a href="#inside">Scroll to explore <span>↓</span></a><span>PLANNING STARTS WITH CURIOSITY</span></div>
+          <div className="stage-bottom"><span>BUILT AT HACKTRENT 2026</span><a href="#experiment">Scroll to explore <span>↓</span></a><span>PLANNING STARTS WITH CURIOSITY</span></div>
           <div className="scroll-track"><span style={{ transform: `scaleX(${progress})` }} /></div>
         </div>
       </section>
+      <BlockedExitScene reduced={reduced} />
       <section className="inside" id="inside">
         <div><span className="section-mark" aria-hidden="true">↳</span><h2>What happens when<br />the plan changes?</h2></div>
-        <div className="inside-copy"><p>Start with a school. Fill the corridors. Then ask a question that changes everything.</p><div className="scenario-prompt"><span className="prompt-dot" /><span>“What if the east exit closes?”</span><Arrow /></div><p className="prototype-note" role="status">{demo ? 'You’re viewing the landing-page prototype. The interactive simulation is not connected yet.' : 'An opening experiment. Blocked-exit and replay scenes are coming next.'}</p><button className="text-button" onClick={() => window.scrollTo({ top: 0, behavior: reduced ? 'instant' : 'smooth' })}>Back to the school <span>↑</span></button></div>
+        <div className="inside-copy"><p>Start with a school. Fill the corridors. Then ask a question that changes everything.</p><div className="scenario-prompt"><span className="prompt-dot" /><span>“What if the east exit closes?”</span><Arrow /></div><p className="prototype-note" role="status">{demo ? 'You’re viewing the landing-page prototype. The interactive simulation is not connected yet.' : 'A visual experiment, not a live simulation. Rewind and replay are coming next.'}</p><button className="text-button" onClick={() => window.scrollTo({ top: 0, behavior: reduced ? 'instant' : 'smooth' })}>Back to the school <span>↑</span></button></div>
       </section>
     </main>
     <footer><a className="wordmark" href="#">Crowd Control.</a><span>Ask a better what-if.</span><span>Planning estimates. Not certified safety analysis.</span></footer>
