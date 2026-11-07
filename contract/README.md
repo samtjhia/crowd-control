@@ -56,12 +56,19 @@ npm run typecheck --workspace @crowd-control/contract
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits and the performance target
-remain implementation work. Parts one/two now provide Rust world initialization,
+remain implementation work. Parts one–three now provide Rust world initialization,
 full runtime agents, both grid encodings, seeded streams, fixed-clock playback and
-snapshot export. Actual Wasm tests include native parity and host pacing. Browser
-worker/PixiJS acceptance remains pending; restore and replay remain unimplemented.
+snapshot export, basic reach navigation and recorded immediate portal.open changes.
+Actual Wasm tests include native parity and host pacing. Browser worker/PixiJS
+acceptance remains pending; crowd avoidance, restore and replay remain unimplemented.
 
 ## Engine input example
+
+`fixtures/engine-navigation-load.json` is the running part-three example: one reach
+controller routes one agent through a door. Close/open it through an immediate
+create-intervention request with `set` → `values.components.portal.open` and explicit
+portal IDs. Scene metadata precedes changed-topology frames. The engine also accepts
+history queries; broader operations/goals and the full example below remain pending.
 
 `fixtures/engine-load.json` is a complete WorkerCommand load payload: CompileOutput
 plus an empty initial history. Two agents wander, one arrives at simulation second

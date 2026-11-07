@@ -193,15 +193,70 @@ dto!(Point {
 });
 dto!(AgentNavigation { target_entity_id: Option<Id>, target_point: Option<Point>, flow_field_id: Option<Id>, map_version: Counter });
 dto!(Timers { reaction_remaining: Nonnegative, wait_remaining: Nonnegative, wander_refresh_remaining: Option<Nonnegative> });
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReachKind {
+    #[serde(rename = "reach")]
+    Reach,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum Selection {
+    #[serde(rename = "nearest")]
+    Nearest,
+    #[default]
+    #[serde(rename = "lowest-cost")]
+    LowestCost,
+    #[serde(rename = "random")]
+    Random,
+}
+dto!(ReachGoal {
+    kind: ReachKind,
+    #[serde(skip_serializing_if = "Option::is_none")] target_zone: Option<Id>,
+    #[serde(skip_serializing_if = "Option::is_none")] target_entity_id: Option<Id>,
+    #[serde(skip_serializing_if = "Option::is_none")] target_ids: Option<Vec<Id>>,
+    #[serde(skip_serializing_if = "Option::is_none")] selection: Option<Selection>,
+    #[serde(skip_serializing_if = "Option::is_none")] stop_distance: Option<Nonnegative>,
+    #[serde(skip_serializing_if = "Option::is_none")] urgency: Option<Nonnegative>
+});
+dto!(GoalCursor {
+    child_index: Counter,
+    repeats_remaining: Counter
+});
+dto!(GoalFailure {
+    code: String,
+    message: String
+});
+dto!(GoalRuntime { id: Id, spec: ReachGoal, status: String, cursor: Vec<GoalCursor>, started_at: Option<Nonnegative>, failure: Option<GoalFailure> });
 dto!(AgentRuntime {
     id: Id, kind: String, #[serde(skip_serializing_if="Option::is_none")] label: Option<String>, tags: Vec<Id>, profile: Id,
     components: Components, appearance: Value, sensors: Option<Value>, state: String, state_reason: Option<String>,
-    position: Point, velocity: Point, zone_id: Option<Id>, controller: Option<Id>, current_goal: Option<Value>, goal_queue: Vec<Value>,
+    position: Point, velocity: Point, zone_id: Option<Id>, controller: Option<Id>, current_goal: Option<GoalRuntime>, goal_queue: Vec<GoalRuntime>,
     navigation: AgentNavigation, timers: Timers, queue_ref: Option<Value>, interaction_ref: Option<Value>, random_state: u32, departed_at: Option<Nonnegative>
 });
 dto!(Allocation { next_entity: Counter, next_goal: Counter, next_job: Counter, next_ticket: Counter, next_event: Counter, reserved: Vec<Reservation> });
 dto!(Reservation { key: Id, ids: Vec<Id> });
 dto!(RandomStreams { layout: u32, placement: u32, rule_sampling: BTreeMap<Id,u32> });
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CreateAction {
+    #[serde(rename = "create_intervention")]
+    Create,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SetKind {
+    #[serde(rename = "set")]
+    Set,
+}
+dto!(PortalRequest { schema_version: Counter, simulation_id: Id, request_id: Id, action: Option<CreateAction>, label: Option<String>, at: Option<Nonnegative>, operations: Vec<Value> });
+dto!(PortalSelector { ids: Vec<Id>, kind: Option<EntityKind> });
+dto!(PortalOpen { open: bool });
+dto!(PortalComponents { portal: PortalOpen });
+dto!(PortalValues {
+    components: PortalComponents
+});
+dto!(PortalOperation {
+    op: SetKind,
+    targets: PortalSelector,
+    values: PortalValues
+});
 
 pub fn preflight(value: &Value) -> Result<(), &'static str> {
     fn visit(

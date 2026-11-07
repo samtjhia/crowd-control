@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "world-engine-v2";
+pub const ENGINE_VERSION: &str = "navigation-engine-v3";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -151,8 +151,39 @@ impl Engine {
                 json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"snapshot","commandId":c.command_id,"snapshot":world.snapshot(c.snapshot_id.as_ref().unwrap())}),
                 self.ack(&c.command_id),
             ]),
+            "apply_request" => {
+                let result = self
+                    .loaded
+                    .as_mut()
+                    .unwrap()
+                    .portal_request(c.request.as_ref().unwrap())?;
+                if result["ok"] == true {
+                    let mut messages = self.publication(&c.command_id, true);
+                    messages[0]["applied"] = result["value"].clone();
+                    Ok(messages)
+                } else {
+                    Ok(vec![
+                        json!({"schemaVersion":1,"simulationId":c.simulation_id,"commandId":c.command_id,"type":"error","error":result["error"]}),
+                    ])
+                }
+            }
+            "query" => {
+                let query = c.query.as_ref().unwrap();
+                if query["kind"] != "history" {
+                    return Err(unsupported(
+                        "Only history queries are enabled in part three",
+                    ));
+                }
+                if query.as_object().is_none_or(|v| v.len() != 1) {
+                    return Err(invalid("Unknown history query fields"));
+                }
+                Ok(vec![
+                    json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"query_result","commandId":c.command_id,"stamp":self.stamp(),"result":{"kind":"history","history":world.history}}),
+                    self.ack(&c.command_id),
+                ])
+            }
             _ => Err(unsupported(format!(
-                "{} is not enabled in part two",
+                "{} is not enabled in part three",
                 c.r#type
             ))),
         }
@@ -173,7 +204,7 @@ impl Engine {
     }
     fn stamp(&self) -> Value {
         let world = self.loaded.as_ref().unwrap();
-        json!({"streamId":format!("rust-stream-{}",self.stream),"tick":world.tick,"time":world.time(),"topologyVersion":0,"sceneVersion":1,"historyRevision":0})
+        json!({"streamId":format!("rust-stream-{}",self.stream),"tick":world.tick,"time":world.time(),"topologyVersion":world.topology_version,"sceneVersion":world.scene_version,"historyRevision":world.history.history_revision})
     }
     fn ack(&self, id: &Id) -> Value {
         json!({"schemaVersion":1,"simulationId":self.loaded.as_ref().unwrap().initial.scene.simulation_id,"type":"ack","commandId":id,"stamp":self.stamp()})

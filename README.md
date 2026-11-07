@@ -8,7 +8,7 @@ Use Node 24+, npm 10+, and Rust with edition 2024 support.
 ```text
 contract/   Strict Zod schemas, shared types and JSON fixtures — C leads, everyone reviews
 compiler/   Layout generation, maps, rasterization, placement — B
-engine/     Rust world initialization, fixed clock and Wasm bridge — A
+engine/     Rust world, navigation, fixed clock and Wasm bridge — A
 history/    Intervention revisions and replay planning — C
 server/     Node API and Gemini planner; persistence adapters — C
 web/        React + Vite UI — B, with C owning chat
@@ -64,8 +64,9 @@ Browser acceptance and simulation physics/replay remain pending. Commit both loc
 The engine demo is at `/`; the planner UI is at `/planner`. The engine's PixiJS
 view loads a pinned CDN bundle and needs network access.
 
-The frontend initializes two stationary agents and offers Play/Pause, Step, Speed,
-Reset and forward clock controls. Movement is a later milestone. Its minimal PixiJS
+The frontend routes an agent around a wall through a door. Play/Pause, Step, Speed,
+Reset, forward clock controls and Close/Open door exercise Rust navigation and
+recorded topology changes. Crowd avoidance arrives in part four. Its minimal PixiJS
 view loads a pinned CDN bundle; it needs network access. See
 [engine/README.md](engine/README.md) for setup, supported inputs and limitations.
 

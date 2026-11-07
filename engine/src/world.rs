@@ -1,6 +1,7 @@
 use crate::{
     core::{ENGINE_VERSION, Failure, invalid, unsupported},
     grid::{GridData, bounds},
+    navigation::{self, Navigator},
     protocol::*,
     random::stream_seed,
 };
@@ -17,6 +18,13 @@ pub struct World {
     pub tick: u64,
     pub random: RandomStreams,
     pub allocations: Allocation,
+    pub map_state: Map,
+    pub topology_version: u64,
+    pub scene_version: u64,
+    pub history: History,
+    pub request_contents: std::collections::BTreeMap<Id, String>,
+    #[serde(skip)]
+    pub navigator: Navigator,
     initial_scene_hash: String,
 }
 
@@ -45,20 +53,21 @@ impl World {
         {
             return Err(unsupported("Unsupported random or engine version"));
         }
-        if !s.controllers.is_empty()
-            || !s.jobs.is_empty()
-            || !s.rules.is_empty()
-            || s.agents.iter().any(|a| a.controller.is_some())
-            || model.contact.is_some()
-        {
+        if !s.jobs.is_empty() || !s.rules.is_empty() || model.contact.is_some() {
             return Err(unsupported(
-                "Goals, jobs, rules and contact physics are not enabled in the clock-only engine",
+                "Jobs, rules and contact physics are not enabled in part three",
             ));
         }
         if s.agents.len() > 2000 {
             return Err(("RESOURCE_LIMIT", "Agent budget exceeded".into()));
         }
         let grid = GridData::decode(&s.map)?;
+        let mut controllers = std::collections::BTreeMap::new();
+        for (id, value) in &s.controllers {
+            let goal = navigation::parse_goal(value)?;
+            navigation::validate_goal(&goal, &grid, &s.agents)?;
+            controllers.insert(id.clone(), goal);
+        }
         let mut ids: BTreeSet<Id> = grid
             .zone_ids
             .iter()
@@ -68,6 +77,7 @@ impl World {
             .collect();
         let mut agents = vec![];
         let mut placement_work = 0usize;
+        let mut next_goal = 1u64;
         if model.default_agent.navigation.maximum_speed.0
             < model.default_agent.navigation.preferred_speed.0
         {
@@ -80,7 +90,9 @@ impl World {
                 return Err(invalid("Invalid profile speed range"));
             }
         }
-        for a in &s.agents {
+        let mut blueprints: Vec<_> = s.agents.iter().collect();
+        blueprints.sort_by(|a, b| a.id.cmp(&b.id));
+        for a in blueprints {
             if !ids.insert(a.id.clone()) {
                 return Err(invalid("Duplicate entity ID"));
             }
@@ -158,6 +170,24 @@ impl World {
                 random_state: stream_seed(s.seed.0 as u32, &format!("agent:{}", a.id.0)),
                 departed_at: None,
             });
+            if let Some(controller) = &a.controller {
+                let goal = controllers
+                    .get(controller)
+                    .ok_or_else(|| invalid("Unknown controller"))?
+                    .clone();
+                let runtime = agents.last_mut().unwrap();
+                runtime.controller = Some(controller.clone());
+                runtime.current_goal = Some(GoalRuntime {
+                    id: Id(format!("goal-{next_goal}")),
+                    spec: goal,
+                    status: if immobile { "suspended" } else { "active" }.into(),
+                    cursor: vec![],
+                    started_at: Some(Nonnegative(0.0)),
+                    failure: None,
+                });
+                runtime.timers.reaction_remaining = runtime.components.behavior.reaction_delay;
+                next_goal += 1;
+            }
         }
         agents.sort_by(|a, b| a.id.cmp(&b.id));
         for (i, a) in agents.iter().enumerate() {
@@ -183,7 +213,7 @@ impl World {
         };
         let allocations = Allocation {
             next_entity: Counter(ids.len() as f64 + 1.0),
-            next_goal: Counter(1.0),
+            next_goal: Counter(next_goal as f64),
             next_job: Counter(1.0),
             next_ticket: Counter(1.0),
             next_event: Counter(1.0),
@@ -197,15 +227,28 @@ impl World {
         let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
             (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
         });
-        Ok(Self {
+        let map_state = initial.scene.map.clone();
+        let mut world = Self {
             initial,
             grid,
             agents,
             tick: 0,
             random,
             allocations,
+            map_state,
+            topology_version: 0,
+            scene_version: 1,
+            history: History {
+                history_revision: Counter(0.0),
+                records: vec![],
+                outcomes: vec![],
+            },
+            request_contents: Default::default(),
+            navigator: Navigator::default(),
             initial_scene_hash: format!("fnv1a64-v1:{hash:016x}"),
-        })
+        };
+        world.prepare_navigation()?;
+        Ok(world)
     }
 
     pub fn time(&self) -> f64 {
@@ -220,12 +263,30 @@ impl World {
                     && (*n as f64 * self.initial.scene.model.dt.0).is_finite()
             })
             .ok_or_else(|| ("RESOURCE_LIMIT", "Tick/time range exceeded".into()))?;
-        // shortcut: no tick-dependent behavior is enabled; visit every tick before adding goals/jobs.
-        self.tick = next;
+        if !self.navigator.prepared {
+            self.prepare_navigation()?;
+        }
+        while self.tick < next {
+            self.navigator
+                .step(&self.grid, &mut self.agents, self.initial.scene.model.dt.0);
+            self.tick += 1;
+        }
+        Ok(())
+    }
+    pub fn prepare_navigation(&mut self) -> Result<(), Failure> {
+        let mut agents = self.agents.clone();
+        self.navigator.prepare(
+            &self.grid,
+            &self.map_state,
+            &mut agents,
+            self.topology_version,
+            self.initial.scene.model.dt.0,
+        )?;
+        self.agents = agents;
         Ok(())
     }
     pub fn map(&self) -> Value {
-        let mut map = wire(&self.initial.scene.map);
+        let mut map = wire(&self.map_state);
         map.as_object_mut().unwrap().remove("rows");
         map.as_object_mut().unwrap().remove("legend");
         map["grid"] = serde_json::to_value(&self.grid).unwrap();
@@ -244,13 +305,37 @@ impl World {
     pub fn snapshot(&self, id: &Id) -> Value {
         let mut versions = wire(&self.initial.scene.versions);
         versions["engine"] = json!(ENGINE_VERSION);
-        let overlays:Vec<Value>=self.agents.iter().enumerate().filter(|(_,a)|a.state=="immobile"&&a.components.physical.blocks_movement).map(|(i,a)|json!({"id":format!("immobile-{}",i+1),"entityId":a.id,"cells":self.grid.footprint(a.position.x.0,a.position.y.0,a.components.physical.radius.0),"kind":"immobile"})).collect();
+        let mut overlays:Vec<Value>=self.agents.iter().enumerate().filter(|(_,a)|a.state=="immobile"&&a.components.physical.blocks_movement).map(|(i,a)|json!({"id":format!("immobile-{}",i+1),"entityId":a.id,"cells":self.grid.footprint(a.position.x.0,a.position.y.0,a.components.physical.radius.0),"kind":"immobile"})).collect();
+        for (i, portal) in self
+            .map_state
+            .portals
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.open)
+        {
+            let index = self
+                .grid
+                .portal_ids
+                .iter()
+                .position(|id| id.as_ref() == Some(&portal.id))
+                .unwrap() as u32;
+            overlays.push(json!({"id":format!("portal-{i}"),"entityId":portal.id,"cells":self.grid.portal_index.iter().enumerate().filter_map(|(i,p)|(*p==index).then_some(i)).collect::<Vec<_>>(),"kind":"portal"}));
+        }
         json!({"schemaVersion":1,"simulationId":self.initial.scene.simulation_id,"id":id,"initialSceneHash":self.initial_scene_hash,"versions":versions,
-            "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":0,"overlays":overlays,"entities":[],"entityOrigins":[],
-            "profiles":wire(&self.initial.scene.profiles),"controllers":{},"agents":self.agents,"jobs":[],"rules":[],"queues":[],"slots":[],"allocations":self.allocations,"random":self.random,
-            "metrics":{"samples":[],"departures":[],"removedCount":0,"portalCrossings":[],"queueTotals":[],"clearance":null},"events":[],"historyRevision":0,
-            "appliedThrough":{"tick":self.tick,"order":0,"prefixHash":"empty-history-v1"},"contactState":null})
+            "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":[],"entityOrigins":[],
+            "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":[],"rules":[],"queues":[],"slots":[],"allocations":self.allocations,"random":self.random,
+            "metrics":{"samples":[],"departures":[],"removedCount":0,"portalCrossings":[],"queueTotals":[],"clearance":null},"events":[],"historyRevision":self.history.history_revision,
+            "appliedThrough":{"tick":self.tick,"order":self.history.records.len(),"prefixHash":fingerprint(&self.history.records)},"contactState":null})
     }
+}
+pub fn fingerprint<T: Serialize>(value: &T) -> String {
+    let hash = serde_json::to_vec(value)
+        .unwrap()
+        .iter()
+        .fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
+        });
+    format!("fnv1a64-v1:{hash:016x}")
 }
 
 fn resolve_components(
@@ -343,6 +428,31 @@ pub fn wire<T: Serialize>(value: &T) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shared_fields_and_active_roundtrip_preserve_route_progress() {
+        let mut input: Value = serde_json::from_str(include_str!(
+            "../../contract/fixtures/engine-static-load.json"
+        ))
+        .unwrap();
+        input["compiled"]["scene"]["controllers"] =
+            json!({"leave":{"kind":"reach","targetZone":"outside"}});
+        for agent in input["compiled"]["scene"]["agents"].as_array_mut().unwrap() {
+            agent["controller"] = json!("leave");
+        }
+        let initial: Compiled = serde_json::from_value(input["compiled"].clone()).unwrap();
+        let mut world = World::load(initial, &Id("engine-demo".into())).unwrap();
+        assert_eq!(world.navigator.field_count(), 1);
+        world.advance(17).unwrap();
+        let encoded = serde_json::to_string(&world).unwrap();
+        let mut restored: World = serde_json::from_str(&encoded).unwrap();
+        restored.advance(21).unwrap();
+        world.advance(21).unwrap();
+        assert_eq!(
+            restored.snapshot(&Id("saved".into())),
+            world.snapshot(&Id("saved".into()))
+        );
+        assert_eq!(restored.navigator.field_count(), 1);
+    }
     #[test]
     fn world_roundtrip_preserves_independent_state() {
         let input: Value = serde_json::from_str(include_str!(

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { parseWorkerCommand, type Frame, type RenderScene, type Stamp, type WorkerCommand } from '@crowd-control/contract'
-import staticLoad from '../../contract/fixtures/engine-static-load.json'
+import navigationLoad from '../../contract/fixtures/engine-navigation-load.json'
 import { createRealEndpoint, type RealEndpoint } from './worker/realEndpoint.ts'
 import { createStaticRenderer } from './render/staticRenderer.ts'
 
@@ -13,6 +13,7 @@ function App() {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
   const [targetTime, setTargetTime] = useState('10')
+  const [doorOpen, setDoorOpen] = useState(true)
   const pending = useRef(new Map<string, WorkerCommand>())
   const nextCommand = useRef(0)
   const header = () => ({ schemaVersion: 1 as const, simulationId: 'engine-demo', commandId: `control-${++nextCommand.current}` })
@@ -29,11 +30,11 @@ function App() {
     let frame: Frame | undefined
     let stream: string | undefined
     const draw = () => {
-      if (!renderer || !scene || !frame || frame.streamId !== scene.stamp.streamId || frame.sceneVersion !== scene.stamp.sceneVersion || frame.historyRevision !== scene.stamp.historyRevision) return
+      if (!renderer || !scene || !frame || frame.streamId !== scene.stamp.streamId || frame.sceneVersion !== scene.stamp.sceneVersion || frame.historyRevision !== scene.stamp.historyRevision || frame.topologyVersion !== scene.stamp.topologyVersion) return
       try {
         renderer.render({ scene: scene.data, frame, camera: { pan: { x: -1, y: -1 }, pixelsPerUnit: 60 }, selectedIds: [] })
         setReady(true)
-        setStatus(`${frame.agents.length} agents · ${frame.time.toFixed(2)} simulation seconds · tick ${frame.tick}`)
+        setStatus(`${frame.agents.map((a) => `${a.id}: ${a.state}`).join(', ')} · ${frame.time.toFixed(2)} simulation seconds · tick ${frame.tick}`)
       } catch (e) { setError(e instanceof Error ? e.message : 'Renderer failed') }
     }
     const worker = createRealEndpoint()
@@ -53,11 +54,14 @@ function App() {
         if (command?.type === 'speed') setSpeed(command.multiplier)
       }
       if (message.type === 'ack' && message.stamp.streamId !== stream) { stream = message.stamp.streamId; scene = undefined; frame = undefined }
-      if (message.type === 'scene' && message.stamp.streamId === stream) scene = { stamp: message.stamp, data: message.scene }
+      if (message.type === 'scene' && message.stamp.streamId === stream) {
+        scene = { stamp: message.stamp, data: message.scene }
+        setDoorOpen(message.scene.map.portals[0]!.open)
+      }
       if (message.type === 'frame' && message.frame.streamId === stream) frame = message.frame
       draw()
     })
-    const parsed = parseWorkerCommand(staticLoad)
+    const parsed = parseWorkerCommand(navigationLoad)
     if (parsed.ok) { pending.current.set(parsed.value.commandId, parsed.value); worker.send(parsed.value) }
     else queueMicrotask(() => { if (!disposed) setError(parsed.error.message) })
     void createStaticRenderer(host.current).then((view) => {
@@ -72,13 +76,17 @@ function App() {
     <main>
       <p>HackTrent 2026</p>
       <h1>Crowd Control</h1>
-      <p>Rust world initialization and fixed-clock demo</p>
+      <p>Rust navigation and live door changes</p>
       <p role="status">{status}</p>
       {error && <p role="alert">{error}</p>}
       <div className="playback-controls">
         <button disabled={!ready} onClick={() => send({ ...header(), type: playing ? 'pause' : 'resume' })}>{playing ? 'Pause' : 'Play'}</button>
         <button disabled={!ready || playing} onClick={() => send({ ...header(), type: 'step', ticks: 20 })}>Step 1 second</button>
         <button disabled={!ready} onClick={() => send({ ...header(), type: 'reset' })}>Reset scene</button>
+        <button disabled={!ready} onClick={() => {
+          const h = header()
+          send({ ...h, type: 'apply_request', request: { schemaVersion: 1, simulationId: h.simulationId, requestId: h.commandId, action: 'create_intervention', label: doorOpen ? 'Close door' : 'Open door', operations: [{ op: 'set', targets: { ids: [navigationLoad.compiled.scene.map.portals[0]!.id] }, values: { components: { portal: { open: !doorOpen } } } }] } })
+        }}>{doorOpen ? 'Close door' : 'Open door'}</button>
         <label>Speed <select disabled={!ready} value={speed} onChange={(event) => send({ ...header(), type: 'speed', multiplier: Number(event.target.value) })}>
           <option value="0.25">0.25×</option><option value="1">1×</option><option value="4">4×</option>
         </select></label>
@@ -88,7 +96,8 @@ function App() {
         <button disabled={!ready || playing}>Run to time</button>
       </form>
       <div ref={host} className="simulation-view" />
-      <p>The clock advances; agents remain stationary. Movement, goals and scheduling follow in later milestones.</p>
+      <p>The agent routes through the doorway to the green zone. Close the door before arrival to block its route, then reopen it to continue. Reset to try again. Closing an occupied doorway is rejected.</p>
+      <p>Basic navigation only. Crowd avoidance, acceleration and scheduling follow in later milestones.</p>
     </main>
   )
 }
