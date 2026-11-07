@@ -55,8 +55,10 @@ npm run typecheck --workspace @crowd-control/contract
 ```
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
-resolution, physics/fall transitions, replay commits, Rust Serde/ABI bindings,
-PixiJS rendering and the 2,000-agent/4×/60-fps target remain implementation work.
+resolution, physics/fall transitions, replay commits and the performance target
+remain implementation work. Part-one static Rust DTOs, ABI binding, real worker
+and a PixiJS smoke-test view exist. The actual Node/Wasm test passed November 7;
+browser worker/PixiJS acceptance remains pending.
 
 ## Engine input example
 
@@ -77,3 +79,47 @@ Step at fixed dt (0.05 s here), execute due jobs/rules, update navigation/moveme
 then publish versioned scene/frame/metric messages. Appearance only affects
 render metadata. B owns position handling; the engine applies updates in worker
 state. Pin the actual engine build in versions.engine for saved runs.
+
+## Compiler → engine → PixiJS
+
+The ordered implementation work is in `engine/IMPLEMENTATION_PLAN.md`.
+
+Rust runs inside the browser's WebAssembly runtime, hosted by the Web Worker.
+The crate is a library (`cdylib`/`rlib`), not a standalone executable. Current
+`cargo build` creates native libraries for local development; the browser build
+must target `wasm32-unknown-unknown` to produce a `.wasm` module. A JS binding layer
+exposes the declared WasmEngineBindings API and handles strings across that
+boundary. Part one now has handwritten Rust exports, a JS memory/string binding
+and a real worker; no wasm-bindgen CLI is required. The worker loads the module
+once, validates TypeScript inputs, then calls Rust. Static loads/reset are
+implemented; fixed-step simulation is not. Native protocol checks and the actual
+Node/Wasm test pass. The target is installed; browser rendering remains unverified.
+
+```text
+Compiler returns CompileOutput
+  → UI sends WorkerCommand {type: "load", compiled, history}
+  → TypeScript Web Worker validates and JSON-encodes the command
+  → Rust/Wasm dispatch(handle, commandJson) loads/steps authoritative state
+  → dispatch returns JSON encoding WorkerMessage[]
+  → Worker parses/validates and postMessages those objects to the UI
+  → UI combines RenderScene + latest Frame + Camera into RenderInput
+  → PixiJS adapter creates/updates drawing objects by stable entity ID
+```
+
+The worker owns the engine handle and schedules fixed-step batches. Rust returns
+an ack and initial scene/frame on load. Scene messages contain map geometry and
+resolved agent radius/appearance; frame messages contain current agent x/y and
+state. Resend scene metadata on spawn/removal, restyling, geometry changes and
+restore, before frames that require it. Metrics/density arrive separately.
+
+The UI keeps an ID → PixiJS object map, updates positions from frames and draws on
+the PixiJS ticker. Camera conversion is (world − pan) × pixelsPerUnit; radius uses
+the same scale. Interpolation may smooth publications between physics ticks but
+does not feed positions back into the engine. Avoid rebuilding every drawing
+object or routing every agent movement through React state.
+
+Match streamId, sceneVersion and historyRevision before drawing; discard stale
+streams and buffer frames awaiting their scene metadata. Physics ticks and render
+frames have independent cadences. At dt=0.05 the engine advances 20 ticks per
+simulation second; 4× playback requires 80 ticks per wall second, regardless of
+the display's frame rate. This handoff is specified, not implemented yet.

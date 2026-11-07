@@ -1,0 +1,83 @@
+import type { RenderInput } from '@crowd-control/contract'
+
+type Graphics = {
+  rect(x: number, y: number, width: number, height: number): Graphics
+  circle(x: number, y: number, radius: number): Graphics
+  poly(points: number[]): Graphics
+  fill(color: string): Graphics
+  stroke(style: { color: string; width: number }): Graphics
+  position: { set(x: number, y: number): void }
+  alpha: number
+  visible: boolean
+  destroy(): void
+}
+type Application = {
+  init(options: { width: number; height: number; background: string; antialias: boolean }): Promise<void>
+  canvas: HTMLCanvasElement
+  stage: { addChild(graphic: Graphics): void; removeChildren(): Graphics[] }
+  destroy(removeView: boolean, options: { children: boolean }): void
+}
+type Pixi = { Application: new () => Application; Graphics: new () => Graphics }
+
+export async function createStaticRenderer(host: HTMLElement) {
+  // shortcut: the smoke-test view pins a CDN bundle; bundle Pixi via npm for the product renderer.
+  const url = 'https://pixijs.download/v8.22.0/pixi.min.mjs'
+  const pixi: Pixi = await import(/* @vite-ignore */ url)
+  if (typeof pixi.Application !== 'function' || typeof pixi.Graphics !== 'function') throw new Error('Invalid PixiJS bundle')
+  const app = new pixi.Application()
+  await app.init({ width: 800, height: 400, background: '#F1F5F9', antialias: true })
+  app.canvas.setAttribute('role', 'img')
+  app.canvas.setAttribute('aria-label', 'Stationary crowd scene loaded from the Rust engine')
+  host.appendChild(app.canvas)
+  let currentScene: RenderInput['scene'] | undefined
+  let currentScale = 0
+  let currentPan = { x: NaN, y: NaN }
+  const agents = new Map<string, Graphics>()
+  return {
+    render(input: RenderInput) {
+      const { scene, frame, camera } = input
+      const scale = camera.pixelsPerUnit
+      if (currentScene !== scene || currentScale !== scale || currentPan.x !== camera.pan.x || currentPan.y !== camera.pan.y) {
+        for (const graphic of app.stage.removeChildren()) graphic.destroy()
+        agents.clear()
+        const map = scene.map
+        if (!('rows' in map)) throw new Error('Static renderer requires a rows/legend map')
+        const drawCell = (x: number, y: number, color: string) => {
+          const graphic = new pixi.Graphics().rect((x * map.cellSize - camera.pan.x) * scale, (y * map.cellSize - camera.pan.y) * scale, map.cellSize * scale, map.cellSize * scale).fill(color)
+          app.stage.addChild(graphic)
+        }
+        map.rows.forEach((row, y) => [...row].forEach((glyph, x) => {
+          const id = map.legend[glyph]
+          const room = map.rooms.find((r) => r.id === id)
+          const portal = map.portals.find((p) => p.id === id)
+          drawCell(x, y, glyph === '#' ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? '#E2E8F0')
+        }))
+        for (const agent of scene.agents) {
+          const r = agent.radius * scale
+          const graphic = new pixi.Graphics()
+          switch (agent.appearance.symbol ?? 'circle') {
+            case 'circle': graphic.circle(0, 0, r); break
+            case 'square': graphic.rect(-r / Math.SQRT2, -r / Math.SQRT2, r * Math.SQRT2, r * Math.SQRT2); break
+            case 'triangle': graphic.poly([0, -r, Math.sqrt(3) * r / 2, r / 2, -Math.sqrt(3) * r / 2, r / 2]); break
+          }
+          graphic.fill(agent.appearance.fill ?? '#2563EB')
+          if (agent.appearance.stroke) graphic.stroke({ color: agent.appearance.stroke, width: agent.appearance.strokeWidthPx ?? 1 })
+          graphic.alpha = agent.appearance.opacity ?? 1
+          agents.set(agent.id, graphic)
+          app.stage.addChild(graphic)
+        }
+        currentScene = scene
+        currentScale = scale
+        currentPan = { ...camera.pan }
+      }
+      for (const graphic of agents.values()) graphic.visible = false
+      for (const agent of frame.agents) {
+        const graphic = agents.get(agent.id)
+        if (!graphic) throw new Error(`Missing scene metadata for ${agent.id}`)
+        graphic.visible = agent.state !== 'departed'
+        graphic.position.set((agent.x - camera.pan.x) * scale, (agent.y - camera.pan.y) * scale)
+      }
+    },
+    destroy() { app.destroy(true, { children: true }) },
+  }
+}

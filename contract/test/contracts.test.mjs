@@ -31,6 +31,7 @@ test('PRD and worker fixtures pass strict contracts without normalization', () =
     'compile-output': c.CompileOutputSchema, 'snapshot': c.EngineSnapshotSchema,
     'worker-apply': c.WorkerCommandSchema, 'worker-ack': c.WorkerMessageSchema, 'worker-frame': c.WorkerMessageSchema,
     'engine-load': c.WorkerCommandSchema,
+    'engine-static-load': c.WorkerCommandSchema,
   };
   for (const [name, schema] of Object.entries(fixtures)) {
     const original = fixture(name);

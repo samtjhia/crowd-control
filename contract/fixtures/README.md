@@ -15,3 +15,8 @@ They do not run a compiler, measure physical behavior or execute replay.
 `engine-load.json` is a complete small worker load message for starting engine
 development: two initial attendees, one future arrival, and an alarm-driven exit.
 It has no contact model. Its model parameters are illustrative, not calibrated.
+
+`engine-static-load.json` removes controllers, controller references, jobs and
+rules from engine-load.json. It is the supported part-one input. Native Rust
+integration tests validate its output with the shared worker schemas. This does
+not establish browser/Wasm acceptance, which needs the installed Rust target.
