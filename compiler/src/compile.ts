@@ -2,6 +2,7 @@ import { parseCompileInput, type CompileInput, type CompileOutput, type Result }
 import { chainLayout, designPopulation } from './layout/chain.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
 import { fail } from './result.ts'
+import { placeInitialAgents } from './spawn/lattice.ts'
 
 /**
  * Turns a semantic scenario plan (C's planner output) plus prepared assets and a model
@@ -29,7 +30,7 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
-/** Generated chain layouts (§8). Sizing and the glyph map are built; people follow in steps 3–6. */
+/** Generated chain layouts (§8). Sizing, the glyph map and the starting crowd are built; profiles and goals follow in steps 4–6. */
 function compileGenerated(input: CompileInput): Result<CompileOutput> {
   const { layout } = input.plan
   if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
@@ -42,7 +43,9 @@ function compileGenerated(input: CompileInput): Result<CompileOutput> {
   if (cutOff.length > 0) {
     return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Not every space connects: ${cutOff.join(', ')} cannot be reached`, { affectedIds: cutOff })
   }
-  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are rasterized but people are not placed yet', { path: 'plan.layout' })
+  const agents = placeInitialAgents(input.plan.initialOperations, rooms, input.model)
+  if (!agents.ok) return agents
+  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are placed but profiles and goals are not compiled yet', { path: 'plan.layout' })
 }
 
 /** Prepared venue lookup: built in step 8. */
