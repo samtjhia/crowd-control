@@ -25,6 +25,8 @@ pub struct World {
     pub events: Vec<Value>,
     pub removed_count: u64,
     pub metrics: crate::metrics::Metrics,
+    pub contact_config: Option<crate::contact::Config>,
+    pub contact_state: crate::contact::State,
     pub runtime: crate::scheduling::Runtime,
     #[serde(skip)]
     pub wander_cells: Vec<Vec<usize>>,
@@ -62,8 +64,9 @@ impl World {
         {
             return Err(unsupported("Unsupported random or engine version"));
         }
-        if model.contact.is_some() {
-            return Err(unsupported("Contact physics is not currently enabled"));
+        let contact_config = crate::contact::config(model.contact.as_ref(), &model.units)?;
+        if contact_config.is_some() && (model.dt.0 < 1e-6 || model.dt.0 > 1.0) {
+            return Err(invalid("Contact solver requires dt in [0.000001,1]"));
         }
         if s.agents.len() > 2000 {
             return Err(("RESOURCE_LIMIT", "Agent budget exceeded".into()));
@@ -272,6 +275,8 @@ impl World {
             events: vec![],
             removed_count: 0,
             metrics: Default::default(),
+            contact_config,
+            contact_state: Default::default(),
             runtime: Default::default(),
             wander_cells: vec![],
             topology_version: 0,
@@ -323,6 +328,7 @@ impl World {
             })
             .ok_or_else(|| ("RESOURCE_LIMIT", "Tick/time range exceeded".into()))?;
         let metric_before = self.metrics.checkpoint();
+        let contact_before = self.contact_state.clone();
         let dynamic_before = if self.has_runtime_work() {
             // Derived navigation caches are rebuilt on rollback; do not copy them twice.
             let navigator = std::mem::take(&mut self.navigator);
@@ -354,14 +360,28 @@ impl World {
                 if !self.navigator.prepared {
                     self.prepare_navigation()?;
                 }
+                if self.contact_config.is_some() {
+                    self.contact_state.begin();
+                }
                 self.navigator.step(
                     &self.grid,
                     &mut self.agents,
                     self.initial.scene.model.dt.0,
                     self.tick,
                     &mut self.metrics,
+                    self.contact_config
+                        .as_ref()
+                        .map(|c| (c, &mut self.contact_state)),
                 )?;
                 self.after_goals()?;
+                if let Some(config) = &self.contact_config {
+                    self.contact_state.finish(
+                        config,
+                        &mut self.agents,
+                        self.tick + 1,
+                        self.initial.scene.model.dt.0,
+                    )?;
+                }
                 self.tick += 1;
                 if self.events.len() > 10000 {
                     return Err(("RESOURCE_LIMIT", "Event retention budget exceeded".into()));
@@ -371,6 +391,7 @@ impl World {
                 } else {
                     self.runtime.processed_events = self.events.len();
                 }
+                self.evaluate_entity_rules()?;
                 self.capture_metrics()?;
             }
             Ok(())
@@ -393,12 +414,22 @@ impl World {
                 self.runtime.processed_events,
             ) = before.unwrap();
             self.metrics.rollback(metric_before);
+            self.contact_state = contact_before;
             self.navigator = Navigator::default();
             return Err(error);
         }
         Ok(())
     }
     pub fn prepare_navigation(&mut self) -> Result<(), Failure> {
+        if self.contact_config.as_ref().is_some_and(|c| {
+            self.agents
+                .iter()
+                .any(|a| a.components.navigation.maximum_speed.0 > c.parameters.maximum_speed.0)
+        }) {
+            return Err(invalid(
+                "Agent maximumSpeed exceeds contact solver maximumSpeed",
+            ));
+        }
         if self.grid.target_cells.is_empty() {
             self.grid.target_cells = crate::shapes::validate_masks(&self.map_state, &self.grid)?;
         }
@@ -454,7 +485,7 @@ impl World {
             "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":self.map_state.entities().iter().map(wire).collect::<Vec<_>>(),"entityOrigins":self.runtime.entity_origins,
             "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":self.runtime.jobs,"rules":self.runtime.rules,"queues":self.queues,"slots":self.slots,"allocations":self.allocations,"random":self.random,
             "metrics":self.metrics_snapshot(),"events":self.events,"historyRevision":self.history.history_revision,
-            "appliedThrough":{"tick":self.tick,"order":self.history.records.len(),"prefixHash":fingerprint(&self.history.records)},"contactState":null})
+            "appliedThrough":{"tick":self.tick,"order":self.history.records.len(),"prefixHash":fingerprint(&self.history.records)},"contactState":self.contact_config.as_ref().map(|c|json!({"solverVersion":c.solver_version,"data":self.contact_state}))})
     }
 }
 pub fn fingerprint<T: Serialize>(value: &T) -> String {

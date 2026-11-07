@@ -73,7 +73,7 @@ impl World {
         let origin = json!({"interventionId":id,"revision":1});
         if at > self.time() {
             let job_id =
-                crate::goals::allocate(&mut candidate.allocations.next_job, "intervention-job")?;
+                crate::goals::allocate(&mut candidate.allocations.next_job, "intervention-job-")?;
             candidate.schedule(job_id, at, r.operations.clone(), origin.clone())?;
         } else {
             candidate.execute_operations(&r.operations, &origin, &id.0, &mut 0)?;

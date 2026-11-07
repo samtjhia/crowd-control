@@ -293,3 +293,49 @@ test('part seven metrics, cohorts and read-only queries validate in Wasm with na
     assert.deepEqual(wasm, native)
   } finally { bindings.destroy_engine(handle) }
 })
+
+test('part eight contact impulses, subject jobs, falls and recovery validate with native parity', async () => {
+  const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-contact-load.json', import.meta.url), 'utf8'))
+  const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: 'engine-demo', commandId: type, type, ...extra })
+  const commands = [load, h('step', { ticks: 2 }), h('snapshot', { snapshotId: 'queued' }), h('step', { ticks: 1 }), h('snapshot', { snapshotId: 'fallen' }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'recover', operations: [{ op: 'set', targets: { ids: ['a2'] }, values: { components: { mobility: { speedMultiplier: 1 } }, appearance: { pose: 'upright' } } }] } }), h('step', { ticks: 5 }), h('snapshot', { snapshotId: 'recovered' })]
+  const bindings = await engine(), handle = bindings.create_engine()
+  try {
+    const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+    for (const batch of wasm) for (const message of batch) {
+      const parsed = parseWorkerMessage(message); assert.equal(parsed.ok, true, JSON.stringify(parsed))
+    }
+    const queued = wasm[2][0].snapshot, fallen = wasm[4][0].snapshot, recovered = wasm[7][0].snapshot
+    assert.equal(queued.jobs[0].subjectId, 'a2'); assert.equal(queued.jobs[0].dueTick, 3)
+    assert.ok(Math.abs(queued.agents[1].sensors.contactLoad - 4) < 1e-8)
+    assert.equal(fallen.agents[1].state, 'immobile'); assert.equal(fallen.agents[1].appearance.pose, 'fallen')
+    assert.equal(fallen.contactState.solverVersion, 'disc-impulse-v1')
+    assert.equal(recovered.rules[0].subjects.a2.fired, true); assert.notEqual(recovered.agents[1].state, 'immobile')
+    const executable = fileURLToPath(new URL('../../target/debug/examples/protocol', import.meta.url))
+    const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((v) => JSON.parse(v))
+    assert.deepEqual(wasm, native)
+  } finally { bindings.destroy_engine(handle) }
+})
+
+test('registered contact presets advertise sensors to the compiler and real frontend client', async () => {
+  const { startScenario } = await import('../../web/src/sim/scenario.ts')
+  const { SimulationClient } = await import('../../web/src/worker/simulationClient.ts')
+  const plan = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
+  const fixture = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-contact-load.json', import.meta.url), 'utf8'))
+  plan.rules = fixture.compiled.scene.rules
+  plan.timeline = []
+  plan.initialOperations = [{ op: 'spawn', count: 3, template: { kind: 'agent', tags: ['attendee'] }, placement: { inside: { ids: ['hall'] } } }, { op: 'assign_goal', targets: { kind: 'agent' }, goal: { kind: 'wait', duration: 100 } }]
+  const compiled = startScenario(plan, fixture.compiled.resolvedModel)
+  assert.equal(compiled.ok, true, JSON.stringify(compiled))
+  if (!compiled.ok) return
+  const bindings = await engine(), listeners = new Set<(m: WorkerMessage) => void>()
+  const host = createEngineHost(bindings, (m) => queueMicrotask(() => listeners.forEach((listener) => listener(m))))
+  const client = new SimulationClient({ kind: 'real', send: (c) => host.send(c), subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } } })
+  try {
+    assert.equal((await client.load(compiled.value)).type, 'ack')
+    assert.equal((await client.step(3)).type, 'ack')
+    const reply = await client.command({ type: 'query', query: { kind: 'agents', targets: { kind: 'agent' } } })
+    assert.equal(reply.type, 'query_result')
+    if (reply.type === 'query_result' && reply.result.kind === 'agents') assert.ok(reply.result.agents.every((a) => a.sensors !== null && a.sensors.contactLoadRatio === 0 && a.state !== 'immobile'))
+    assert.equal(client.getView().lastError, null)
+  } finally { client.dispose(); host.dispose() }
+})

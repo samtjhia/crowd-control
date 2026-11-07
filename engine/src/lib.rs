@@ -1,4 +1,5 @@
 //! Authoritative worlds, fixed ticks and collision-safe local movement.
+mod contact;
 mod core;
 mod geometry;
 mod goals;

@@ -132,21 +132,26 @@ pub fn advance(
     dt: f64,
     tick: u64,
     metrics: &mut crate::metrics::Metrics,
+    contact: Option<(&crate::contact::Config, &mut crate::contact::State)>,
 ) -> Result<(), Failure> {
     let mut active: Vec<bool> = agents
         .iter_mut()
         .enumerate()
         .map(|(i, a)| nav.ready(a, i, dt))
         .collect();
-    if !active.iter().any(|active| *active) {
+    if contact.is_none() && !active.iter().any(|active| *active) {
         return Ok(());
     }
-    let max_speed = agents
+    let mut max_speed = agents
         .iter()
         .enumerate()
         .filter(|(i, _)| active[*i])
         .map(|(_, a)| navigation::speed(a).max(V::of(&a.velocity).len()))
         .fold(0.0, f64::max);
+    if let Some((config, _)) = &contact {
+        max_speed = config.parameters.maximum_speed.0;
+    }
+    let mut contact = contact;
     let steps = (max_speed * dt / (grid.cell_size * 0.25)).ceil().max(1.0) as usize;
     if steps > 256 || dt / (steps as f64) == 0.0 {
         return Err((
@@ -177,6 +182,28 @@ pub fn advance(
             .collect();
         let neighbors = Neighbors::new(&old, bucket_size, grid);
         charge(&mut work, neighbors.heads.len() + agents.len())?;
+        let mut physical = if contact.is_some() {
+            agents
+                .iter()
+                .map(|a| {
+                    if a.departed_at.is_some()
+                        || !a.components.physical.movable
+                        || a.components.mobility.speed_multiplier.0 == 0.0
+                    {
+                        crate::contact::Vec2::default()
+                    } else {
+                        let v = V::of(&a.velocity);
+                        let slowing = v
+                            .mul(-1.0)
+                            .limit(a.components.navigation.acceleration.0 * h);
+                        let v = v.add(slowing);
+                        crate::contact::Vec2::new(v.x, v.y)
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
         for order in 0..agents.len() {
             let i = (order + (tick % agents.len() as u64) as usize) % agents.len();
             if !active[i] {
@@ -264,6 +291,17 @@ pub fn advance(
             if !v.x.is_finite() || !v.y.is_finite() {
                 return Err(("RESOURCE_LIMIT", "Velocity numeric range exceeded".into()));
             }
+            if contact.is_some() {
+                if agents[i].components.physical.movable
+                    && agents[i].components.mobility.speed_multiplier.0 > 0.0
+                {
+                    let end = me.p.add(v.mul(h));
+                    if nav.permits_agent(grid, &me.p.point(), &end.point(), i) {
+                        physical[i] = crate::contact::Vec2::new(v.x, v.y)
+                    }
+                }
+                continue;
+            }
             let candidates = [v, V { x: v.x, y: 0.0 }, V { x: 0.0, y: v.y }, V::default()];
             let mut accepted = V::default();
             for v in candidates {
@@ -324,6 +362,52 @@ pub fn advance(
             } else {
                 a.state = "moving".into();
                 a.state_reason = None;
+            }
+        }
+        if let Some((config, state)) = contact.as_mut() {
+            state.solve(
+                grid,
+                agents,
+                &mut physical,
+                h,
+                &config.parameters,
+                &mut work,
+            )?;
+            for (i, a) in agents
+                .iter_mut()
+                .enumerate()
+                .filter(|(_, a)| a.departed_at.is_none())
+            {
+                let v = physical[i];
+                let from = navigation::index(grid, &a.position);
+                a.position.x.0 += v.x * h;
+                a.position.y.0 += v.y * h;
+                if grid.portal_ids.len() > 1 {
+                    let to = navigation::index(grid, &a.position);
+                    if from != to {
+                        metrics.transition(
+                            grid,
+                            &a.id,
+                            from,
+                            to,
+                            (tick as f64 + (substep + 1) as f64 / steps as f64) * dt,
+                        )?;
+                    }
+                }
+                a.velocity = Point {
+                    x: Number(v.x),
+                    y: Number(v.y),
+                };
+                a.zone_id = grid.zone_at(a.position.x.0, a.position.y.0);
+                if active[i] {
+                    if v.len() <= grid.cell_size * 1e-10 {
+                        a.state = "waiting".into();
+                        a.state_reason = Some("movement-obstructed".into())
+                    } else {
+                        a.state = "moving".into();
+                        a.state_reason = None;
+                    }
+                }
             }
         }
     }

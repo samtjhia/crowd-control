@@ -37,6 +37,7 @@ test('PRD and worker fixtures pass strict contracts without normalization', () =
     'engine-movement-load': c.WorkerCommandSchema,
     'engine-crossing-load': c.WorkerCommandSchema,
     'engine-services-load': c.WorkerCommandSchema,
+    'engine-contact-load': c.WorkerCommandSchema,
   };
   for (const [name, schema] of Object.entries(fixtures)) {
     const original = fixture(name);
@@ -262,4 +263,19 @@ test('compiled clearance is explicit, finite and unique, including declared futu
   rejects(c.ClearanceCohortSchema, { cohortIds: [], startedAt: 0 });
   rejects(c.ClearanceCohortSchema, { cohortIds: ['a1', 'a1'], startedAt: 0 });
   rejects(c.ClearanceCohortSchema, { cohortIds: ['a1'], startedAt: -1 });
+});
+
+test('registered disc contact validates parameters, state and captured subject jobs', () => {
+  const input = fixture('engine-contact-load'); check(c.WorkerCommandSchema, input);
+  const contact = input.compiled.resolvedModel.contact;
+  rejects(c.ContactModelSchema, { ...contact, parameters: { ...contact.parameters, iterations: 0 } });
+  rejects(c.ContactModelSchema, { ...contact, parameters: { ...contact.parameters, extra: 1 } });
+  check(c.DiscImpulseStateSchema, { sampleTick: 1, dt: 0.05, impulses: { a1: [0.1, 0.2] } });
+  rejects(c.DiscImpulseStateSchema, { sampleTick: 1, dt: 0, impulses: {} });
+  const snapshot = fixture('snapshot');
+  snapshot.model.contact = contact;
+  snapshot.contactState = { solverVersion: 'disc-impulse-v1', data: { sampleTick: snapshot.tick, dt: snapshot.model.dt, impulses: {} } };
+  for (const agent of snapshot.agents) agent.sensors = null;
+  check(c.EngineSnapshotSchema, snapshot);
+  snapshot.contactState.data = { warmStart: [] }; rejects(c.EngineSnapshotSchema, snapshot);
 });

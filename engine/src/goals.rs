@@ -421,7 +421,7 @@ impl Context<'_> {
     fn queue(&mut self, a: &mut AgentRuntime, g: &GoalSpec) -> Result<bool, Failure> {
         let id = g.target_entity_id.as_ref().unwrap();
         if a.queue_ref.is_none() {
-            let ticket = allocate(&mut self.allocations.next_ticket, "ticket")?;
+            let ticket = allocate(&mut self.allocations.next_ticket, "ticket-")?;
             let entry = QueueEntry {
                 ticket_id: ticket.clone(),
                 agent_id: a.id.clone(),
@@ -569,7 +569,7 @@ pub fn allocate(counter: &mut Counter, prefix: &str) -> Result<Id, Failure> {
         return Err(("RESOURCE_LIMIT", "Allocation counter exhausted".into()));
     }
     counter.0 += 1.0;
-    Ok(Id(format!("{prefix}-{n:.0}")))
+    Ok(Id(format!("{prefix}{n:.0}")))
 }
 impl World {
     pub fn initialize_services(&mut self) {
@@ -1176,6 +1176,9 @@ impl World {
                 self.navigator.prepared = false;
                 if matches!(g.kind, GoalKind::Reach) && g.depart_on_arrival == Some(true) {
                     self.metrics.forget_agent(&a.id);
+                    for rule in &mut self.runtime.rules {
+                        rule.subjects.remove(&a.id);
+                    }
                     a.departed_at = Some(Nonnegative(now));
                     a.state = "departed".into();
                     a.current_goal.as_mut().unwrap().status = "completed".into();
@@ -1183,7 +1186,7 @@ impl World {
                     zero(a);
                     reset_route(a);
                     self.departures.push(json!({"agentId":a.id,"at":now,"travelTime":now-a.current_goal.as_ref().unwrap().started_at.unwrap().0}));
-                    let id = allocate(&mut self.allocations.next_event, "event")?;
+                    let id = allocate(&mut self.allocations.next_event, "event-")?;
                     self.events.push(json!({"id":id,"tick":self.tick+1,"time":now,"name":"departure","source":a.id}));
                 } else {
                     next_leaf(a, now);
@@ -1229,7 +1232,7 @@ impl World {
             }
             let goal = install(
                 spec.clone(),
-                allocate(&mut self.allocations.next_goal, "goal")?,
+                allocate(&mut self.allocations.next_goal, "goal-")?,
                 now,
                 enqueue,
             );
@@ -1262,9 +1265,12 @@ impl World {
                 .ok_or_else(|| ("NOT_FOUND", format!("Unknown agent {}", id.0)))?;
             let mut a = self.agents.remove(i);
             self.metrics.forget_agent(&a.id);
+            for rule in &mut self.runtime.rules {
+                rule.subjects.remove(&a.id);
+            }
             release(&mut a, &mut self.queues, &mut self.slots, false);
             self.removed_count += 1;
-            let event = allocate(&mut self.allocations.next_event, "event")?;
+            let event = allocate(&mut self.allocations.next_event, "event-")?;
             self.events.push(json!({"id":event,"tick":self.tick,"time":self.time(),"name":"removed","source":a.id}));
         }
         self.navigator.prepared = false;

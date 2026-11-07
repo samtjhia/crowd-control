@@ -27,6 +27,9 @@ pub fn validate_live(ops: &[Value]) -> Result<(), Failure> {
     writable(ops)
 }
 pub fn validate(ops: &[Value], depth: usize) -> Result<(), Failure> {
+    validate_scoped(ops, depth, false)
+}
+fn validate_scoped(ops: &[Value], depth: usize, bound: bool) -> Result<(), Failure> {
     if depth > 8 || ops.is_empty() || ops.len() > 100 {
         return Err((
             "RESOURCE_LIMIT",
@@ -75,7 +78,7 @@ pub fn validate(ops: &[Value], depth: usize) -> Result<(), Failure> {
         };
         sel::keys(op, allowed, required)?;
         if let Some(s) = op.get("targets") {
-            sel::validate(s, 0)?;
+            selector_binding(s, bound)?;
         }
         match op["op"].as_str().unwrap() {
             "add" => {
@@ -127,7 +130,7 @@ pub fn validate(ops: &[Value], depth: usize) -> Result<(), Failure> {
                 {
                     return Err(invalid("Invalid goal mode"));
                 }
-                validate_goal(&op["goal"], 0)?;
+                validate_goal(&op["goal"], 0, bound)?;
             }
             "clear_goal" => {
                 if op
@@ -143,7 +146,7 @@ pub fn validate(ops: &[Value], depth: usize) -> Result<(), Failure> {
                     return Err(invalid("Schedule requires at XOR after"));
                 }
                 sel::number(op.get("at").unwrap_or(&op["after"]))?;
-                validate(array(&op["operations"])?, depth + 1)?;
+                validate_scoped(array(&op["operations"])?, depth + 1, bound)?;
             }
             "define_rule" => {
                 sel::id(&op["id"])?;
@@ -156,7 +159,11 @@ pub fn validate(ops: &[Value], depth: usize) -> Result<(), Failure> {
                 {
                     return Err(invalid("Repeating rules require a positive cooldown"));
                 }
-                validate(array(&op["operations"])?, depth + 1)?;
+                validate_scoped(
+                    array(&op["operations"])?,
+                    depth + 1,
+                    op["when"]["kind"] == "entity_metric",
+                )?;
             }
             "remove_rule" => {
                 sel::id(&op["id"])?;
@@ -183,7 +190,7 @@ pub fn validate(ops: &[Value], depth: usize) -> Result<(), Failure> {
 pub fn array(v: &Value) -> Result<&Vec<Value>, Failure> {
     v.as_array().ok_or_else(|| invalid("Expected array"))
 }
-fn validate_goal(v: &Value, depth: usize) -> Result<(), Failure> {
+fn validate_goal(v: &Value, depth: usize, bound: bool) -> Result<(), Failure> {
     if depth > 8 {
         return Err(("RESOURCE_LIMIT", "Goal depth exceeded".into()));
     }
@@ -193,14 +200,14 @@ fn validate_goal(v: &Value, depth: usize) -> Result<(), Failure> {
         .ok_or_else(|| invalid("Invalid goal"))?;
     for (src, dest) in [("target", "targetEntityId"), ("inside", "insideZone")] {
         if let Some(s) = o.remove(src) {
-            sel::validate(&s, 0)?;
+            selector_binding(&s, bound)?;
             o.insert(dest.into(), json!("validation-placeholder"));
         }
     }
     if v["kind"] == "sequence" {
         let children = array(&v["goals"])?;
         for c in children {
-            validate_goal(c, depth + 1)?;
+            validate_goal(c, depth + 1, bound)?;
         }
         o.insert("goals".into(), json!([{"kind":"wait","duration":0}]));
     }
@@ -247,7 +254,17 @@ pub fn condition(v: &Value) -> Result<(), Failure> {
             sel::number(&v["value"])?;
         }
         Some("entity_metric") => {
-            return Err(unsupported("Contact sensors require part eight"));
+            sel::keys(
+                v,
+                &["kind", "targets", "metric", "comparison", "value", "for"],
+                &["kind", "targets", "metric", "comparison", "value", "for"],
+            )?;
+            sel::validate(&v["targets"], 0)?;
+            if v["metric"] != "contactLoadRatio" {
+                return Err(unsupported("Unknown entity metric"));
+            }
+            sel::number(&v["value"])?;
+            sel::number(&v["for"])?;
         }
         _ => return Err(invalid("Unknown rule condition")),
     }
@@ -1459,4 +1476,61 @@ impl World {
             }
         }
     }
+}
+
+fn selector_binding(v: &Value, bound: bool) -> Result<(), Failure> {
+    if v.get("binding").is_some() {
+        sel::keys(v, &["binding"], &["binding"])?;
+        if !bound || v["binding"] != "subject" {
+            return Err(invalid(
+                "subject is only bound inside entity_metric actions",
+            ));
+        }
+        Ok(())
+    } else {
+        sel::validate(v, 0)
+    }
+}
+pub fn bind_subject(ops: &[Value], id: &Id, scope: &Id) -> Vec<Value> {
+    fn selector(v: &mut Value, id: &Id) {
+        if v["binding"] == "subject" {
+            *v = json!({"ids":[id]});
+        }
+    }
+    fn goal(v: &mut Value, id: &Id) {
+        for k in ["target", "inside"] {
+            if let Some(s) = v.get_mut(k) {
+                selector(s, id);
+            }
+        }
+        if let Some(gs) = v.get_mut("goals").and_then(Value::as_array_mut) {
+            for g in gs {
+                goal(g, id);
+            }
+        }
+    }
+    ops.iter()
+        .map(|op| {
+            let mut op = op.clone();
+            if let Some(s) = op.get_mut("targets") {
+                selector(s, id);
+            }
+            if let Some(g) = op.get_mut("goal") {
+                goal(g, id);
+            }
+            if op["op"] == "schedule" {
+                let child = Id(format!(
+                    "scoped-schedule-{}",
+                    crate::world::fingerprint(&(scope, &op["id"]))
+                ));
+                op["operations"] = json!(bind_subject(
+                    op["operations"].as_array().unwrap(),
+                    id,
+                    &child
+                ));
+                op["id"] = json!(child);
+            }
+            op
+        })
+        .collect()
 }

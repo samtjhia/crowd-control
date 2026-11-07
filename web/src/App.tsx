@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { parseWorkerCommand, type Frame, type RenderScene, type Stamp, type WorkerCommand } from '@crowd-control/contract'
-import movementLoad from '../../contract/fixtures/engine-services-load.json'
+import serviceLoad from '../../contract/fixtures/engine-services-load.json'
+import contactLoad from '../../contract/fixtures/engine-contact-load.json'
 import { createRealEndpoint, type RealEndpoint } from './worker/realEndpoint.ts'
 import { createStaticRenderer } from './render/staticRenderer.ts'
 
 function App() {
+  const contactDemo = new URLSearchParams(window.location.search).get('demo') === 'contact'
+  const movementLoad = contactDemo ? contactLoad : serviceLoad
+  const controlledId = movementLoad.compiled.scene.agents[contactDemo ? 1 : 0]!.id
   const host = useRef<HTMLDivElement>(null)
   const endpoint = useRef<RealEndpoint | null>(null)
   const [status, setStatus] = useState('Loading Rust/Wasm and PixiJS…')
@@ -35,7 +39,7 @@ function App() {
       try {
         renderer.render({ scene: scene.data, frame, camera: { pan: { x: -1, y: -1 }, pixelsPerUnit: 40 }, selectedIds: [] })
         setReady(true)
-        setImmobile(frame.agents[0]?.state === 'immobile')
+        setImmobile(frame.agents.find((agent) => agent.id === controlledId)?.state === 'immobile')
         setStatus(`${frame.agents.map((a) => `${a.id}: ${a.state}`).join(', ')} · ${frame.time.toFixed(2)} simulation seconds · tick ${frame.tick}`)
       } catch (e) { setError(e instanceof Error ? e.message : 'Renderer failed') }
     }
@@ -73,25 +77,25 @@ function App() {
     }).catch((e: unknown) => { if (!disposed) setError(e instanceof Error ? e.message : 'Cannot load PixiJS') })
     const commands = pending.current
     return () => { disposed = true; unsubscribe(); worker.dispose(); renderer?.destroy(); endpoint.current = null; commands.clear() }
-  }, [])
+  }, [controlledId, movementLoad])
   return (
     <main>
       <p>HackTrent 2026</p>
       <h1>Crowd Control</h1>
-      <p>Rust goals, queues, interactions and recovery</p>
+      <p>{contactDemo ? 'Rust contact and compression-triggered falls' : 'Rust goals, queues, interactions and recovery'}</p>
       <p role="status">{status}</p>
       {error && <p role="alert">{error}</p>}
       <div className="playback-controls">
         <button disabled={!ready} onClick={() => send({ ...header(), type: playing ? 'pause' : 'resume' })}>{playing ? 'Pause' : 'Play'}</button>
-        <button disabled={!ready || playing} onClick={() => send({ ...header(), type: 'step', ticks: 20 })}>Step 1 second</button>
+        <button disabled={!ready || playing} onClick={() => send({ ...header(), type: 'step', ticks: contactDemo ? 1 : 20 })}>{contactDemo ? 'Step one tick' : 'Step 1 second'}</button>
         <button disabled={!ready} onClick={() => send({ ...header(), type: 'reset' })}>Reset scene</button>
-        <button disabled={!ready} onClick={() => {
+        <button disabled={!ready || contactDemo} onClick={() => {
           const h = header()
           send({ ...h, type: 'apply_request', request: { schemaVersion: 1, simulationId: h.simulationId, requestId: h.commandId, action: 'create_intervention', label: doorOpen ? 'Close door' : 'Open door', operations: [{ op: 'set', targets: { ids: [movementLoad.compiled.scene.map.portals[0]!.id] }, values: { components: { portal: { open: !doorOpen } } } }] } })
         }}>{doorOpen ? 'Close door' : 'Open door'}</button>
         <button disabled={!ready} onClick={() => {
           const h = header()
-          send({ ...h, type: 'apply_request', request: { schemaVersion: 1, simulationId: h.simulationId, requestId: h.commandId, action: 'create_intervention', label: immobile ? 'Recover agent' : 'Stop agent', operations: [{ op: 'set', targets: { ids: [movementLoad.compiled.scene.agents[0]!.id], kind: 'agent' }, values: { components: { mobility: { speedMultiplier: immobile ? 1 : 0 } }, appearance: { pose: immobile ? 'upright' : 'fallen' } } }] } })
+          send({ ...h, type: 'apply_request', request: { schemaVersion: 1, simulationId: h.simulationId, requestId: h.commandId, action: 'create_intervention', label: immobile ? 'Recover agent' : 'Stop agent', operations: [{ op: 'set', targets: { ids: [controlledId], kind: 'agent' }, values: { components: { mobility: { speedMultiplier: immobile ? 1 : 0 } }, appearance: { pose: immobile ? 'upright' : 'fallen' } } }] } })
         }}>{immobile ? 'Recover agent' : 'Stop agent'}</button>
         <label>Speed <select disabled={!ready} value={speed} onChange={(event) => send({ ...header(), type: 'speed', multiplier: Number(event.target.value) })}>
           <option value="0.25">0.25×</option><option value="1">1×</option><option value="4">4×</option><option value="8">8×</option>
@@ -102,8 +106,7 @@ function App() {
         <button disabled={!ready || playing}>Run to time</button>
       </form>
       <div ref={host} className="simulation-view" />
-      <p>Two attendees queue at the brown desk, interact one at a time, then leave through the door. A third wanders in the hall. Close/Open door blocks and resumes routes; Reset starts again.</p>
-      <p>Stop/Recover preserves the first attendee’s goal and restarts interrupted service. Scheduling and live arrivals follow in part six.</p>
+      {contactDemo ? <p>Two people push toward the middle person. Only the middle person's own sustained contact meets the fall rule. Step one tick at a time to inspect the delay; Recover keeps the once-only rule fired.</p> : <p>Two attendees queue at the brown desk, interact one at a time, then leave through the door. A third wanders in the hall. Close/Open door blocks and resumes routes; Stop/Recover preserves intent.</p>}
     </main>
   )
 }

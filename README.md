@@ -73,7 +73,8 @@ inputs and limitations.
 The product simulator at `/sim` defaults to the mock worker. Use
 `/sim?engine=real` for Rust/Wasm with the same PixiJS UI and compiled scenarios.
 That mode runs movement, goals, arrivals, rules, live changes and real metrics.
-Contact physics/replay remain pending. The preset is explicitly movement-only.
+The preset is explicitly movement-only. Open `/?demo=contact` for the opt-in
+physical contact and compression-fall fixture. Replay remains pending.
 
 See [contract/README.md](contract/README.md) for contract imports, validation
 boundaries and remaining engine/adapter work.

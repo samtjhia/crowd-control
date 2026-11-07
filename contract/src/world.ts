@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DISC_IMPULSE_VERSION, DiscImpulseParametersSchema } from './contact.js';
 import { ClearanceCohortSchema } from './metrics.js';
 import { FiniteSchema, HeaderSchema, IdSchema, LimitsSchema, NonnegativeSchema, PositiveIntegerSchema, PositiveSchema, RandomStateSchema, SelectionSchema, SimTimeSchema, TickSchema, UnitsSchema, VersionsSchema, uniqueIds } from './common.js';
 import { AgentOverridesSchema, AppearanceSchema, BehaviorSchema, EntityBlueprintSchema, MapAppearanceSchema, MobilitySchema, PortalSchema, RectSchema, ResolvedAgentComponentsSchema } from './entities.js';
@@ -6,9 +7,13 @@ import { DefineRuleOperationSchema, EntitySelectorSchema, OperationSchema } from
 import { CapabilitiesSchema, InventoryItemSchema, ScenarioPlanSchema } from './planner.js';
 import { GridDataSchema, MapSourceSchema, PreparedMapSchema } from './editor.js';
 
-export const ContactModelSchema = z.strictObject({ solverVersion: IdSchema, referenceLoad: PositiveSchema, forceUnits: z.enum(['model-force', 'N']), parameters: z.record(IdSchema, FiniteSchema) });
+export const ContactModelSchema = z.strictObject({ solverVersion: IdSchema, referenceLoad: PositiveSchema, forceUnits: z.enum(['model-force', 'N']), parameters: z.record(IdSchema, FiniteSchema) }).superRefine((v, ctx) => {
+  if (v.solverVersion === DISC_IMPULSE_VERSION && (!DiscImpulseParametersSchema.safeParse(v.parameters).success || v.referenceLoad < 1e-12)) ctx.addIssue({ code: 'custom', message: 'Invalid disc-impulse-v1 parameters/referenceLoad' });
+});
 export const ContactDiagnosticsSchema = z.strictObject({ solverVersion: IdSchema, tick: TickSchema, dt: PositiveSchema, measure: z.enum(['force', 'impulse']), forceUnits: z.enum(['model-force', 'N']), agents: z.array(z.strictObject({ agentId: IdSchema, normalMagnitudes: z.array(NonnegativeSchema) })) }).refine((v) => new Set(v.agents.map((a) => a.agentId)).size === v.agents.length, 'Duplicate contact diagnostic agent');
-export const ModelPresetSchema = z.strictObject({ id: IdSchema, version: IdSchema, units: UnitsSchema, dt: PositiveSchema, defaultAgent: ResolvedAgentComponentsSchema, layout: z.strictObject({ bodyDiameter: PositiveSchema, spacingDiameters: PositiveSchema, preferredAspect: PositiveSchema, doorBodyWidths: PositiveSchema }), contact: ContactModelSchema.optional() });
+export const ModelPresetSchema = z.strictObject({ id: IdSchema, version: IdSchema, units: UnitsSchema, dt: PositiveSchema, defaultAgent: ResolvedAgentComponentsSchema, layout: z.strictObject({ bodyDiameter: PositiveSchema, spacingDiameters: PositiveSchema, preferredAspect: PositiveSchema, doorBodyWidths: PositiveSchema }), contact: ContactModelSchema.optional() }).superRefine((v, ctx) => {
+  if (v.contact?.solverVersion === DISC_IMPULSE_VERSION && (v.dt < 1e-6 || v.dt > 1 || (v.contact.forceUnits === 'N' && v.units !== 'm'))) ctx.addIssue({ code: 'custom', message: 'Invalid contact timestep or force units' });
+});
 export const CompileInputSchema = z.strictObject({ plan: ScenarioPlanSchema, assets: z.array(PreparedMapSchema), model: ModelPresetSchema, capabilities: CapabilitiesSchema, limits: LimitsSchema });
 export const AgentProfileSchema = z.strictObject({ radius: PositiveSchema, preferredSpeed: NonnegativeSchema, maximumSpeed: NonnegativeSchema.optional(), acceleration: NonnegativeSchema.optional(), personalSpace: NonnegativeSchema.optional(), blocksMovement: z.boolean().optional(), movable: z.boolean().optional(), behavior: BehaviorSchema.partial().optional(), mobility: MobilitySchema.partial().optional(), appearance: AppearanceSchema.optional() }).refine((v) => v.maximumSpeed === undefined || v.maximumSpeed >= v.preferredSpeed, 'Invalid profile speed range');
 const TargetZoneSchema = z.strictObject({ targetZone: IdSchema });

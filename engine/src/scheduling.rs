@@ -1,6 +1,6 @@
 //! Fixed-boundary jobs and bounded event cascades, with persistent revision ownership.
 use crate::{
-    core::{Failure, invalid},
+    core::{Failure, invalid, unsupported},
     operations,
     protocol::*,
     selectors as sel,
@@ -12,6 +12,8 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Job {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_id: Option<Id>,
     pub id: Id,
     pub due_tick: u64,
     pub order: u64,
@@ -25,7 +27,14 @@ pub struct Rule {
     pub origin: Value,
     pub fired: bool,
     pub next_eligible_tick: u64,
-    pub subjects: std::collections::BTreeMap<Id, Value>,
+    pub subjects: std::collections::BTreeMap<Id, Progress>,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Progress {
+    pub held_ticks: u64,
+    pub fired: bool,
+    pub next_eligible_tick: u64,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -192,6 +201,7 @@ impl World {
             .ok_or_else(|| invalid("Job order exhausted"))?;
         self.allocations.next_job.0 += 1.0;
         self.runtime.jobs.push(Job {
+            subject_id: None,
             id,
             due_tick,
             order,
@@ -203,6 +213,11 @@ impl World {
     }
     pub fn define_rule(&mut self, op: Value, origin: Value) -> Result<(), Failure> {
         operations::validate(std::slice::from_ref(&op), 0)?;
+        if op["when"]["kind"] == "entity_metric" && self.contact_config.is_none() {
+            return Err(unsupported(
+                "contactLoadRatio requires an enabled registered contact solver",
+            ));
+        }
         if self.runtime.rules.len() >= 1000 {
             return Err(("RESOURCE_LIMIT", "Rule budget exceeded".into()));
         }
@@ -238,7 +253,7 @@ impl World {
         if self.events.len() >= 10000 {
             return Err(("RESOURCE_LIMIT", "Event retention budget exceeded".into()));
         }
-        let id = crate::goals::allocate(&mut self.allocations.next_event, "event")?;
+        let id = crate::goals::allocate(&mut self.allocations.next_event, "event-")?;
         let mut event = json!({"id":id,"tick":self.tick,"time":self.time(),"name":name});
         if let Some(v) = source {
             event["source"] = v;
@@ -284,6 +299,16 @@ impl World {
                     return Err(("RESOURCE_LIMIT", "Rule/job cascade budget exceeded".into()));
                 }
                 let job = self.runtime.jobs.remove(0);
+                if job.subject_id.as_ref().is_some_and(|id| {
+                    !self.agents.iter().any(|a| {
+                        &a.id == id
+                            && a.departed_at.is_none()
+                            && a.components.physical.movable
+                            && a.components.mobility.speed_multiplier.0 > 0.0
+                    })
+                }) {
+                    continue;
+                }
                 let mut origin = job.origin.clone();
                 origin["parentJobId"] = json!(job.id);
                 if let Err((code, message)) =
@@ -318,6 +343,9 @@ impl World {
                 }
                 let op = &r.definition;
                 let when = &op["when"];
+                if when["kind"] == "entity_metric" {
+                    continue;
+                }
                 if r.next_eligible_tick > self.tick || r.fired && op["once"] != false {
                     continue;
                 }
@@ -418,6 +446,130 @@ impl World {
                 continue;
             }
             break;
+        }
+        Ok(())
+    }
+}
+
+impl World {
+    pub fn evaluate_entity_rules(&mut self) -> Result<(), Failure> {
+        if self.contact_config.is_none() {
+            return Ok(());
+        }
+        let dt = self.initial.scene.model.dt.0;
+        let mut work = 0;
+        let definitions: Vec<_> = self
+            .runtime
+            .rules
+            .iter()
+            .filter(|r| r.definition["when"]["kind"] == "entity_metric")
+            .map(|r| (r.definition.clone(), r.origin.clone()))
+            .collect();
+        for (definition, origin) in definitions {
+            let id = sel::id(&definition["id"])?;
+            let key = format!("rule:{}", id.0);
+            let when = &definition["when"];
+            let ids = sel::resolve(self, &when["targets"], &key, &mut work)?;
+            let selected: BTreeSet<_> = ids.into_iter().collect();
+            let required = self.due_tick(sel::number(&when["for"])?)?.max(1);
+            let cooldown = self
+                .due_tick(
+                    definition
+                        .get("cooldown")
+                        .map(sel::number)
+                        .transpose()?
+                        .unwrap_or(dt),
+                )?
+                .max(1);
+            if cooldown > 9_007_199_254_740_991 - self.tick {
+                return Err((
+                    "RESOURCE_LIMIT",
+                    "Entity-metric cooldown exceeds tick range".into(),
+                ));
+            }
+            let present: BTreeSet<_> = self.agents.iter().map(|a| a.id.clone()).collect();
+            let subjects: Vec<_> = self
+                .agents
+                .iter()
+                .map(|a| {
+                    (
+                        a.id.clone(),
+                        selected.contains(&a.id)
+                            && a.departed_at.is_none()
+                            && a.components.physical.movable
+                            && a.components.mobility.speed_multiplier.0 > 0.0
+                            && a.sensors.as_ref().is_some_and(|s| {
+                                sel::compare(
+                                    &s["contactLoadRatio"],
+                                    when["comparison"].as_str().unwrap(),
+                                    &when["value"],
+                                )
+                            }),
+                    )
+                })
+                .collect();
+            let mut total: usize = self.runtime.rules.iter().map(|r| r.subjects.len()).sum();
+            let mut fire = vec![];
+            let r = self
+                .runtime
+                .rules
+                .iter_mut()
+                .find(|r| r.definition["id"] == definition["id"])
+                .unwrap();
+            for (agent, passes) in subjects {
+                if !r.subjects.contains_key(&agent) && !passes {
+                    continue;
+                }
+                if !r.subjects.contains_key(&agent) {
+                    if total >= 2000 {
+                        return Err((
+                            "RESOURCE_LIMIT",
+                            "Entity-metric counter budget exceeded".into(),
+                        ));
+                    }
+                    total += 1;
+                }
+                let p = r.subjects.entry(agent.clone()).or_default();
+                p.held_ticks = if passes {
+                    p.held_ticks.saturating_add(1).min(9_007_199_254_740_991)
+                } else {
+                    0
+                };
+                if passes
+                    && p.held_ticks >= required
+                    && (!p.fired || definition["once"] == false)
+                    && self.tick >= p.next_eligible_tick
+                {
+                    p.fired = true;
+                    p.next_eligible_tick = self.tick + cooldown;
+                    fire.push(agent);
+                }
+            }
+            for (agent, p) in &mut r.subjects {
+                if !present.contains(agent) {
+                    p.held_ticks = 0;
+                }
+            }
+            for agent in fire {
+                let job = crate::goals::allocate(&mut self.allocations.next_job, "metric-action-")?;
+                let captured = operations::bind_subject(
+                    operations::array(&definition["operations"])?,
+                    &agent,
+                    &job,
+                );
+                let mut origin = origin.clone();
+                origin["parentRuleId"] = json!(id);
+                let due = self
+                    .tick
+                    .checked_add(1)
+                    .filter(|n| *n <= 9_007_199_254_740_991)
+                    .ok_or_else(|| invalid("Entity-metric action time exhausted"))?;
+                self.schedule(job.clone(), due as f64 * dt, captured, origin)?;
+                let queued = self.runtime.jobs.iter_mut().find(|j| j.id == job).unwrap();
+                queued.due_tick = due;
+                queued.subject_id = Some(agent);
+            }
+            self.runtime.jobs.sort_by_key(|j| (j.due_tick, j.order));
         }
         Ok(())
     }

@@ -69,3 +69,8 @@ const scheduled = structuredClone(load)
 scheduled.compiled.scene.jobs = [{ id: 'future', at: 1000, operations: [{ op: 'emit', event: 'later' }] }]
 scheduled.compiled.scene.rules = [{ op: 'define_rule', id: 'watch-count', when: { kind: 'count', targets: { kind: 'agent' }, comparison: 'gt', value: 2000 }, operations: [{ op: 'emit', event: { name: 'over-budget' } }] }]
 benchmarkHost(scheduled, 4, 'Wasm + worker host at 4x with pending job and live count rule')
+
+const contact = structuredClone(scheduled)
+contact.compiled.resolvedModel.contact = { solverVersion: 'disc-impulse-v1', referenceLoad: 2, forceUnits: 'model-force', parameters: { mass: 1, iterations: 64, tolerance: 1e-8, maximumSpeed: 2 } }
+contact.compiled.scene.rules.push({ op: 'define_rule', id: 'contact-monitor', when: { kind: 'entity_metric', targets: { kind: 'agent' }, metric: 'contactLoadRatio', comparison: 'gte', value: 1000, for: 1 }, operations: [{ op: 'set', targets: { binding: 'subject' }, values: { components: { mobility: { speedMultiplier: 0 } } } }] })
+benchmarkHost(contact, 4, 'Wasm + worker host at 4x with contact solver and per-agent sensor rule')

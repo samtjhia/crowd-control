@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONTACT_STATE_SCHEMAS } from './contact.js';
 import { JsonValueSchema, type ContractError, type JsonValue, type Limits, type Result } from './common.js';
 import type { Appearance, MutableComponents } from './entities.js';
 import { OperationSchema, type Goal, type Operation, type Selector } from './operations.js';
@@ -124,7 +125,7 @@ function semanticError(value: unknown, options: ValidationOptions, goalDepth = 1
   }
   if (v.contactState && typeof v.contactState === 'object' && 'solverVersion' in v.contactState && 'data' in v.contactState) {
     const solver = String(v.contactState.solverVersion);
-    const schema = options.contactStateSchemas && Object.hasOwn(options.contactStateSchemas, solver) ? options.contactStateSchemas[solver] : undefined;
+    const schema = Object.hasOwn(CONTACT_STATE_SCHEMAS, solver) ? CONTACT_STATE_SCHEMAS[solver as keyof typeof CONTACT_STATE_SCHEMAS] : options.contactStateSchemas && Object.hasOwn(options.contactStateSchemas, solver) ? options.contactStateSchemas[solver] : undefined;
     if (!schema) return { code: 'UNSUPPORTED_CAPABILITY', message: `No registered state schema for contact solver: ${solver}` };
     if (!schema.safeParse(v.contactState.data).success) return { code: 'INVALID_SCHEMA', message: 'Invalid contact solver state' };
   }
