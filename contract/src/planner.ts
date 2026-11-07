@@ -21,8 +21,9 @@ export const CapabilitiesSchema = z.strictObject({
 });
 export const ScenarioPlanSchema = HeaderSchema.extend({ seed: RandomStateSchema, layout: LayoutSourceSchema, initialOperations: z.array(OperationSchema), timeline: z.array(ScheduleOperationSchema), rules: z.array(DefineRuleOperationSchema) });
 const followupHeader = { ...HeaderSchema.shape, requestId: IdSchema };
+export const CreateInterventionRequestSchema = z.strictObject({ ...followupHeader, action: z.literal('create_intervention').optional(), label: z.string().optional(), at: SimTimeSchema.optional(), operations: z.array(OperationSchema).min(1) });
 export const FollowupRequestSchema = z.union([
-  z.strictObject({ ...followupHeader, action: z.literal('create_intervention').optional(), label: z.string().optional(), at: SimTimeSchema.optional(), operations: z.array(OperationSchema).min(1) }),
+  CreateInterventionRequestSchema,
   z.strictObject({ ...followupHeader, action: z.literal('edit_intervention'), interventionId: IdSchema, expectedRevision: PositiveIntegerSchema, replacement: z.strictObject({ label: z.string(), at: SimTimeSchema, operations: z.array(OperationSchema).min(1) }) }),
   z.strictObject({ ...followupHeader, action: z.literal('delete_intervention'), interventionId: IdSchema, expectedRevision: PositiveIntegerSchema }),
 ]);
@@ -39,6 +40,7 @@ export type LayoutSource = z.infer<typeof LayoutSourceSchema>;
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export type ScenarioPlan = z.infer<typeof ScenarioPlanSchema>;
 export type FollowupRequest = z.infer<typeof FollowupRequestSchema>;
+export type CreateInterventionRequest = z.infer<typeof CreateInterventionRequestSchema>;
 export type FollowupAction = Omit<Extract<FollowupRequest, { operations: unknown }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'edit_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'delete_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'>;
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InterventionSummary = z.infer<typeof InterventionSummarySchema>;

@@ -10,7 +10,7 @@ contract/   Strict Zod schemas, shared types and JSON fixtures — C leads, ever
 compiler/   Layout generation, maps, rasterization, placement — B
 engine/     Rust library; future simulation core and Wasm bridge — A
 history/    Intervention revisions and replay planning — C
-server/     Node API; future planner and persistence adapters — C
+server/     Node API and Gemini planner; persistence adapters — C
 web/        React + Vite UI — B, with C owning chat
 docs/       Existing local PRDs, contracts, roles and tech stack
 ```
@@ -34,9 +34,16 @@ In another terminal, start the API:
 npm run dev:server
 ```
 
-The initial API exposes `GET http://127.0.0.1:3001/health`.
-Copy `.env.example` to `.env` to change PORT. Service credentials are optional
-placeholders; no Gemini, database or Auth0 integration is implemented.
+The API exposes `GET http://127.0.0.1:3001/health`, `GET /health/database`,
+and `POST /api/plan`. Vite proxies `/api` requests to the local Node server.
+To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
+`GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
+in chat. Set `DATABASE_URL` in the same root `.env` to enable Tiger Data.
+On startup, the server creates the run, intervention, and metric tables and
+turns the metric table into a Timescale hypertable. The offline mock writes
+run metadata, batches metric samples, and records worker-acknowledged
+interventions in the background. Generated scenario plans are previews only:
+the compiler handoff is not connected yet. Auth0 is not implemented.
 
 ## Checks
 
@@ -48,8 +55,8 @@ npm test
 
 `check` runs TypeScript checks, Rust formatting and Cargo checking. `build`
 builds all npm workspaces and the native Rust library. `test` runs the shared
-contract tests and Cargo's test harness. Simulation physics/replay tests remain
-pending. Commit both package-lock.json and Cargo.lock.
+contract, server-planner and web tests plus Cargo's test harness. Simulation
+physics/replay tests remain pending. Commit both package-lock.json and Cargo.lock.
 
 See [contract/README.md](contract/README.md) for contract imports, validation
 boundaries and remaining engine/adapter work.

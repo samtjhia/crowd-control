@@ -120,6 +120,32 @@ test('closing a door bumps topology and scene versions and updates the scene map
   assert.ok(ofType(closed, 'events')[0]!.events.some((e) => e.name === 'portal_closed'))
 })
 
+test('follow-up requests can spawn new people inside a known zone', () => {
+  const { sim } = loaded()
+  const spawned = send(sim, {
+    type: 'apply_request',
+    request: request('foyer-arrivals', [{
+      op: 'spawn',
+      template: { kind: 'agent', tags: ['attendee', 'late'] },
+      count: 3,
+      placement: { inside: { ids: ['foyer'] } },
+    }]),
+  })
+
+  assert.equal(ofType(spawned, 'ack')[0]!.applied?.historyRevision, 1)
+  assert.equal(lastFrame(spawned).agents.length, 11)
+  assert.ok(ofType(spawned, 'events').some((message) =>
+    message.events.some((event) =>
+      event.name === 'spawned'
+      && event.source === 'foyer'
+      && typeof event.data === 'object'
+      && event.data !== null
+      && !Array.isArray(event.data)
+      && event.data.count === 3,
+    ),
+  ))
+})
+
 test('requests are deduplicated, atomic, and unsupported actions fail explicitly', () => {
   const { sim } = loaded()
   const first = ofType(send(sim, { type: 'apply_request', request: fall('a2', 0) }), 'ack')[0]!.applied
