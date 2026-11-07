@@ -196,17 +196,47 @@
 .sim-brand-mark i:nth-child(4) { background: #c58a9a; }
 
 .sim-scenario {
+  display: flex;
   flex: 1;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  overflow: hidden;
   padding-left: 12px;
   border-left: 1px solid var(--hair);
   color: var(--muted);
+}
+
+/* A native select, so keyboard, screen readers and phones get the platform picker. */
+.sim-scenario-picker {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.sim-scenario-picker select {
+  appearance: none;
+  margin: 0;
+  padding: 4px 26px 4px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: var(--well);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sim-scenario-picker select:hover { border-color: var(--muted); }
+.sim-scenario-picker select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sim-scenario-picker svg { position: absolute; right: 9px; color: var(--muted); pointer-events: none; }
+
+.sim-scenario-detail {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.sim-scenario span { color: var(--text); font-weight: 500; }
 
 .sim-tag {
   display: inline-flex;
@@ -610,7 +640,7 @@
     background: rgb(20 30 20 / 0.18);
   }
 
-  .sim-scenario { display: none; }
+  .sim-scenario-detail { display: none; }
   .sim-playback { flex-wrap: wrap; gap: 6px 12px; height: auto; padding: 10px 14px; }
   .timeline { flex-basis: 100%; padding-top: 2px; }
   .sim-zoom { bottom: 150px; }

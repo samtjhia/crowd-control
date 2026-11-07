@@ -41,17 +41,27 @@ export function buildZones(map: CompiledMap): Map<string, ZoneGeometry> {
     if (list) list.push(box)
     else boxes.set(id, [box])
   }
-  for (const room of map.rooms) add(room.id, { x: room.x, y: room.y, width: room.width, height: room.height })
-  for (const entity of map.entities ?? []) {
-    if (entity.kind === 'zone' && entity.shape) add(entity.id, shapeBounds(entity.shape))
-  }
   if ('grid' in map && map.grid) {
+    // Grid membership is the zone: room records on grid maps are only bounding boxes, and may
+    // cover tables, walls or the missing corner of an L-shape. Cells merge into row strips.
     const { grid } = map
-    for (let i = 0; i < grid.zoneIndex.length; i++) {
-      const zoneId = grid.zoneIds[grid.zoneIndex[i]!]
-      if (!zoneId || grid.blocked[i] === 1) continue
-      add(zoneId, { x: (i % grid.width) * grid.cellSize, y: Math.floor(i / grid.width) * grid.cellSize, width: grid.cellSize, height: grid.cellSize })
+    for (let row = 0; row < grid.height; row++) {
+      let start = 0
+      for (let column = 1; column <= grid.width; column++) {
+        const i = row * grid.width + column
+        const previous = i - 1
+        const zoneOf = (index: number) => (grid.blocked[index] === 1 ? null : grid.zoneIds[grid.zoneIndex[index]!] ?? null)
+        if (column < grid.width && zoneOf(i) === zoneOf(previous)) continue
+        const zoneId = zoneOf(previous)
+        if (zoneId) add(zoneId, { x: start * grid.cellSize, y: row * grid.cellSize, width: (column - start) * grid.cellSize, height: grid.cellSize })
+        start = column
+      }
     }
+  } else {
+    for (const room of map.rooms) add(room.id, { x: room.x, y: room.y, width: room.width, height: room.height })
+  }
+  for (const entity of map.entities ?? []) {
+    if (entity.kind === 'zone' && entity.shape && !boxes.has(entity.id)) add(entity.id, shapeBounds(entity.shape))
   }
   const zones = new Map<string, ZoneGeometry>()
   for (const [id, list] of boxes) zones.set(id, { id, boxes: list, ...centroid(list) })

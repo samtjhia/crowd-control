@@ -84,6 +84,8 @@ export class SimulationClient {
     this.update({ simulationId: compiled.scene.simulationId, lastError: null })
     return this.command({ type: 'load', compiled, history })
   }
+  /** Shows an error that happened before the worker was involved, e.g. a plan that failed to compile. */
+  reportError(error: ContractError) { this.update({ lastError: error }) }
   play() { return this.command({ type: 'resume' }) }
   pause() { return this.command({ type: 'pause' }) }
   step(ticks = 1) { return this.command({ type: 'step', ticks }) }

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
-  ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
-  Pause, Play, Plus, RotateCcw, SendHorizontal, Siren, StepForward,
+  ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
+  Pause, Play, Plus, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
 } from 'lucide-react'
-import { CompileOutputSchema, parseContract, type Camera, type CompileOutput } from '@crowd-control/contract'
-import workedExample from '../../../contract/fixtures/compile-output.json'
+import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
+import examplePreset from '../../../contract/fixtures/compile-output.json'
+import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
 import { CrowdRenderer } from '../render/renderer.ts'
 import { createMockEndpoint } from '../worker/mockEndpoint.ts'
@@ -15,6 +16,7 @@ import { PlanSigns } from './PlanSigns.tsx'
 import { StatusIcon } from './StatusIcon.tsx'
 import { Timeline } from './Timeline.tsx'
 import { formatClock, toIncidents, type Incident } from './incidents.ts'
+import { describeScenario, scenarios, startScenario } from './scenario.ts'
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -35,8 +37,26 @@ function insetsFor(panels: Panels) {
     right: wide && panels.right ? LAYOUT.gap * 2 + LAYOUT.right : 0,
   }
 }
-/** The Technical PRD §8 scenario that the mock worker plays until prepared maps exist. */
-const SCENARIO = { title: 'Worked example', detail: 'Hall, foyer and outside · 10 people' }
+/**
+ * Demo plans compiled in the browser, until the planner supplies them: the Technical PRD §8
+ * worked example (model units) and one per prepared venue (metres).
+ */
+const SCENARIOS = scenarios(workedPlan as ScenarioPlan, examplePreset.resolvedModel as ModelPreset)
+const SCENARIO_PARAM = 'scenario'
+
+/** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
+function initialScenarioId(): string {
+  const requested = new URLSearchParams(window.location.search).get(SCENARIO_PARAM)
+  return SCENARIOS.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
+}
+
+/** Keeps the choice in the URL so a reload or a shared link opens the same venue. */
+function rememberScenario(id: string) {
+  const url = new URL(window.location.href)
+  if (id === SCENARIOS[0]!.id) url.searchParams.delete(SCENARIO_PARAM)
+  else url.searchParams.set(SCENARIO_PARAM, id)
+  window.history.replaceState(window.history.state, '', url)
+}
 const SUGGESTIONS = ['Close the hall door for 30 seconds', 'Someone trips in the foyer', 'Why did people queue at the exit?']
 
 type Panels = { left: boolean; right: boolean }
@@ -58,12 +78,6 @@ function saveDrawMode(mode: AgentDrawMode) {
   } catch {
     // Not persisted; the toggle still works for this visit.
   }
-}
-
-function workedExampleScene(): CompileOutput {
-  const parsed = parseContract(CompileOutputSchema, workedExample)
-  if (!parsed.ok) throw new Error(`Worked example fixture is invalid: ${parsed.error.message}`)
-  return parsed.value
 }
 
 export default function SimulatorApp() {
@@ -92,11 +106,33 @@ export default function SimulatorApp() {
     return { left: open, right: open }
   })
 
+  const [scenarioId, setScenarioId] = useState(initialScenarioId)
+  const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId)!
+  /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
+  const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
+  const generated = scenario.plan.layout.mode === 'generate'
+  // Compiled once per choice; switching scenarios or layouts loads a fresh simulation.
+  const compiled = useMemo(() => layoutSeed === null
+    ? startScenario(scenario.plan, scenario.model)
+    : startScenario({ ...scenario.plan, seed: layoutSeed }, scenario.model, { varyLayout: true }), [scenario, layoutSeed])
+  const scenarioDetail = compiled.ok
+    ? describeScenario(compiled.value) + (layoutSeed === null ? '' : ` · layout ${layoutSeed}`)
+    : 'This plan could not be built'
+  const chooseScenario = (id: string) => {
+    setScenarioId(id)
+    setLayoutSeed(null)
+    rememberScenario(id)
+  }
+  /** Same description, a different building: the plan's seed first, then the next seeds in turn. */
+  const nextLayout = () => setLayoutSeed((seed) => (seed === null ? scenario.plan.seed : (seed + 1) >>> 0))
+
   useEffect(() => {
-    void client.load(workedExampleScene())
+    // A plan that fails to compile never reaches the worker; its error shows in the event log.
+    if (compiled.ok) void client.load(compiled.value)
+    else client.reportError(compiled.error)
     // Pausing stops the playback timer; the client stays usable if React remounts (StrictMode).
     return () => void client.pause().catch(() => {})
-  }, [client])
+  }, [client, compiled])
 
   useEffect(() => {
     const host = hostRef.current
@@ -183,7 +219,22 @@ export default function SimulatorApp() {
 
       <header className="sim-float sim-topbar">
         <p className="sim-brand"><BrandMark /> Crowd Control</p>
-        <p className="sim-scenario"><span>{SCENARIO.title}</span> · {SCENARIO.detail}</p>
+        <div className="sim-scenario">
+          <label className="sim-scenario-picker">
+            <span className="visually-hidden">Scenario</span>
+            <select value={scenarioId} onChange={(event) => chooseScenario(event.target.value)}>
+              {SCENARIOS.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+            </select>
+            <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
+          </label>
+          {generated && (
+            <button type="button" className="sim-icon-btn" onClick={nextLayout}
+              aria-label="New layout" title="New layout: same description, a different building">
+              <Shuffle size={14} />
+            </button>
+          )}
+          <span className="sim-scenario-detail">{scenarioDetail}</span>
+        </div>
         {alarm && (
           <p className="sim-tag sim-tag-alarm" role="status">
             <Siren size={13} strokeWidth={2.25} aria-hidden="true" /> Alarm at {formatClock(alarm.time, false)}
