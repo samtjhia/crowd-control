@@ -153,6 +153,81 @@ test('allows follow-up arrivals to spawn inside an inventoried zone', async () =
   assert.deepEqual(result.value, followup)
 })
 
+test('answers why questions from supplied metrics and cites only supplied events', async () => {
+  const whyRequest = {
+    ...request,
+    prompt: 'Why did the queue get longer?',
+    context: {
+      ...request.context,
+      capabilities: {
+        ...request.context.capabilities,
+        editableHistory: false,
+      },
+      askWhy: true,
+      metricSamples: [{
+        time: 12,
+        present: 6,
+        departed: 0,
+        blocked: 2,
+        immobile: 0,
+        removed: 0,
+        zones: [],
+        portals: [],
+        queues: [{ targetId: 'desk', length: 3, served: 1, totalWait: 8, maximumWait: 6 }],
+        clearance: { t50: null, t90: null, t100: null },
+      }],
+      events: [{ id: 'queue-event-1', tick: 240, time: 12, name: 'queue_grew', data: { targetId: 'desk' } }],
+    },
+  }
+  const answer = {
+    kind: 'answer',
+    text: 'At 12 seconds the queue at the desk had three people, and two people were blocked. This is consistent with the queue growing, but the available sample does not establish why they were blocked.',
+    evidenceEventIds: ['queue-event-1'],
+  }
+  let promptText = ''
+  const planRequest = createGeminiPlanner({
+    apiKey: 'server-only-key',
+    model: 'gemini-test',
+    fetcher: async (_url, init) => {
+      promptText = JSON.parse(init.body).contents[0].parts[0].text
+      return geminiResponse(answer)
+    },
+  })
+
+  const result = await planRequest(whyRequest)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.value, answer)
+  assert.match(promptText, /When context\.askWhy is true/)
+  assert.match(promptText, /Do not infer causes that the supplied evidence does not establish/)
+})
+
+test('rejects why answers that cite events outside the supplied evidence', async () => {
+  const whyRequest = {
+    ...request,
+    context: {
+      ...request.context,
+      askWhy: true,
+      events: [{ id: 'real-event', tick: 1, time: 0.05, name: 'door_closed' }],
+    },
+  }
+  const planRequest = createGeminiPlanner({
+    apiKey: 'server-only-key',
+    model: 'gemini-test',
+    fetcher: async () => geminiResponse({
+      kind: 'answer',
+      text: 'The unsupported event caused this.',
+      evidenceEventIds: ['invented-event'],
+    }),
+  })
+
+  const result = await planRequest(whyRequest)
+
+  assert.equal(result.ok, false)
+  assert.match(result.error.message, /event that was not included/)
+  assert.equal(result.error.retryable, false)
+})
+
 test('corrects a follow-up reply when a new scenario was requested', async () => {
   const unexpectedFollowup = {
     kind: 'followup',
