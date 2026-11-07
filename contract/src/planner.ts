@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { EntityKindSchema, HeaderSchema, IdSchema, PositiveIntegerSchema, RandomStateSchema, SimTimeSchema, uniqueIds } from './common.js';
 import { MapAppearanceSchema } from './entities.js';
 import { DefineRuleOperationSchema, EntityMetricSchema, OperationSchema, ScheduleOperationSchema } from './operations.js';
-import { MetricSampleSchema, ReadQuerySchema } from './metrics.js';
+import { EventRecordSchema, MetricSampleSchema, ReadQuerySchema } from './metrics.js';
 
 export const SpacePlanSchema = z.strictObject({ id: IdSchema, label: z.string().optional(), tags: z.array(IdSchema).optional(), areaWeight: PositiveIntegerSchema, appearance: MapAppearanceSchema.optional() });
 export const ConnectionPlanSchema = z.strictObject({ id: IdSchema, connects: z.tuple([IdSchema, IdSchema]).refine(([a, b]) => a !== b), label: z.string().optional(), tags: z.array(IdSchema).optional(), appearance: MapAppearanceSchema.optional() });
@@ -29,7 +29,7 @@ export const FollowupRequestSchema = z.union([
 ]);
 export const InventoryItemSchema = z.strictObject({ id: IdSchema, kind: EntityKindSchema, label: z.string().optional(), tags: z.array(IdSchema), componentNames: z.array(IdSchema) });
 export const InterventionSummarySchema = z.strictObject({ id: IdSchema, revision: PositiveIntegerSchema, label: z.string(), at: SimTimeSchema, deleted: z.boolean() });
-export const PlannerRequestSchema = HeaderSchema.extend({ requestId: IdSchema, prompt: z.string().min(1), context: z.strictObject({ capabilities: CapabilitiesSchema, layout: LayoutSourceSchema.optional(), inventory: z.array(InventoryItemSchema), summary: MetricSampleSchema.optional(), interventions: z.array(InterventionSummarySchema), selectedInterventionId: IdSchema.optional() }) });
+export const PlannerRequestSchema = HeaderSchema.extend({ requestId: IdSchema, prompt: z.string().min(1), context: z.strictObject({ capabilities: CapabilitiesSchema, layout: LayoutSourceSchema.optional(), inventory: z.array(InventoryItemSchema), summary: MetricSampleSchema.optional(), metricSamples: z.array(MetricSampleSchema).max(100).optional(), events: z.array(EventRecordSchema).max(100).optional(), interventions: z.array(InterventionSummarySchema), selectedInterventionId: IdSchema.optional(), askWhy: z.boolean().optional() }) });
 export const PlannerReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('scenario'), plan: ScenarioPlanSchema }), z.strictObject({ kind: z.literal('followup'), request: FollowupRequestSchema }), z.strictObject({ kind: z.literal('query'), query: ReadQuerySchema }),
   z.strictObject({ kind: z.literal('clarification'), message: z.string().min(1), candidateIds: z.array(IdSchema).optional() }), z.strictObject({ kind: z.literal('answer'), text: z.string().min(1), evidenceEventIds: z.array(IdSchema) }),

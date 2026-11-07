@@ -8,6 +8,35 @@ export const PortalMetricsSchema = z.strictObject({ portalId: IdSchema, crossed:
 export const QueueMetricsSchema = z.strictObject({ targetId: IdSchema, length: CounterSchema, served: CounterSchema, totalWait: SimTimeSchema, maximumWait: SimTimeSchema });
 const clearance = z.strictObject({ t50: SimTimeSchema.nullable(), t90: SimTimeSchema.nullable(), t100: SimTimeSchema.nullable() });
 export const MetricSampleSchema = z.strictObject({ time: SimTimeSchema, present: CounterSchema, departed: CounterSchema, blocked: CounterSchema, immobile: CounterSchema, removed: CounterSchema, zones: z.array(ZoneMetricsSchema), portals: z.array(PortalMetricsSchema), queues: z.array(QueueMetricsSchema), clearance });
+export const RunAnalyticsSchema = z.strictObject({
+  runId: z.uuid(),
+  sampleCount: CounterSchema,
+  peakDensityByZone: z.array(z.strictObject({
+    zoneId: IdSchema,
+    peakDensity: NonnegativeSchema,
+    at: SimTimeSchema,
+  })),
+  interventions: z.array(z.strictObject({
+    requestId: IdSchema,
+    prompt: z.string(),
+    at: SimTimeSchema,
+    comparisons: z.array(z.strictObject({
+      zoneId: IdSchema,
+      beforeDensity: NonnegativeSchema.nullable(),
+      afterDensity: NonnegativeSchema.nullable(),
+      beforeSamples: CounterSchema,
+      afterSamples: CounterSchema,
+    })),
+  })),
+});
+export const RunSummarySchema = z.strictObject({
+  runId: z.uuid(),
+  simulationId: IdSchema,
+  startedAt: z.iso.datetime(),
+  sampleCount: CounterSchema,
+  interventionCount: CounterSchema,
+});
+export const RunSummariesSchema = z.array(RunSummarySchema);
 export const DensityGridSchema = z.strictObject({ width: PositiveIntegerSchema, height: PositiveIntegerSchema, cellSize: PositiveSchema, origin: Vec2Schema, units: z.enum(['people/m2', 'people/model-unit2']), values: z.array(NonnegativeSchema) }).refine((v) => v.values.length === v.width * v.height, 'Density buffer length must equal width × height');
 export const DepartureRecordSchema = z.strictObject({ agentId: IdSchema, at: SimTimeSchema, travelTime: SimTimeSchema });
 export const ClearanceCohortSchema = z.strictObject({ cohortIds: z.array(IdSchema).min(1).max(20_000), startedAt: SimTimeSchema }).refine((v) => new Set(v.cohortIds).size === v.cohortIds.length, 'Duplicate clearance cohort ID');
@@ -24,6 +53,8 @@ export type ZoneMetrics = z.infer<typeof ZoneMetricsSchema>;
 export type PortalMetrics = z.infer<typeof PortalMetricsSchema>;
 export type QueueMetrics = z.infer<typeof QueueMetricsSchema>;
 export type MetricSample = z.infer<typeof MetricSampleSchema>;
+export type RunAnalytics = z.infer<typeof RunAnalyticsSchema>;
+export type RunSummary = z.infer<typeof RunSummarySchema>;
 export type DensityGrid = z.infer<typeof DensityGridSchema>;
 export type DepartureRecord = z.infer<typeof DepartureRecordSchema>;
 export type MetricsState = z.infer<typeof MetricsStateSchema>;

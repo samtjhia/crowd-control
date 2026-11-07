@@ -84,6 +84,20 @@ form { display: grid; gap: 0.7rem; }
 .followup-panel h3 { margin: 0; }
 .followup-panel > p:not(.eyebrow) { line-height: 1.5; }
 .followup-panel form { margin-top: 1rem; }
+.analytics-panel { background: #f8faff; border: 1px solid #e4e7ec; border-radius: 0.75rem; margin-top: 1.5rem; padding: 1.25rem; }
+.analytics-panel h3 { margin: 0; }
+.analytics-panel h4 { margin: 1.25rem 0 0.5rem; }
+.analytics-interventions > li + li { margin-top: 0.75rem; }
+.past-runs-list { list-style: none; margin: 1rem 0 0; padding: 0; }
+.past-runs-list > li {
+  align-items: center;
+  border-top: 1px solid #e4e7ec;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.9rem 0;
+}
+.past-runs-list .fine-print { margin-top: 0.25rem; }
 .history-list { line-height: 1.5; }
 .history-entry + .history-entry { margin-top: 0.85rem; }
 .history-entry > .eyebrow { margin: 0.2rem 0 0.25rem; }
@@ -98,6 +112,33 @@ form { display: grid; gap: 0.7rem; }
   margin: 0.35rem 0 0.75rem;
   padding: 0.65rem 0.85rem;
 }
+.auth-screen {
+  align-content: center;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 1rem;
+  box-shadow: 0 8px 30px rgb(16 24 40 / 5%);
+  margin: 12vh auto 0;
+  max-width: 34rem;
+  padding: clamp(1.5rem, 5vw, 3rem);
+}
+.auth-screen h1 { margin-top: 0; }
+.auth-screen p { color: #475467; line-height: 1.55; }
+.auth-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  justify-content: flex-end;
+  margin: 1rem auto;
+  max-width: 52rem;
+  padding: 0 1rem;
+}
+.auth-header nav, .auth-account { align-items: center; display: flex; gap: 1rem; }
+.auth-header nav { margin-right: auto; }
+.auth-header a { color: #344054; font-size: 0.9rem; font-weight: 650; text-decoration: none; }
+.auth-header a:hover { color: #155eef; text-decoration: underline; }
+.auth-header span { color: #475467; font-size: 0.9rem; }
 .fine-print, footer, .muted { color: #667085; font-size: 0.85rem; line-height: 1.5; }
 .fine-print { margin-bottom: 0; }
 .message { color: #175cd3; line-height: 1.5; }

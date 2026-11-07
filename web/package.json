@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "npm run build --workspace @crowd-control/compiler",
-    "dev": "vite",
+    "dev": "vite --port 5173 --strictPort",
     "prebuild": "npm run build --workspace @crowd-control/compiler",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
@@ -15,6 +15,7 @@
     "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@auth0/auth0-react": "^2.30.0",
     "@crowd-control/compiler": "*",
     "@crowd-control/contract": "*",
     "@crowd-control/history": "*",

@@ -44,8 +44,9 @@ export function createGeminiPlanner(options: GeminiPlannerOptions) {
     const prompt = (validationFeedback?: string) => [
       'You are the planning assistant for Crowd Control, a crowd-simulation planning estimate, not certified safety advice.',
       'Return exactly one JSON object that conforms to the supplied PlannerReply JSON Schema.',
-      'When context.capabilities.editableHistory is true, this is a NEW SCENARIO request: return kind "scenario" and a complete plan. Never return kind "followup" for this request, even if the prompt mentions a change, gate, door, or timed action.',
-      'When context.capabilities.editableHistory is false, this is a FOLLOW-UP to the already-loaded simulation: return kind "followup" with a create_intervention request, copying simulationId and requestId from the Planner request. Do not return scenario plans or edit/delete requests.',
+      'When context.askWhy is true, answer the user question using only context.metricSamples, context.events, context.inventory, and context.interventions. Return kind "answer". Do not infer causes that the supplied evidence does not establish; state when evidence is insufficient. Cite only event IDs present in context.events using evidenceEventIds. Metrics have simulation-time timestamps; distinguish observed correlation from proven cause.',
+      'When context.askWhy is false and context.capabilities.editableHistory is true, this is a NEW SCENARIO request: return kind "scenario" and a complete plan. Never return kind "followup" for this request, even if the prompt mentions a change, gate, door, or timed action.',
+      'When context.askWhy is false and context.capabilities.editableHistory is false, this is a FOLLOW-UP to the already-loaded simulation: return kind "followup" with a create_intervention request, copying simulationId and requestId from the Planner request. Do not return scenario plans or edit/delete requests.',
       // The allowed changes come from the request, so the simulator decides what is supported, not this prompt.
       `For follow-ups, use only these operations: ${request.value.context.capabilities.operations.join(', ') || 'none'}; and only these goal kinds: ${request.value.context.capabilities.goals.join(', ') || 'none'}. Anything else is rejected. Refer to rooms, doors and people only by IDs from context.inventory.`,
       [
@@ -135,10 +136,13 @@ export function createGeminiPlanner(options: GeminiPlannerOptions) {
       }
       const expectsFollowup = !request.value.context.capabilities.editableHistory
       if (
-        (expectsFollowup && reply.value.kind === 'scenario')
-        || (!expectsFollowup && reply.value.kind === 'followup')
+        (request.value.context.askWhy && reply.value.kind !== 'answer')
+        || (!request.value.context.askWhy && (
+          (expectsFollowup && reply.value.kind === 'scenario')
+          || (!expectsFollowup && reply.value.kind === 'followup')
+        ))
       ) {
-        const expectedKind = expectsFollowup ? 'followup' : 'scenario'
+        const expectedKind = request.value.context.askWhy ? 'answer' : expectsFollowup ? 'followup' : 'scenario'
         if (attempt === 0) {
           validationFeedback = `this request requires kind "${expectedKind}" based on context.capabilities.editableHistory`
           continue
@@ -150,6 +154,12 @@ export function createGeminiPlanner(options: GeminiPlannerOptions) {
         || (reply.value.kind === 'followup' && reply.value.request.simulationId !== request.value.simulationId)
       ) {
         return unavailable('Gemini returned a plan for a different simulation; no changes were applied.', true)
+      }
+      if (request.value.context.askWhy && reply.value.kind === 'answer') {
+        const availableEventIds = new Set((request.value.context.events ?? []).map((event) => event.id))
+        if (reply.value.evidenceEventIds.some((id) => !availableEventIds.has(id))) {
+          return unavailable('Gemini cited an event that was not included in the supplied run evidence.', false)
+        }
       }
       return { ok: true, value: reply.value }
     }
