@@ -1,27 +1,36 @@
-import { DoorOpen, MousePointer2, PersonStanding } from 'lucide-react'
+import { DoorOpen, MousePointer2, PersonStanding, SquareDashedMousePointer } from 'lucide-react'
 import type { Pick } from '../render/hitTest.ts'
 import type { AppliedChange, SimulationView } from '../worker/simulationClient.ts'
 import { formatClock } from './incidents.ts'
 import { isDown, isOpen, nameOf, presentPeople, selectionActions, type MapAction } from './mapActions.ts'
 
-/** What a click on the map does: inspect, trip/help up a person, or close/open a door. */
-export type MapTool = 'select' | 'trip' | 'doors'
+/**
+ * What the pointer does on the map. Select and Box choose things to inspect; Trip and Doors
+ * change the simulation with one click. In every tool but Box, dragging pans the map.
+ */
+export type MapTool = 'select' | 'box' | 'trip' | 'doors'
 
-const TOOLS: { id: MapTool; label: string; hint: string; key: string; Icon: typeof MousePointer2 }[] = [
-  { id: 'select', label: 'Select', hint: 'Click a person, door or room to see details. Shift-click or Shift-drag to select several', key: 'V', Icon: MousePointer2 },
-  { id: 'trip', label: 'Trip', hint: 'Click a person to make them fall, or to help them up', key: 'F', Icon: PersonStanding },
-  { id: 'doors', label: 'Doors', hint: 'Click a door to close it, or to open it again', key: 'D', Icon: DoorOpen },
+const TOOLS: { id: MapTool; label: string; hint: string; key: string; Icon: typeof MousePointer2; group: 'choose' | 'change' }[] = [
+  { id: 'select', label: 'Select', hint: 'Click a person, door or room to see it. Drag to pan; Shift-click or Shift-drag to select several', key: 'V', Icon: MousePointer2, group: 'choose' },
+  { id: 'box', label: 'Box', hint: 'Drag a box to select the people and doors inside it; hold Shift to add to the selection', key: 'B', Icon: SquareDashedMousePointer, group: 'choose' },
+  { id: 'trip', label: 'Trip', hint: 'Click a person to make them fall, or to help them up', key: 'F', Icon: PersonStanding, group: 'change' },
+  { id: 'doors', label: 'Doors', hint: 'Click a door to close it, or to open it again', key: 'D', Icon: DoorOpen, group: 'change' },
 ]
 
+/** A floating toolbar above the playback bar: choose things | change things. */
 export function MapToolbar({ tool, onTool }: { tool: MapTool; onTool: (tool: MapTool) => void }) {
   return (
     <div className="sim-float sim-tools" role="radiogroup" aria-label="Map tool">
-      {TOOLS.map(({ id, label, hint, key, Icon }) => (
-        <button key={id} type="button" role="radio" aria-checked={tool === id} onClick={() => onTool(id)}
-          title={`${label} (${key}): ${hint}`} aria-keyshortcuts={key}>
-          <Icon size={15} strokeWidth={2} aria-hidden="true" />
-          <span>{label}</span>
-        </button>
+      {TOOLS.map(({ id, label, hint, key, Icon, group }, index) => (
+        <span key={id} className="sim-tool">
+          {index > 0 && group !== TOOLS[index - 1]!.group && <span className="sim-tools-divider" aria-hidden="true" />}
+          <button type="button" role="radio" aria-checked={tool === id} onClick={() => onTool(id)}
+            title={`${label} (${key}): ${hint}`} aria-keyshortcuts={key}>
+            <Icon size={16} strokeWidth={2} aria-hidden="true" />
+            <span>{label}</span>
+            <kbd aria-hidden="true">{key}</kbd>
+          </button>
+        </span>
       ))}
     </div>
   )
@@ -46,7 +55,7 @@ export function SelectionDetails({ selection, view, onAction, onClear }: {
   if (selection.length === 0 || !scene) {
     return (
       <p className="sim-muted">
-        Click a person, door or room on the map. Shift-click or Shift-drag to select several. Use Trip (F) or Doors (D) to change things with one click.
+        Click a person, door or room on the map. Use Box (B) or Shift-drag to select several, and Trip (F) or Doors (D) to change things with one click.
       </p>
     )
   }

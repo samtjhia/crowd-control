@@ -26,6 +26,8 @@ export type RendererOptions = {
 /** Screen space covered by floating UI; fitting centres the map in what is left. */
 export type Insets = { top: number; right: number; bottom: number; left: number }
 
+export type BoxSelectMode = 'off' | 'shift' | 'always'
+
 type AgentView = {
   body: Graphics
   figure: Sprite | null
@@ -113,8 +115,8 @@ export class CrowdRenderer {
   private positions = new Map<string, Vec2>()
   private pickable: readonly PickKind[] = []
   private readonly pickListeners = new Set<(pick: Pick | null, additive: boolean) => void>()
-  private readonly boxListeners = new Set<(picks: Pick[]) => void>()
-  private boxSelect = false
+  private readonly boxListeners = new Set<(picks: Pick[], additive: boolean) => void>()
+  private boxSelect: BoxSelectMode = 'off'
   /** The Shift-drag selection box, in screen pixels, while it is being drawn. */
   private marquee: { from: Vec2; to: Vec2 } | null = null
   private selection: Pick[] = []
@@ -224,13 +226,16 @@ export class CrowdRenderer {
     }
   }
 
-  /** Lets Shift-drag draw a selection box instead of panning (plain drag always pans). */
-  setBoxSelect(enabled: boolean) {
-    this.boxSelect = enabled
+  /**
+   * When dragging draws a selection box instead of panning: 'shift' only while Shift is held,
+   * 'always' for every drag (the Box tool), 'off' never.
+   */
+  setBoxSelect(mode: BoxSelectMode) {
+    this.boxSelect = mode
   }
 
-  /** Notified with the people and doors inside a finished Shift-drag box. */
-  onBoxSelect(listener: (picks: Pick[]) => void): () => void {
+  /** Notified with the people and doors inside a finished selection box, and whether Shift was held to add them. */
+  onBoxSelect(listener: (picks: Pick[], additive: boolean) => void): () => void {
     this.boxListeners.add(listener)
     return () => {
       this.boxListeners.delete(listener)
@@ -725,13 +730,13 @@ export class CrowdRenderer {
     }
     const onDown = (event: PointerEvent) => {
       if (event.button !== 0) return
-      dragging = { x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0, box: event.shiftKey && this.boxSelect, start: local(event) }
+      dragging = { x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0, box: this.boxSelect === 'always' || (this.boxSelect === 'shift' && event.shiftKey), start: local(event) }
       canvas.setPointerCapture(event.pointerId)
     }
     const onMove = (event: PointerEvent) => {
       if (!dragging || dragging.id !== event.pointerId) {
         // Hovering: a hand over anything a click would act on.
-        if (event.pointerType === 'mouse') canvas.style.cursor = this.pickAtScreen(local(event)) ? 'pointer' : ''
+        if (event.pointerType === 'mouse') canvas.style.cursor = this.pickAtScreen(local(event)) ? 'pointer' : this.boxSelect === 'always' ? 'crosshair' : ''
         return
       }
       const dx = event.clientX - dragging.x, dy = event.clientY - dragging.y
@@ -759,7 +764,7 @@ export class CrowdRenderer {
       if (marquee && event.type === 'pointerup' && this.scene) {
         const frame = this.client.getView().current?.frame ?? null
         const picks = pickInBox(this.scene, frame, this.positions, screenToWorld(this.camera, marquee.from), screenToWorld(this.camera, marquee.to))
-        for (const listener of this.boxListeners) listener(picks)
+        for (const listener of this.boxListeners) listener(picks, event.shiftKey)
       } else if (click && this.pickable.length > 0) {
         const pick = this.pickAtScreen(local(event))
         for (const listener of this.pickListeners) listener(pick, event.shiftKey)

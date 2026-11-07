@@ -278,33 +278,56 @@
 .sim .sim-draw-mode button:hover { color: var(--text); }
 .sim .sim-draw-mode button[aria-checked='true'] { background: var(--well-strong); color: var(--text); font-weight: 600; }
 
-/* Map tools mirror the People/Markers switch, at the map's top-left corner. */
+/*
+ * Map tools: a floating bar centred over the free map space, just above the playback bar.
+ * It follows the panels as they slide, like the bars it sits between.
+ */
 .sim-tools {
-  top: calc(var(--gap) * 2 + var(--top-h));
-  left: var(--inset-l);
+  bottom: calc(var(--gap) * 2 + var(--bottom-h));
+  left: calc(var(--inset-l) + (100% - var(--inset-l) - var(--inset-r)) / 2);
   display: flex;
-  padding: 3px;
-  border-radius: 11px;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 14px;
+  transform: translateX(-50%);
   transition: left var(--slide) var(--ease);
 }
+
+.sim-tool { display: flex; align-items: center; gap: 2px; }
+.sim-tools-divider { width: 1px; height: 22px; margin: 0 5px; background: var(--hair); }
 
 .sim .sim-tools button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 11px 0 9px;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
   transition: background-color 160ms ease-out, color 160ms ease-out;
 }
 
-.sim .sim-tools button:hover { color: var(--text); }
+.sim .sim-tools kbd {
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--well);
+  color: var(--faint);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sim .sim-tools button:hover { background: var(--well); color: var(--text); }
 .sim .sim-tools button[aria-checked='true'] { background: var(--green); color: #ffffff; font-weight: 600; }
+.sim .sim-tools button[aria-checked='true'] kbd { background: rgb(255 255 255 / 0.18); color: #ffffff; }
 .sim .sim-tools button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 .sim-zoom {
@@ -725,8 +748,10 @@
   .sim-playback { flex-wrap: wrap; gap: 6px 12px; height: auto; padding: 10px 14px; }
   .timeline { flex-basis: 100%; padding-top: 2px; }
   .sim-zoom { bottom: 150px; }
-  .sim .sim-tools button span { display: none; }
-  .sim .sim-tools button { padding: 0 9px; }
+  .sim-tools { bottom: 150px; }
+  .sim .sim-tools button span,
+  .sim .sim-tools kbd { display: none; }
+  .sim .sim-tools button { padding: 0 10px; }
 }
 
 @media (max-width: 520px) {

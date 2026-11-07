@@ -9,7 +9,7 @@ import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
 import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
-import { CrowdRenderer } from '../render/renderer.ts'
+import { CrowdRenderer, type BoxSelectMode } from '../render/renderer.ts'
 import { createMockEndpoint } from '../worker/mockEndpoint.ts'
 import { SimulationClient, type SimulationView } from '../worker/simulationClient.ts'
 import { PlanSigns } from './PlanSigns.tsx'
@@ -22,7 +22,9 @@ import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActio
 import { describeScenario, scenarios, startScenario } from './scenario.ts'
 
 /** What each tool can click: Select anything, Trip people, Doors doors. */
-const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
+const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], box: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
+/** Box always drags a selection box; Select does with Shift held; the others always pan. */
+const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', trip: 'off', doors: 'off' }
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -144,10 +146,10 @@ export default function SimulatorApp() {
   const applyAction = (action: MapAction) => void client.apply(action.label, action.operations)
   /** What a click on the map does with the current tool. Read through a ref by the renderer. */
   const onPickRef = useRef<(pick: Pick | null, additive: boolean) => void>(() => {})
-  const onBoxRef = useRef<(picks: Pick[]) => void>(() => {})
+  const onBoxRef = useRef<(picks: Pick[], additive: boolean) => void>(() => {})
   useEffect(() => {
     onPickRef.current = (pick, additive) => {
-      if (toolRef.current === 'select') {
+      if (toolRef.current === 'select' || toolRef.current === 'box') {
         // Shift-click adds or removes one item; a plain click replaces the selection.
         if (additive) { if (pick) setSelection((current) => toggleIn(current, pick)) }
         else setSelection(pick ? [pick] : [])
@@ -159,14 +161,14 @@ export default function SimulatorApp() {
       const action = actionFor(toolRef.current, current.scene, current.current?.frame ?? null, pick.kind, pick.id)
       if (action) void client.apply(action.label, action.operations)
     }
-    // Shift-drag adds everything in the box to the selection.
-    onBoxRef.current = (picks) => setSelection((current) => union(current, picks))
+    // A box replaces the selection; with Shift held it adds to it.
+    onBoxRef.current = (picks, additive) => setSelection((current) => (additive ? union(current, picks) : picks))
   }, [client])
 
   useEffect(() => {
     toolRef.current = tool
     rendererRef.current?.setPickable(PICKABLE[tool])
-    rendererRef.current?.setBoxSelect(tool === 'select')
+    rendererRef.current?.setBoxSelect(BOX_MODE[tool])
   }, [tool])
 
   useEffect(() => {
@@ -198,9 +200,9 @@ export default function SimulatorApp() {
       rendererRef.current = created
       stopCamera = created.onCameraChange(setCamera)
       stopPick = created.onPick((pick, additive) => onPickRef.current(pick, additive))
-      stopBox = created.onBoxSelect((picks) => onBoxRef.current(picks))
+      stopBox = created.onBoxSelect((picks, additive) => onBoxRef.current(picks, additive))
       created.setPickable(PICKABLE[toolRef.current])
-      created.setBoxSelect(toolRef.current === 'select')
+      created.setBoxSelect(BOX_MODE[toolRef.current])
       if (panelsRef.current) created.setInsets(insetsFor(panelsRef.current))
     })
     return () => {
@@ -244,6 +246,7 @@ export default function SimulatorApp() {
           case ']': setPanels((p) => ({ ...p, right: !p.right })); return true
           case '\\': setPanels((p) => { const open = !(p.left || p.right); return { left: open, right: open } }); return true
           case 'v': case 'V': setTool('select'); return true
+          case 'b': case 'B': setTool('box'); return true
           case 'f': case 'F': setTool('trip'); return true
           case 'd': case 'D': setTool('doors'); return true
           case 'Escape':
