@@ -1,220 +1,628 @@
+/*
+ * Crowd Control simulator. The map is a full-screen sage workspace (the landing page's
+ * world); white, neutral, rounded cards float over it for the panels and controls.
+ * Panels slide with transforms only, so opening one never re-lays-out or resizes the map.
+ * Everything is scoped under .sim / sim-* so it never collides with the landing CSS.
+ */
 .sim {
-  --sim-bg: #f8fafc;
-  --sim-surface: #ffffff;
-  --sim-border: #cbd5e1;
-  --sim-text: #0f172a;
-  --sim-muted: #475569;
-  --sim-accent: #2563eb;
-  --sim-warn-bg: #fef3c7;
-  --sim-warn-text: #78350f;
-  --sim-error: #b91c1c;
+  /* Workspace: the landing page's green world. */
+  --workspace: #e8ece0;
+  --green: #357650;
+  --green-hover: #265e3d;
+  --blue: #597dab;
+  --rose: #b75f74;
+  --amber: #c08a3e;
+  /* Cards: white and neutral, so they stand apart from the map. */
+  --card: #ffffff;
+  --text: #1e2420;
+  --muted: #6b706a;
+  --faint: #8f938d;
+  --hair: #ececea;
+  --well: #f5f5f2;
+  --well-strong: #ebebe7;
+  --shadow: 0 1px 2px rgb(20 30 20 / 0.05), 0 12px 32px rgb(20 30 20 / 0.09);
+  --radius: 18px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --slide: 360ms;
+  /* Floating layout; SimulatorApp.tsx uses the same numbers to fit the map. */
+  --gap: 12px;
+  --left-w: 320px;
+  --right-w: 340px;
+  --top-h: 52px;
+  --bottom-h: 68px;
+  --inset-l: var(--gap);
+  --inset-r: var(--gap);
 
-  min-height: 100vh;
-  background: var(--sim-bg);
-  color: var(--sim-text);
-  font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--workspace);
+  color: var(--text);
+  font: 13px/1.55 'DM Sans Variable', 'DM Sans', sans-serif;
+  font-variant-numeric: tabular-nums;
   text-align: left;
+  -webkit-font-smoothing: antialiased;
 }
 
-.sim-header {
-  display: flex;
-  flex-wrap: wrap;
+.sim.has-left { --inset-l: calc(var(--gap) * 2 + var(--left-w)); }
+.sim.has-right { --inset-r: calc(var(--gap) * 2 + var(--right-w)); }
+
+/* Zero-specificity resets, so every component rule below wins. */
+:where(.sim) :where(h1, h2, h3, p, dl, dd, ol, ul) { margin: 0; }
+:where(.sim) :where(ol, ul) { padding: 0; list-style: none; }
+.sim :is(h2, .sim-chat-title, .sim-brand, .sim-clock) { font-family: 'Manrope Variable', 'Manrope', sans-serif; }
+.sim ::selection { background: #d0e6ba; }
+.sim :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sim * { scrollbar-width: thin; scrollbar-color: #d5d6d1 transparent; }
+.sim button { font: inherit; color: inherit; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.sim-muted { color: var(--muted); }
+
+/* ---- Workspace ---- */
+
+.sim-stage { position: absolute; inset: 0; }
+.sim-canvas { position: absolute; inset: 0; }
+.sim-canvas canvas { display: block; touch-action: none; cursor: grab; }
+.sim-canvas canvas:active { cursor: grabbing; }
+
+.sim-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.map-markers { position: absolute; inset: 0; pointer-events: none; }
+.map-marker { position: absolute; display: flex; transform: translate(-50%, -50%); }
+.map-marker-above { transform: translate(-50%, calc(-100% - 6px)); }
+.map-marker .status-icon { box-shadow: 0 0 0 2px #ffffff, 0 2px 6px rgb(20 30 20 / 0.2); }
+
+/* Venue-wide event: a ring traces the whole map and pulses three times, then fades away. */
+.map-pulse {
+  position: absolute;
+  border: 3px solid var(--ring);
+  border-radius: 6px;
+  opacity: 0;
+  animation: map-pulse 2.4s var(--ease) 1 both;
+}
+
+.status-ring-closed { --ring: var(--rose); }
+.status-ring-warning { --ring: var(--amber); }
+.status-ring-exit { --ring: var(--green); }
+.status-ring-instruction { --ring: var(--blue); }
+
+@keyframes map-pulse {
+  0% { opacity: 0; box-shadow: 0 0 0 0 var(--ring); }
+  10% { opacity: 1; box-shadow: 0 0 0 0 var(--ring); }
+  30% { opacity: 1; box-shadow: 0 0 0 14px transparent; }
+  31% { box-shadow: 0 0 0 0 var(--ring); }
+  55% { opacity: 1; box-shadow: 0 0 0 14px transparent; }
+  56% { box-shadow: 0 0 0 0 var(--ring); }
+  80% { opacity: 0.9; box-shadow: 0 0 0 14px transparent; }
+  100% { opacity: 0; box-shadow: 0 0 0 14px transparent; }
+}
+
+/* ...and stays as a badge on the map's top-left corner. */
+.map-notices {
+  position: absolute;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  transform: translate(-6px, calc(-100% - 8px));
+}
+
+.map-notice {
+  display: inline-flex;
   align-items: center;
-  gap: 12px 24px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--sim-border);
-  background: var(--sim-surface);
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #ffffff, 0 2px 8px rgb(20 30 20 / 0.18);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: notice-in 400ms var(--ease) 1.6s both;
 }
 
-.sim-header h1 {
-  margin: 0;
-  font-size: 18px;
+.map-notice .status-icon { background: transparent; }
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.9); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-pulse { display: none; }
+  .map-notice { animation: none; }
+}
+
+/* ---- Floating cards ---- */
+
+.sim-float {
+  position: absolute;
+  border: 1px solid rgb(20 30 20 / 0.06);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+/* Bars that span the free space between the panels follow them as they slide. */
+.sim-topbar,
+.sim-playback {
+  left: var(--inset-l);
+  right: var(--inset-r);
+  transition: left var(--slide) var(--ease), right var(--slide) var(--ease);
+}
+
+.sim-topbar {
+  top: var(--gap);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--top-h);
+  padding: 0 10px 0 16px;
+  border-radius: 14px;
+}
+
+.sim-brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
   font-weight: 650;
+  letter-spacing: -0.04em;
 }
 
-.sim-header h1 span {
-  color: var(--sim-muted);
-  font-weight: 450;
+/* The landing page's brand mark: six leaning pill people. */
+.sim-brand-mark {
+  display: grid;
+  grid-template-columns: repeat(3, 3px);
+  gap: 3px;
+  margin: 3px 2px 0 2px;
+  transform: rotate(-12deg);
 }
 
-.sim-mock {
-  margin: 0;
+.sim-brand-mark i { position: relative; width: 3px; height: 8px; border-radius: 3px; background: var(--green); }
+.sim-brand-mark i::before { content: ''; position: absolute; top: -4px; width: 3px; height: 3px; border-radius: 50%; background: inherit; }
+.sim-brand-mark i:nth-child(2), .sim-brand-mark i:nth-child(5) { background: #89a581; }
+.sim-brand-mark i:nth-child(3) { background: #7898b5; }
+.sim-brand-mark i:nth-child(4) { background: #c58a9a; }
+
+.sim-scenario {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 12px;
+  border-left: 1px solid var(--hair);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-scenario span { color: var(--text); font-weight: 500; }
+
+.sim-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: var(--sim-warn-bg);
-  color: var(--sim-warn-text);
+  background: var(--well);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sim-tag-alarm { background: #f8e8ec; color: #96364e; }
+
+.sim-draw-mode {
+  top: calc(var(--gap) * 2 + var(--top-h));
+  right: var(--inset-r);
+  display: flex;
+  padding: 3px;
+  border-radius: 11px;
+  transition: right var(--slide) var(--ease);
+}
+
+.sim .sim-draw-mode button {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
 }
 
-.sim-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  min-height: calc(100vh - 57px);
-}
+.sim .sim-draw-mode button:hover { color: var(--text); }
+.sim .sim-draw-mode button[aria-checked='true'] { background: var(--well-strong); color: var(--text); font-weight: 600; }
 
-.sim-main {
+.sim-zoom {
+  right: var(--inset-r);
+  bottom: calc(var(--gap) * 2 + var(--bottom-h));
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  /* Override the landing page's global `main` sizing and centring. */
-  max-width: none;
-  margin: 0;
-  padding: 16px 20px;
-  min-width: 0;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  transition: right var(--slide) var(--ease);
 }
 
-.sim-controls {
+.sim .sim-icon-btn {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out;
+}
+
+.sim .sim-icon-btn:hover:not(:disabled) { background: var(--well); color: var(--text); }
+.sim .sim-icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---- Side panels: full-height floating cards that slide in and out ---- */
+
+.sim-panel {
+  top: var(--gap);
+  bottom: var(--gap);
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform var(--slide) var(--ease), opacity var(--slide) var(--ease);
+  will-change: transform;
+  z-index: 3;
+}
+
+.sim-panel-left { left: var(--gap); width: var(--left-w); }
+.sim-panel-right { right: var(--gap); width: var(--right-w); }
+.sim:not(.has-left) .sim-panel-left { transform: translateX(calc(-100% - var(--gap) - 16px)); opacity: 0.6; }
+.sim:not(.has-right) .sim-panel-right { transform: translateX(calc(100% + var(--gap) + 16px)); opacity: 0.6; }
+
+.sim-panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 10px 0 20px;
+}
+
+.sim-panel-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+
+.sim-panel-body { flex: 1; min-height: 0; overflow-y: auto; }
+
+.sim-section { padding: 16px 20px; border-top: 1px solid var(--hair); }
+
+.sim-section h3,
+.sim-legend summary {
+  margin-bottom: 12px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/*
+ * Panel handles sit at the panel's vertical middle. Open: a tab on the panel's inner edge
+ * (closes it). Closed: the same tab at the screen edge (reopens it). They slide together.
+ */
+.sim .sim-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgb(20 30 20 / 0.06);
+  background: var(--card);
+  box-shadow: 3px 3px 10px rgb(20 30 20 / 0.07);
+  color: var(--faint);
+  cursor: pointer;
+  transition: transform var(--slide) var(--ease), color 160ms ease-out, width 160ms ease-out;
+}
+
+.sim .sim-handle:hover { width: 22px; color: var(--text); }
+
+.sim .sim-handle-left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 9px 9px 0;
+  transform: translate(calc(var(--gap) + var(--left-w) - 1px), -50%);
+}
+
+.sim .sim-handle-right {
+  right: 0;
+  border-right: 0;
+  border-radius: 9px 0 0 9px;
+  box-shadow: -3px 3px 10px rgb(20 30 20 / 0.07);
+  transform: translate(calc(-1 * (var(--gap) + var(--right-w) - 1px)), -50%);
+}
+
+.sim:not(.has-left) .sim-handle-left,
+.sim:not(.has-right) .sim-handle-right { transform: translate(0, -50%); }
+
+.sim-zoom-divider { height: 1px; margin: 3px 6px; background: var(--hair); }
+.sim .sim-zoom .sim-icon-btn[aria-pressed='true'] { background: var(--well-strong); color: var(--text); }
+
+/* ---- Playback bar ---- */
+
+.sim-playback {
+  bottom: var(--gap);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--bottom-h);
+  padding: 0 18px 0 12px;
+}
+
+.sim-transport { display: flex; flex: none; align-items: center; gap: 4px; }
+
+.sim .sim-play {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-.sim-controls button,
-.sim-controls select {
-  font: inherit;
-  color: var(--sim-text);
-  background: var(--sim-surface);
-  border: 1px solid var(--sim-border);
-  border-radius: 6px;
-  padding: 5px 10px;
+  height: 40px;
+  min-width: 96px;
+  margin-right: 4px;
+  padding: 0 18px 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--green);
+  color: #ffffff;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 160ms ease-out, transform 120ms ease-out;
 }
 
-.sim-controls button[aria-pressed='true'] {
-  background: var(--sim-accent);
-  border-color: var(--sim-accent);
+.sim .sim-play:hover:not(:disabled) { background: var(--green-hover); }
+.sim .sim-play:active:not(:disabled) { transform: scale(0.97); }
+.sim .sim-play:disabled { opacity: 0.4; cursor: default; }
+
+.sim-speed {
+  display: flex;
+  margin-left: 6px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--well);
+}
+
+.sim .sim-speed button {
+  min-width: 36px;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.sim .sim-speed button:hover:not(:disabled) { color: var(--text); }
+.sim .sim-speed button[aria-checked='true'] { background: var(--card); box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); color: var(--text); font-weight: 600; }
+.sim .sim-speed button:disabled { opacity: 0.4; cursor: default; }
+
+.sim-clock { flex: none; min-width: 74px; font-size: 18px; font-weight: 600; letter-spacing: -0.03em; }
+
+/* ---- Timeline ---- */
+
+.timeline { flex: 1; min-width: 160px; padding-top: 14px; }
+.timeline-track { position: relative; height: 4px; border-radius: 999px; background: var(--well-strong); }
+.timeline-elapsed { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--green); }
+
+.timeline-marker {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--card);
+  transform: translate(-50%, -50%);
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(20 30 20 / 0.2);
+  transform: translate(-50%, -50%);
+}
+
+.timeline-ticks { position: relative; height: 16px; margin-top: 8px; color: var(--faint); font-size: 10px; }
+.timeline-ticks li { position: absolute; transform: translateX(-50%); }
+.timeline-ticks li:first-child { transform: none; }
+.timeline-ticks li.is-end { transform: translateX(-100%); }
+.timeline-ticks li.is-covered { visibility: hidden; }
+
+/* ---- Status colours (map, timeline, events) ---- */
+
+.status-icon { display: inline-grid; flex: none; place-items: center; border-radius: 50%; color: #ffffff; }
+.status-exit { background: var(--green); }
+.status-warning { background: var(--amber); }
+.status-closed { background: var(--rose); }
+.status-instruction { background: var(--blue); }
+
+/* ---- Assistant ---- */
+
+.sim-chat { display: flex; flex-direction: column; height: 100%; }
+.sim-chat-empty { flex: 1; padding: 8px 20px 20px; }
+.sim-chat-title { margin-bottom: 6px; font-size: 18px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.3; }
+
+.sim-suggestions { display: grid; gap: 8px; margin-top: 20px; }
+
+.sim-suggestions li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--well);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sim-prompt-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.sim-composer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  background: var(--well);
+}
+
+.sim-composer input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; }
+.sim-composer input:focus { outline: none; }
+.sim-composer input::placeholder { color: var(--faint); }
+
+.sim .sim-send {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
   color: #ffffff;
 }
 
-.sim-controls button:disabled,
-.sim-controls select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.sim .sim-send:disabled { opacity: 0.3; }
 
-.sim-controls :focus-visible {
-  outline: 2px solid var(--sim-accent);
-  outline-offset: 2px;
-}
+/* ---- Overview and events ---- */
 
-.sim-controls kbd {
-  margin-left: 4px;
-  font-size: 11px;
-  color: inherit;
-  opacity: 0.7;
-}
+.sim-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sim-stats div { padding: 10px 12px; border-radius: 12px; background: var(--well); }
+.sim-stats dt { color: var(--muted); font-size: 11px; }
+.sim-stats dd { font-family: 'Manrope Variable', 'Manrope', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: -0.04em; }
+.sim-stats dd.is-warning { color: #9a6524; }
 
-.sim-speed {
-  display: inline-flex;
+.sim-stat-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-weight: 500; }
+
+.sim-events li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 11px;
+  padding: 7px 0;
 }
 
-.sim-zoom {
-  display: inline-flex;
-  gap: 2px;
-}
-
-.sim-clock {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.sim-clock small {
-  color: var(--sim-muted);
-  font-weight: 400;
-  font-size: 12px;
-}
-
-.sim-canvas {
-  overflow: hidden;
-  min-height: 120px;
-}
-
-.sim-canvas canvas {
-  display: block;
-  border: 1px solid var(--sim-border);
-  border-radius: 4px;
-  touch-action: none;
-  cursor: grab;
-}
-
-.sim-canvas canvas:active {
-  cursor: grabbing;
-}
-
-.sim-status {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px 32px;
-  align-items: flex-start;
-}
-
-.sim-status dl {
-  display: flex;
-  gap: 24px;
-  margin: 0;
-}
-
-.sim-status dt {
-  color: var(--sim-muted);
-  font-size: 12px;
-}
-
-.sim-status dd {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.sim-events {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-  color: var(--sim-muted);
-}
-
-.sim-events time {
-  font-variant-numeric: tabular-nums;
-  color: var(--sim-text);
-}
+.sim-event-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.45; }
+.sim-event-title { font-weight: 500; }
+.sim-events time { color: var(--faint); font-size: 11px; }
 
 .sim-error {
-  margin: 0;
-  color: var(--sim-error);
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8e8ec;
+  color: #96364e;
+  font-weight: 500;
 }
 
-.sim-legend {
-  font-size: 12px;
-  color: var(--sim-muted);
+/* ---- Legend ---- */
+
+.sim-legend summary { display: flex; align-items: center; gap: 8px; margin-bottom: 0; list-style: none; cursor: pointer; }
+.sim-legend summary::-webkit-details-marker { display: none; }
+
+.sim-legend summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 200ms var(--ease);
 }
 
-.sim-legend ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
+.sim-legend[open] summary::after { transform: rotate(45deg); }
+.sim-legend-list { display: grid; gap: 9px; margin-top: 14px; }
+.sim-legend-list li { display: flex; align-items: center; gap: 10px; }
+.sim-shortcuts { display: grid; gap: 6px; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.sim-shortcuts div { display: grid; grid-template-columns: 96px 1fr; gap: 8px; }
+
+.sim kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: var(--well);
+  color: var(--text);
+  font: 500 11px 'DM Sans Variable', 'DM Sans', sans-serif;
 }
 
-.sim-chat {
-  border-left: 1px solid var(--sim-border);
-  background: var(--sim-surface);
-  padding: 16px;
-  color: var(--sim-muted);
-}
+/* ---- Narrow screens: panels overlay the map ---- */
 
-@media (max-width: 860px) {
-  .sim-body {
-    grid-template-columns: 1fr;
+.sim-scrim { display: none; }
+
+@media (max-width: 999px) {
+  .sim.has-left,
+  .sim.has-right { --inset-l: var(--gap); --inset-r: var(--gap); }
+  .sim { --left-w: min(340px, calc(100vw - 64px)); --right-w: min(340px, calc(100vw - 64px)); }
+
+  .sim.has-left .sim-scrim,
+  .sim.has-right .sim-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: block;
+    border: 0;
+    background: rgb(20 30 20 / 0.18);
   }
 
-  .sim-chat {
-    border-left: 0;
-    border-top: 1px solid var(--sim-border);
-  }
+  .sim-scenario { display: none; }
+  .sim-playback { flex-wrap: wrap; gap: 6px 12px; height: auto; padding: 10px 14px; }
+  .timeline { flex-basis: 100%; padding-top: 2px; }
+  .sim-zoom { bottom: 150px; }
+}
+
+@media (max-width: 520px) {
+  .sim .sim-speed button { min-width: 30px; }
+  .sim .sim-play { min-width: 0; padding: 0 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sim *,
+  .sim *::before,
+  .sim *::after { transition-duration: 0ms !important; }
 }

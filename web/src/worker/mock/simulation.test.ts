@@ -147,6 +147,29 @@ test('requests are deduplicated, atomic, and unsupported actions fail explicitly
   assert.equal(ofType(send(unloaded, { type: 'pause' }), 'error')[0]?.error.code, 'NOT_FOUND')
 })
 
+test('people walk through doorways, never through walls', () => {
+  const { sim } = loaded()
+  const map = compiled.scene.map
+  assert.ok('rows' in map && map.rows, 'worked example uses glyph rows')
+  const rows = map.rows
+  for (let tick = 0; tick < 700; tick++) {
+    const frame = lastFrame(send(sim, { type: 'step', ticks: 1 }))
+    for (const agent of frame.agents) {
+      assert.notEqual(rows[Math.floor(agent.y)]?.[Math.floor(agent.x)], '#', `${agent.id} inside a wall at t=${frame.time}`)
+    }
+  }
+})
+
+test('a closed door blocks the only route instead of being walked through', () => {
+  const { sim } = loaded()
+  send(sim, { type: 'apply_request', request: request('shut', [{ op: 'set', targets: { ids: ['exit'] }, values: { components: { portal: { open: false } } } }]) })
+  const frame = lastFrame(send(sim, { type: 'run_to', time: 45 }))
+  assert.ok(frame.agents.every((agent) => agent.state !== 'departed'), 'nobody leaves through a closed exit')
+  assert.ok(frame.agents.some((agent) => agent.state === 'blocked'), 'people heading out report blocked')
+  send(sim, { type: 'apply_request', request: request('open', [{ op: 'set', targets: { ids: ['exit'] }, values: { components: { portal: { open: true } } } }]) })
+  assert.ok(lastFrame(send(sim, { type: 'run_to', time: 80 })).agents.every((agent) => agent.state === 'departed'), 'reopening lets everyone out')
+})
+
 test('reset starts a new stream from the initial definition', () => {
   const { sim, messages } = loaded()
   send(sim, { type: 'run_to', time: 12 })

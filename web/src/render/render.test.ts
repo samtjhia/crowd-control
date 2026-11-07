@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import type { CompileOutput, Frame, GridData } from '@crowd-control/contract'
-import { markerShape, resolveAgentStyle, stateAnnotation } from './agentStyle.ts'
+import { GROUP_PALETTE, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation } from './agentStyle.ts'
 import { fitCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera.ts'
 import { displayPositions } from './interpolate.ts'
 import { COLORS, layoutMap } from './mapLayout.ts'
@@ -13,8 +13,9 @@ const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - 
 
 test('PRD §14 renderer acceptance: 480×120 viewport, a1 triangle centred at (30,30) with a 10 px radius', () => {
   const layout = layoutMap(scene.map)
-  const camera = fitCamera({ width: layout.worldWidth, height: layout.worldHeight }, { width: 1200, height: 560 })
+  const camera = fitCamera({ width: layout.worldWidth, height: layout.worldHeight }, { width: 480, height: 120 })
   assert.equal(camera.pixelsPerUnit, 20)
+  assert.deepEqual(camera.pan, { x: 0, y: 0 })
   assert.deepEqual([layout.worldWidth * camera.pixelsPerUnit, layout.worldHeight * camera.pixelsPerUnit], [480, 120])
 
   const a1 = scene.agents[0]!
@@ -85,6 +86,17 @@ test('grid maps are laid out from cell membership, independent of how width is c
   assert.deepEqual(layout.runs.filter((r) => r.kind === 'portal').map((r) => [r.row, r.start, r.portalId]), [[1, 2, 'gate']])
 })
 
+test('group colours move onto the landing palette without merging groups', () => {
+  assert.equal(groupColor('#2563EB'), GROUP_PALETTE.blue)
+  assert.equal(groupColor('#7C3AED'), GROUP_PALETTE.rose)
+  assert.equal(groupColor('#16A34A'), GROUP_PALETTE.green)
+  assert.equal(groupColor('#F59E0B'), GROUP_PALETTE.amber)
+  assert.equal(groupColor(undefined), GROUP_PALETTE.green)
+  assert.equal(groupColor('#94A3B8'), GROUP_PALETTE.green, 'greys have no group hue')
+  assert.equal(stableIndex('a1', 4), stableIndex('a1', 4))
+  assert.ok(stableIndex('a2', 4) >= 0 && stableIndex('a2', 4) < 4)
+})
+
 test('camera maps world to screen and keeps the anchor fixed while zooming', () => {
   const camera = { pan: { x: 0, y: 0 }, pixelsPerUnit: 20 }
   const zoomed = zoomAt(camera, { x: 100, y: 40 }, 2)
@@ -94,6 +106,10 @@ test('camera maps world to screen and keeps the anchor fixed while zooming', () 
   close(anchor.y, 40)
   assert.deepEqual(panBy(camera, { x: 20, y: -40 }).pan, { x: -1, y: 2 })
   assert.equal(fitCamera({ width: 4, height: 45 }, { width: 800, height: 450 }).pixelsPerUnit, 10, 'tall maps shrink to fit')
+  const centred = fitCamera({ width: 24, height: 6 }, { width: 1000, height: 400 }, 64)
+  assert.equal(centred.pixelsPerUnit, 1000 / 24, 'small maps scale up to the panel, capped')
+  close(worldToScreen(centred, { x: 12, y: 3 }).x, 500)
+  close(worldToScreen(centred, { x: 12, y: 3 }).y, 200)
 })
 
 test('display positions interpolate within a stream and never across a reset', () => {

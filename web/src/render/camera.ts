@@ -14,12 +14,21 @@ export function screenToWorld(camera: Camera, point: Vec2): Vec2 {
 }
 
 /**
- * Initial camera: the PRD's 20 px/unit when the world fits the available space,
- * otherwise the largest scale that fits. Screen zoom never changes physical units.
+ * Fits the world inside the available screen space, centred, never above
+ * `maxPixelsPerUnit` (the PRD's 20 px/unit by default). Screen zoom never changes
+ * physical units; it only changes how many pixels one unit takes.
  */
-export function fitCamera(world: { width: number; height: number }, available: { width: number; height: number }): Camera {
+export function fitCamera(
+  world: { width: number; height: number },
+  available: { width: number; height: number },
+  maxPixelsPerUnit = DEFAULT_PIXELS_PER_UNIT,
+): Camera {
   const fit = Math.min(available.width / world.width, available.height / world.height)
-  return { pan: { x: 0, y: 0 }, pixelsPerUnit: clampScale(Math.min(DEFAULT_PIXELS_PER_UNIT, fit)) }
+  const pixelsPerUnit = clampScale(Math.min(maxPixelsPerUnit, fit))
+  return {
+    pixelsPerUnit,
+    pan: { x: (world.width - available.width / pixelsPerUnit) / 2, y: (world.height - available.height / pixelsPerUnit) / 2 },
+  }
 }
 
 /** Zooms by `factor` while keeping the world point under `anchor` (screen px) fixed. */

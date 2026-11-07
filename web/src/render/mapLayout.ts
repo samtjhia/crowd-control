@@ -1,15 +1,15 @@
 import type { CompiledMap, EntityBlueprint, MapAppearance, Shape } from '@crowd-control/contract'
 
-/** Technical PRD §12 visual defaults. Replaceable UI defaults, not safety thresholds. */
+/** Map defaults, re-themed from Technical PRD §12 (which calls them replaceable UI defaults) to the landing page's paper-and-sage palette. */
 export const COLORS = {
-  floor: '#F1F5F9',
-  wall: '#202630',
-  portalOpen: '#86EFAC',
-  portalClosed: '#202630',
-  obstacle: '#64748B',
-  object: '#E2E8F0',
-  outline: '#0F172A',
-  label: '#0F172A',
+  floor: '#FAFBF6',
+  wall: '#7F9479',
+  portalOpen: '#B9D6AE',
+  portalClosed: '#BB6479',
+  obstacle: '#A4B59C',
+  object: '#E6EADC',
+  outline: '#263C2E',
+  label: '#587361',
 } as const
 
 export type CellRun = {
@@ -33,7 +33,8 @@ export type EntityDrawing = {
   fill: string | null; stroke: string | null; strokeWidthPx: number; opacity: number
 }
 
-export type MapLabel = { text: string; x: number; y: number }
+/** A label at the top-left of the region it names; width/height bound where it may be drawn. */
+export type MapLabel = { text: string; x: number; y: number; width: number; height: number }
 
 export type MapLayout = {
   columns: number
@@ -115,7 +116,7 @@ export function layoutMap(map: CompiledMap): MapLayout {
   const entities: EntityDrawing[] = []
   const labels: MapLabel[] = []
   for (const room of map.rooms) {
-    if (room.appearance?.labelVisible) labels.push({ text: room.label ?? room.id, x: room.x, y: room.y })
+    if (room.appearance?.labelVisible) labels.push({ text: room.label ?? room.id, x: room.x, y: room.y, width: room.width, height: room.height })
   }
   for (const entity of map.entities ?? []) {
     if (!entity.shape) continue
@@ -130,19 +131,22 @@ export function layoutMap(map: CompiledMap): MapLayout {
       opacity: appearance?.opacity ?? 1,
     })
     if (appearance?.labelVisible) {
-      const anchor = shapeAnchor(entity.shape)
-      labels.push({ text: entity.label ?? entity.id, x: anchor.x, y: anchor.y })
+      labels.push({ text: entity.label ?? entity.id, ...shapeBox(entity.shape) })
     }
   }
 
   return { columns, rows, cellSize: map.cellSize, worldWidth: columns * map.cellSize, worldHeight: rows * map.cellSize, runs, portals, entities, labels }
 }
 
-function shapeAnchor(shape: Shape): { x: number; y: number } {
+function shapeBox(shape: Shape): { x: number; y: number; width: number; height: number } {
   switch (shape.kind) {
-    case 'rectangle': return { x: shape.x, y: shape.y }
-    case 'circle': return { x: shape.center.x - shape.radius, y: shape.center.y - shape.radius }
+    case 'rectangle': return { x: shape.x, y: shape.y, width: shape.width, height: shape.height }
+    case 'circle': return { x: shape.center.x - shape.radius, y: shape.center.y - shape.radius, width: shape.radius * 2, height: shape.radius * 2 }
     case 'polygon':
-    case 'thick_line': return { x: Math.min(...shape.points.map((p) => p.x)), y: Math.min(...shape.points.map((p) => p.y)) }
+    case 'thick_line': {
+      const xs = shape.points.map((p) => p.x), ys = shape.points.map((p) => p.y)
+      const x = Math.min(...xs), y = Math.min(...ys)
+      return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y }
+    }
   }
 }
