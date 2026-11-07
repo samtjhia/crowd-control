@@ -101,3 +101,36 @@
   .editor .editor-zoom { right: var(--gap); bottom: calc(45vh + var(--gap) * 2); }
   .editor .sim-brand { display: none; }
 }
+
+/* ---- Step controls ---- */
+
+.editor-field { display: grid; gap: 6px; }
+.editor-field label, .editor-label { display: flex; justify-content: space-between; font-weight: 500; }
+.editor-field output { color: var(--muted); font-weight: 400; }
+.editor-field input[type='range'] { width: 100%; accent-color: var(--green); }
+.editor-hint { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.editor-check { display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; }
+.editor-check input { accent-color: var(--green); width: 15px; height: 15px; }
+
+.editor-segmented { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--well); }
+
+.editor .editor-segmented button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.editor .editor-segmented button:hover { color: var(--text); }
+.editor .editor-segmented button[aria-checked='true'] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+
+.editor .sim-action { display: inline-flex; align-items: center; gap: 6px; }
+.editor-step-nav { justify-content: space-between; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--hair); }

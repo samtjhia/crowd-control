@@ -34,3 +34,17 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
+
+/** A rectangle in image pixels. */
+export type PixelRect = { x: number; y: number; width: number; height: number }
+
+/**
+ * The crop box between two dragged corners, snapped to whole pixels and kept inside the
+ * image; null when it is too small to be a deliberate crop (under 16 px either way).
+ */
+export function cropBox(a: { x: number; y: number }, b: { x: number; y: number }, image: { width: number; height: number }): PixelRect | null {
+  const left = Math.max(0, Math.round(Math.min(a.x, b.x))), right = Math.min(image.width, Math.round(Math.max(a.x, b.x)))
+  const top = Math.max(0, Math.round(Math.min(a.y, b.y))), bottom = Math.min(image.height, Math.round(Math.max(a.y, b.y)))
+  if (right - left < 16 || bottom - top < 16) return null
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}

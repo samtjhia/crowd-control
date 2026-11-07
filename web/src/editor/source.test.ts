@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fitPlan, toScreen, toSource, zoomPlan } from './planView.ts'
-import { checkUpload, fitWithin, sha256Hex } from './source.ts'
+import { checkUpload, cropBox, fitWithin, sha256Hex } from './source.ts'
 
 const limits = { maxUploadBytes: 10_000_000 }
 
@@ -40,4 +40,11 @@ test('the plan is fitted into the free screen area and zooms around the pointer'
   const before = toSource(fitted, anchor), after = toSource(zoomed, anchor)
   assert.ok(Math.abs(before.x - after.x) < 1e-9 && Math.abs(before.y - after.y) < 1e-9, 'the point under the pointer stays put')
   assert.equal(zoomPlan(fitted, fitted, anchor, 0.01).scale, fitted.scale * 0.5, 'never smaller than half the fitted size')
+})
+
+test('a crop box is snapped to whole pixels, kept inside the image, and ignores tiny drags', () => {
+  const image = { width: 800, height: 600 }
+  assert.deepEqual(cropBox({ x: 700.4, y: 500.6 }, { x: 100.2, y: 50.4 }, image), { x: 100, y: 50, width: 600, height: 451 }, 'dragged in any direction')
+  assert.deepEqual(cropBox({ x: -50, y: -50 }, { x: 900, y: 700 }, image), { x: 0, y: 0, width: 800, height: 600 }, 'clamped to the image')
+  assert.equal(cropBox({ x: 10, y: 10 }, { x: 20, y: 300 }, image), null, 'a click or a sliver is not a crop')
 })

@@ -1,16 +1,30 @@
-import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
-import { fitPlan, panPlan, zoomPlan, type Area, type PlanCamera } from './planView.ts'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, type Ref } from 'react'
+import { fitPlan, panPlan, toSource, zoomPlan, type Area, type PlanCamera } from './planView.ts'
 
-export type PlanCanvasHandle = { zoom: (factor: number) => void; fit: () => void }
+export type PlanCanvasHandle = { zoom: (factor: number) => void; fit: () => void; redraw: () => void }
+
+/** Pointer input for drawing tools, in source-pixel coordinates. */
+export type StrokeHandlers = {
+  start: (point: { x: number; y: number }, shift: boolean) => void
+  move: (point: { x: number; y: number }, shift: boolean) => void
+  end: (point: { x: number; y: number }, shift: boolean) => void
+}
 
 type Props = {
   pixels: ImageData
   /** Screen edges covered by floating UI, so fitting centres the plan in what is left. */
   insets: { top: number; right: number; bottom: number; left: number }
-  /** Faded image: lets tracing overlays stand out in later steps (0–1). */
+  /** Faded image: lets tracing overlays stand out (0–1). */
   imageOpacity?: number
-  /** Draws tool overlays on top of the image, in screen space, each frame the view changes. */
+  /** Draws tool overlays in screen space whenever the view is redrawn. */
   drawOverlay?: (context: CanvasRenderingContext2D, camera: PlanCamera) => void
+  /** 'pan': dragging moves the plan. 'draw': dragging goes to `stroke` (hold Space to pan). */
+  mode?: 'pan' | 'draw'
+  /** Cursor while drawing: hidden by default (a brush ring replaces it), or e.g. a crosshair. */
+  drawCursor?: string
+  stroke?: StrokeHandlers
+  /** The pointer's position over the plan, for brush previews; null when it leaves. */
+  onHover?: (point: { x: number; y: number } | null) => void
   ref?: Ref<PlanCanvasHandle>
 }
 
@@ -18,17 +32,19 @@ const CLICK_SLOP_PX = 5
 
 /**
  * The floor plan on a pan/zoom canvas (Technical PRD §7 step 3: "pan and zoom all layers
- * together"). Drag to pan, scroll to zoom around the pointer. Zoomed in past 2×, pixels draw
- * crisp so walls can be traced exactly.
+ * together"). Scroll zooms around the pointer. Zoomed in past 2×, pixels draw crisp so walls
+ * can be traced exactly.
  */
-export function PlanCanvas({ pixels, insets, imageOpacity = 1, drawOverlay, ref }: Props) {
+export function PlanCanvas({ pixels, insets, imageOpacity = 1, drawOverlay, mode = 'pan', drawCursor = 'none', stroke, onHover, ref }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const state = useRef<{ camera: PlanCamera | null; fitted: PlanCamera | null; image: HTMLCanvasElement | null; frame: number; moved: boolean }>({
-    camera: null, fitted: null, image: null, frame: 0, moved: false,
+  const state = useRef<{ camera: PlanCamera | null; fitted: PlanCamera | null; image: HTMLCanvasElement | null; frame: number; moved: boolean; space: boolean }>({
+    camera: null, fitted: null, image: null, frame: 0, moved: false, space: false,
   })
-  const props = useRef({ insets, imageOpacity, drawOverlay })
-  props.current = { insets, imageOpacity, drawOverlay }
+  const props = useRef({ insets, imageOpacity, drawOverlay, mode, drawCursor, stroke, onHover })
+  useLayoutEffect(() => {
+    props.current = { insets, imageOpacity, drawOverlay, mode, drawCursor, stroke, onHover }
+  })
 
   const area = (): Area => {
     const host = hostRef.current!
@@ -88,6 +104,7 @@ export function PlanCanvas({ pixels, insets, imageOpacity = 1, drawOverlay, ref 
       draw()
     },
     fit,
+    redraw: draw,
   }))
 
   // A new image: copy it into a canvas once, then fit it to the screen.
@@ -111,43 +128,73 @@ export function PlanCanvas({ pixels, insets, imageOpacity = 1, drawOverlay, ref 
   useEffect(() => {
     const host = hostRef.current!, canvas = canvasRef.current!
     const s = state.current
-    const observer = new ResizeObserver(() => (state.current.moved ? draw() : fit()))
+    const observer = new ResizeObserver(() => (s.moved ? draw() : fit()))
     observer.observe(host)
-    let drag: { x: number; y: number; id: number; travelled: number } | null = null
+    const local = (event: PointerEvent | WheelEvent) => {
+      const bounds = canvas.getBoundingClientRect()
+      return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    }
+    const source = (event: PointerEvent) => (s.camera ? toSource(s.camera, local(event)) : { x: 0, y: 0 })
+    const panning = () => props.current.mode === 'pan' || s.space
+    const setCursor = () => {
+      canvas.style.cursor = panning() ? (drag?.kind === 'pan' && drag.travelled > CLICK_SLOP_PX ? 'grabbing' : 'grab') : props.current.drawCursor
+    }
+    let drag: { kind: 'pan' | 'draw'; x: number; y: number; id: number; travelled: number } | null = null
+
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      const s = state.current
       if (!s.camera || !s.fitted) return
-      const bounds = canvas.getBoundingClientRect()
-      s.camera = zoomPlan(s.camera, s.fitted, { x: event.clientX - bounds.left, y: event.clientY - bounds.top }, event.deltaY < 0 ? 1.12 : 1 / 1.12)
+      s.camera = zoomPlan(s.camera, s.fitted, local(event), event.deltaY < 0 ? 1.12 : 1 / 1.12)
       s.moved = true
       draw()
     }
     const onDown = (event: PointerEvent) => {
       if (event.button !== 0) return
-      drag = { x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0 }
+      const kind = panning() ? 'pan' : 'draw'
+      drag = { kind, x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0 }
       canvas.setPointerCapture(event.pointerId)
+      if (kind === 'draw') props.current.stroke?.start(source(event), event.shiftKey)
     }
     const onMove = (event: PointerEvent) => {
-      if (!drag || drag.id !== event.pointerId || !state.current.camera) return
+      if (s.camera) props.current.onHover?.(source(event))
+      if (!drag || drag.id !== event.pointerId || !s.camera) return
       const dx = event.clientX - drag.x, dy = event.clientY - drag.y
       drag = { ...drag, x: event.clientX, y: event.clientY, travelled: drag.travelled + Math.hypot(dx, dy) }
+      if (drag.kind === 'draw') {
+        props.current.stroke?.move(source(event), event.shiftKey)
+        return
+      }
       if (drag.travelled <= CLICK_SLOP_PX) return
-      state.current.camera = panPlan(state.current.camera, dx, dy)
-      state.current.moved = true
-      canvas.style.cursor = 'grabbing'
+      s.camera = panPlan(s.camera, dx, dy)
+      s.moved = true
+      setCursor()
       draw()
     }
     const onUp = (event: PointerEvent) => {
       if (drag?.id !== event.pointerId) return
+      const finished = drag
       drag = null
-      canvas.style.cursor = ''
+      if (finished.kind === 'draw') props.current.stroke?.end(source(event), event.shiftKey)
+      setCursor()
+    }
+    const onLeave = () => props.current.onHover?.(null)
+    const onEnter = () => setCursor()
+    // Holding Space pans with any tool, as in most drawing apps.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== ' ' || (event.target as HTMLElement | null)?.closest('input, textarea, select, button')) return
+      event.preventDefault()
+      s.space = event.type === 'keydown'
+      setCursor()
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointerup', onUp)
     canvas.addEventListener('pointercancel', onUp)
+    canvas.addEventListener('pointerleave', onLeave)
+    canvas.addEventListener('pointerenter', onEnter)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(s.frame)
@@ -156,9 +203,19 @@ export function PlanCanvas({ pixels, insets, imageOpacity = 1, drawOverlay, ref 
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointerup', onUp)
       canvas.removeEventListener('pointercancel', onUp)
+      canvas.removeEventListener('pointerleave', onLeave)
+      canvas.removeEventListener('pointerenter', onEnter)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKey)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // The cursor follows the tool: a hand for moving, hidden for brushes (the brush ring shows instead).
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (canvas) canvas.style.cursor = mode === 'pan' ? 'grab' : drawCursor
+  }, [mode, drawCursor])
 
   return (
     <div className="editor-canvas" ref={hostRef}>
