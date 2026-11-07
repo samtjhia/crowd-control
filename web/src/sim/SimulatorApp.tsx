@@ -52,6 +52,7 @@ function insetsFor(panels: Panels) {
  */
 const SCENARIOS = scenarios(workedPlan as ScenarioPlan, examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
+const UPLOAD_OPTION = '__upload'
 
 /** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
 function initialScenarioId(): string {
@@ -313,8 +314,13 @@ export default function SimulatorApp() {
         <div className="sim-scenario">
           <label className="sim-scenario-picker">
             <span className="visually-hidden">Scenario</span>
-            <select value={scenarioId} onChange={(event) => chooseScenario(event.target.value)}>
+            <select value={scenarioId} onChange={(event) => {
+              // The last entry opens the floor-plan editor instead of a scenario.
+              if (event.target.value === UPLOAD_OPTION) window.location.assign('/editor')
+              else chooseScenario(event.target.value)
+            }}>
               {SCENARIOS.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              <option value={UPLOAD_OPTION}>Upload a floor plan…</option>
             </select>
             <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
           </label>

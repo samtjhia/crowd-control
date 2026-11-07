@@ -1,11 +1,21 @@
 import { Suspense, lazy } from 'react'
 import App from './App.tsx'
 
-// The simulator lives at /sim and is loaded on demand, so PixiJS stays out of the landing page bundle.
+// The simulator (/sim) and the floor-plan editor (/editor) load on demand, so PixiJS and the
+// editor stay out of the landing page bundle.
 const SimulatorApp = lazy(() => import('./sim/SimulatorApp.tsx'))
+const EditorApp = lazy(() => import('./editor/EditorApp.tsx'))
 
 export default function Root() {
-  if (!window.location.pathname.startsWith('/sim')) return <App />
+  const path = window.location.pathname
+  if (path.startsWith('/editor')) {
+    return (
+      <Suspense fallback={null}>
+        <EditorApp />
+      </Suspense>
+    )
+  }
+  if (!path.startsWith('/sim')) return <App />
   return (
     <Suspense fallback={null}>
       <SimulatorApp />
