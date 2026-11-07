@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, type Ref } from 'react'
 import { fitPlan, panPlan, toSource, zoomPlan, type Area, type PlanCamera } from './planView.ts'
 
-export type PlanCanvasHandle = { zoom: (factor: number) => void; fit: () => void; redraw: () => void }
+export type PlanCanvasHandle = { zoom: (factor: number) => void; fit: () => void; redraw: () => void; camera: () => PlanCamera | null }
 
 /** Pointer input for drawing tools, in source-pixel coordinates. */
 export type StrokeHandlers = {
@@ -105,6 +105,7 @@ export function PlanCanvas({ pixels, insets, imageOpacity = 1, drawOverlay, mode
     },
     fit,
     redraw: draw,
+    camera: () => state.current.camera,
   }))
 
   // A new image: copy it into a canvas once, then fit it to the screen.

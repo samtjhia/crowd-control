@@ -11,7 +11,7 @@ const TOOLS: { id: WallTool; label: string; key: string; Icon: typeof Brush }[] 
  * Step 2: walls. The draft comes from how dark each pixel is; the person checks it and fixes
  * it with brushes (Technical PRD §7 steps 2–4). Red is what people will treat as solid wall.
  */
-export function WallsStep({ walls, fade, onFade, onBack }: { walls: WallEditor; fade: number; onFade: (value: number) => void; onBack: () => void }) {
+export function WallsStep({ walls, fade, onFade, onBack, onNext }: { walls: WallEditor; fade: number; onFade: (value: number) => void; onBack: () => void; onNext: () => void }) {
   return (
     <section className="sim-section">
       <h3>2 · Walls</h3>
@@ -66,7 +66,7 @@ export function WallsStep({ walls, fade, onFade, onBack }: { walls: WallEditor; 
 
       <div className="sim-actions editor-step-nav">
         <button type="button" className="sim-action editor-secondary" onClick={onBack}>Back</button>
-        <button type="button" className="sim-action" disabled title="Setting the scale arrives in the next step">Next: scale</button>
+        <button type="button" className="sim-action" onClick={onNext}>Next: scale</button>
       </div>
     </section>
   )

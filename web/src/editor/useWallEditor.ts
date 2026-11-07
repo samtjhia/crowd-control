@@ -139,7 +139,7 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
   }, [redraw])
 
   /** The red wall overlay, the straight-line preview and the brush ring, over the plan. */
-  const drawOverlay = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera) => {
+  const drawOverlay = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera, options: { brush: boolean } = { brush: true }) => {
     const target = overlay.current
     if (!target) return
     context.imageSmoothingEnabled = camera.scale < 2
@@ -160,7 +160,7 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
       context.stroke()
       context.restore()
     }
-    if (p.hover && toolRef.current !== 'move') {
+    if (options.brush && p.hover && toolRef.current !== 'move') {
       const c = toScreen(camera, p.hover)
       context.save()
       context.lineWidth = 1.5

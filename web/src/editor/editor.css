@@ -134,3 +134,38 @@
 
 .editor .sim-action { display: inline-flex; align-items: center; gap: 6px; }
 .editor-step-nav { justify-content: space-between; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--hair); }
+
+/* ---- Scale ---- */
+
+.editor-distance { display: flex; gap: 8px; }
+
+.editor-distance input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.editor-distance input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.editor-distance .editor-segmented { flex: none; }
+.editor .editor-distance .editor-segmented button { padding: 0 10px; }
+.editor-scale-result { padding: 10px 12px; border-radius: 12px; background: var(--well); }
+
+.editor-warning {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fbf1e1;
+  color: #87561c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.editor-warning svg { flex: none; margin-top: 1px; }
