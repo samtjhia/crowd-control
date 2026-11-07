@@ -112,3 +112,47 @@ test('splitting a million-pixel plan into spaces is fast enough to feel instant'
   const ms = performance.now() - start
   assert.ok(ms < 400, `${ms.toFixed(0)} ms`)
 })
+
+test('"Find rooms" fills every big enough space in one undo step and names edge spaces Outside', () => {
+  // Three spaces: a left room, a right room (split by a doorway), and a strip outside the building.
+  const { blocked, width, height, at } = twoRooms(60, 40)
+  for (let x = 0; x < 60; x++) blocked[at(x, 29)] = 1 // a wall at y 29; below it (y 30–38) is "outside", open to the left edge
+  for (let y = 30; y < 39; y++) blocked[at(0, y)] = 0
+  for (let y = 30; y < 39; y++) blocked[at(30, y)] = 0 // the middle wall stops at y 29
+  const layer = new RoomLayer(width, height)
+  const spaces = partitionFloor(blocked, layer.boundary, width, height, 3)
+  const found = layer.fillAll(spaces, 40)
+  assert.deepEqual(found.map((r) => r.label), ['Room 1', 'Room 2', 'Outside'])
+  assert.deepEqual(found[2]!.tags, ['outside'])
+  assert.equal(layer.roomAt(at(10, 10))?.label, 'Room 1')
+  assert.equal(layer.roomAt(at(50, 10))?.label, 'Room 2')
+  assert.equal(layer.fillAll(spaces, 40).length, 0, 'running it again finds nothing new')
+  layer.undo()
+  assert.equal(layer.rooms.length, 0, 'one undo removes them all')
+  assert.equal(layer.roomAt(at(10, 10)), null)
+})
+
+test('spaces smaller than the minimum are left for the person to decide', () => {
+  const { blocked, width, height } = twoRooms()
+  const layer = new RoomLayer(width, height)
+  const spaces = partitionFloor(blocked, layer.boundary, width, height, 3)
+  assert.equal(layer.fillAll(spaces, 10_000).length, 0)
+})
+
+test('merging two pieces keeps one room with both areas and both sets of tags', () => {
+  const { blocked, width, height, at } = twoRooms()
+  const layer = new RoomLayer(width, height)
+  const spaces = partitionFloor(blocked, layer.boundary, width, height, 3)
+  const [left, right] = layer.fillAll(spaces, 40)
+  layer.toggleTag(right!.id, 'stage')
+  layer.merge(left!.id, right!.id)
+  assert.equal(layer.rooms.length, 1)
+  assert.equal(layer.roomAt(at(50, 10))?.id, left!.id)
+  assert.deepEqual(layer.rooms[0]!.tags, ['stage'])
+  layer.undo()
+  assert.equal(layer.rooms.length, 2, 'undo splits them again')
+  layer.clear()
+  assert.equal(layer.rooms.length, 0)
+  layer.undo()
+  assert.equal(layer.rooms.length, 2, 'and "Remove all" can be undone')
+})

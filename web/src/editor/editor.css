@@ -224,3 +224,5 @@
 .editor-key { display: inline-block; width: 10px; height: 10px; margin: 0 2px -1px 0; border-radius: 3px; }
 .editor-key-wall { background: rgb(220 38 38 / 0.7); }
 .editor-key-object { background: rgb(217 119 6 / 0.65); }
+
+.editor-notice { padding: 8px 10px; border-radius: 10px; background: #eef4fd; color: #234a8a; font-size: 12px; line-height: 1.45; }

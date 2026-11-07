@@ -16,6 +16,7 @@ export function useRoomEditor(plan: LoadedPlan | null, active: boolean, readWall
   const [selected, setSelected] = useState<number | null>(null)
   const [, setVersion] = useState(0)
   const [warning, setWarning] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   /** Openings narrower than this split rooms: metres on scaled plans, pixels otherwise. */
   const [gapMetres, setGapMetres] = useState(1)
   const [gapPixels, setGapPixels] = useState(20)
@@ -91,6 +92,12 @@ export function useRoomEditor(plan: LoadedPlan | null, active: boolean, readWall
     const seed = y * rooms.width + x
     const existing = rooms.roomAt(seed)
     if (existing) {
+      // Shift-clicking another room merges it into the selected one.
+      if (add && selectedRef.current !== null && existing.id !== selectedRef.current) {
+        rooms.merge(selectedRef.current, existing.id)
+        refresh()
+        return
+      }
       setSelected(existing.id)
       return
     }
@@ -153,6 +160,25 @@ export function useRoomEditor(plan: LoadedPlan | null, active: boolean, readWall
     }
   }, [])
 
+  /**
+   * Fills every space at least ~2 m² (or 3% of the image on unscaled plans) in one go.
+   * Spaces touching the plan's edge come out as "Outside", tagged outside.
+   */
+  const findRooms = () => {
+    const rooms = layer.current
+    if (!rooms || !plan) return
+    const space = spaces(gapRef.current)
+    if (!space) return
+    const minPixels = metresPerPixel ? 2 / (metresPerPixel * metresPerPixel) : (Math.min(rooms.width, rooms.height) * 0.03) ** 2
+    const created = rooms.fillAll(space, minPixels)
+    setWarning(null)
+    setSelected(null)
+    setNotice(created.length === 0
+      ? 'No new spaces found. Every enclosed space is already a room, or too small to count.'
+      : `Found ${created.length} ${created.length === 1 ? 'space' : 'spaces'}. Check each one: rename it, Shift-click to merge pieces of one room, and remove anything that isn’t a room.`)
+    refresh()
+  }
+
   const rooms = layer.current?.rooms ?? []
   const sizes = layer.current?.sizes() ?? new Map<number, number>()
   const area = (id: number) => {
@@ -166,7 +192,8 @@ export function useRoomEditor(plan: LoadedPlan | null, active: boolean, readWall
   }
 
   return {
-    tool, setTool, selected, setSelected, warning, gapMetres, setGapMetres, gapPixels, setGapPixels, scaled: metresPerPixel !== null,
+    tool, setTool, selected, setSelected, warning, notice, findRooms,
+    clearAll: () => { act((l) => l.clear()); setSelected(null); setNotice(null) }, gapMetres, setGapMetres, gapPixels, setGapPixels, scaled: metresPerPixel !== null,
     rooms, area, justCreated, clearJustCreated: () => setJustCreated(null),
     rename: (id: number, label: string) => act((l) => l.rename(id, label)),
     toggleTag: (id: number, tag: string) => act((l) => l.toggleTag(id, tag)),

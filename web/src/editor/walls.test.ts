@@ -94,7 +94,7 @@ test('the overlay shows walls in red and everything else clear', () => {
   const out = new Uint8ClampedArray(100 * 40 * 4)
   paintWalls(mask, out)
   const pixel = (x: number, y: number) => [...out.slice((y * 100 + x) * 4, (y * 100 + x) * 4 + 4)]
-  assert.equal(pixel(50, 10)[0], 220)
+  assert.deepEqual(pixel(50, 10).slice(0, 3), [220, 38, 38], 'walls are red')
   assert.ok(pixel(50, 10)[3]! > 0)
   assert.equal(pixel(50, 20)[3], 0)
 })

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Hand, PaintBucket, Redo2, Slash, Trash2, TriangleAlert, Undo2 } from 'lucide-react'
+import { Hand, PaintBucket, Redo2, Slash, Trash2, TriangleAlert, Undo2, Wand2 } from 'lucide-react'
 import { ROOM_TAGS } from './rooms.ts'
 import type { RoomEditor, RoomTool } from './useRoomEditor.ts'
 
@@ -18,8 +18,16 @@ export function RoomsStep({ rooms, onBack, onNext }: { rooms: RoomEditor; onBack
     <section className="sim-section">
       <h3>4 · Rooms</h3>
       <p className="sim-muted">
-        Click inside a space to make it a room, then name it. Only rooms are floor people can use, so fill outdoor areas too if people should go there.
+        Find every space at once, then check them; or click inside a space to make one room. Only rooms are floor people can use, so keep outdoor areas as rooms if people should go there.
       </p>
+
+      <div className="sim-actions">
+        <button type="button" className={`sim-action${rooms.rooms.length > 0 ? ' editor-secondary' : ''}`} onClick={rooms.findRooms}>
+          <Wand2 size={14} aria-hidden="true" /> {rooms.rooms.length > 0 ? 'Find more rooms' : 'Find rooms'}
+        </button>
+        {rooms.rooms.length > 0 && <button type="button" className="sim-action editor-secondary" onClick={rooms.clearAll}>Remove all</button>}
+      </div>
+      {rooms.notice && <p className="editor-notice" role="status">{rooms.notice}</p>}
 
       <div className="editor-segmented" role="radiogroup" aria-label="Room tool">
         {TOOLS.map(({ id, label, key, Icon }) => (
@@ -60,7 +68,7 @@ export function RoomsStep({ rooms, onBack, onNext }: { rooms: RoomEditor; onBack
         <button type="button" className="sim-action editor-secondary" onClick={rooms.undo} disabled={!rooms.canUndo}><Undo2 size={14} aria-hidden="true" /> Undo</button>
         <button type="button" className="sim-action editor-secondary" onClick={rooms.redo} disabled={!rooms.canRedo}><Redo2 size={14} aria-hidden="true" /> Redo</button>
       </div>
-      <p className="editor-hint">Click a room to select it. Shift-click another space to add it to the selected room. Hold Space to move the plan.</p>
+      <p className="editor-hint">Click a room to select it. Shift-click another room or space to merge it into the selected room. Hold Space to move the plan.</p>
 
       <div className="sim-actions editor-step-nav">
         <button type="button" className="sim-action editor-secondary" onClick={onBack}>Back</button>

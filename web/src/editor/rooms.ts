@@ -139,14 +139,7 @@ export class RoomLayer {
     if (changes.length === 0) return null
     const roomsBefore = this.rooms.map((r) => ({ ...r, tags: [...r.tags] }))
     for (const [i] of changes) this.labels[i] = id
-    // Split-line pixels next to the new room become part of it.
-    for (let i = 0; i < this.boundary.length; i++) {
-      if (!this.boundary[i] || this.labels[i] !== 0) continue
-      const x = i % this.width
-      const touches = (x > 0 && this.labels[i - 1] === id) || (x < this.width - 1 && this.labels[i + 1] === id)
-        || (i >= this.width && this.labels[i - this.width] === id) || (i < this.labels.length - this.width && this.labels[i + this.width] === id)
-      if (touches) { this.labels[i] = id; changes.push([i, 0]) }
-    }
+    this.absorbSeams(changes)
     let result = room
     if (!result) {
       result = { id, label: `Room ${this.rooms.length + 1}`, tags: [], color: ROOM_COLORS[(id - 1) % ROOM_COLORS.length]! }
@@ -155,6 +148,85 @@ export class RoomLayer {
     }
     this.record({ labels: changes, boundary: [], rooms: roomsBefore })
     return result
+  }
+
+  /**
+   * "Find rooms": fills every space of at least `minPixels` that isn't a room yet, in one undo
+   * step. Spaces touching the edge of the image are named "Outside" and tagged outside (yards,
+   * streets, the page around the building); the person reviews, renames and merges the rest.
+   */
+  fillAll(space: Int32Array, minPixels: number): Room[] {
+    const size = new Map<number, number>()
+    const edge = new Set<number>()
+    for (let i = 0; i < space.length; i++) {
+      const s = space[i]!
+      if (s < 0 || this.labels[i] !== 0) continue
+      size.set(s, (size.get(s) ?? 0) + 1)
+      const x = i % this.width
+      if (x === 0 || x === this.width - 1 || i < this.width || i >= space.length - this.width) edge.add(s)
+    }
+    const before = this.rooms.map((r) => ({ ...r, tags: [...r.tags] }))
+    const created: Room[] = []
+    const roomFor = new Map<number, number>()
+    let insides = this.rooms.filter((r) => !r.tags.includes('outside')).length
+    let outsides = this.rooms.length - insides
+    const changes: [number, number][] = []
+    // Rooms are numbered in reading order (top to bottom, left to right).
+    for (let i = 0; i < space.length; i++) {
+      const s = space[i]!
+      if (s < 0 || this.labels[i] !== 0 || (size.get(s) ?? 0) < minPixels) continue
+      let id = roomFor.get(s)
+      if (id === undefined) {
+        id = this.nextId++
+        roomFor.set(s, id)
+        const outside = edge.has(s)
+        const n = outside ? ++outsides : ++insides
+        const room: Room = {
+          id, label: outside ? (n === 1 ? 'Outside' : `Outside ${n}`) : `Room ${n}`,
+          tags: outside ? ['outside'] : [], color: ROOM_COLORS[(id - 1) % ROOM_COLORS.length]!,
+        }
+        created.push(room)
+      }
+      this.labels[i] = id
+      changes.push([i, 0])
+    }
+    if (created.length === 0) return []
+    this.absorbSeams(changes)
+    this.rooms = [...this.rooms, ...created]
+    this.record({ labels: changes, boundary: [], rooms: before })
+    return created
+  }
+
+  /** Merges room `from` into room `into` (two pieces of one space, for example). */
+  merge(into: number, from: number) {
+    if (into === from || !this.rooms.some((r) => r.id === into)) return
+    const changes: [number, number][] = []
+    for (let i = 0; i < this.labels.length; i++) if (this.labels[i] === from) { changes.push([i, from]); this.labels[i] = into }
+    const before = this.rooms.map((r) => ({ ...r, tags: [...r.tags] }))
+    const absorbed = this.rooms.find((r) => r.id === from)
+    this.rooms = this.rooms.filter((r) => r.id !== from).map((r) => (r.id === into && absorbed ? { ...r, tags: [...new Set([...r.tags, ...absorbed.tags])] } : r))
+    this.record({ labels: changes, boundary: [], rooms: before })
+  }
+
+  /** Removes every room (one undo step), e.g. to try "Find rooms" again with another setting. */
+  clear() {
+    const changes: [number, number][] = []
+    for (let i = 0; i < this.labels.length; i++) if (this.labels[i]) { changes.push([i, this.labels[i]!]); this.labels[i] = 0 }
+    if (changes.length === 0 && this.rooms.length === 0) return
+    const before = this.rooms.map((r) => ({ ...r, tags: [...r.tags] }))
+    this.rooms = []
+    this.record({ labels: changes, boundary: [], rooms: before })
+  }
+
+  /** Split-line pixels next to newly labelled pixels join that room, so rooms meet without a seam. */
+  private absorbSeams(changes: [number, number][]) {
+    const { width, labels, boundary } = this
+    for (let i = 0; i < boundary.length; i++) {
+      if (!boundary[i] || labels[i] !== 0) continue
+      const x = i % width
+      const id = (x > 0 && labels[i - 1]) || (x < width - 1 && labels[i + 1]) || (i >= width && labels[i - width]) || (i < labels.length - width && labels[i + width]) || 0
+      if (id) { labels[i] = id; changes.push([i, 0]) }
+    }
   }
 
   /** Draws a split line: it separates spaces for filling but is never a wall. */
