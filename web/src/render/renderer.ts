@@ -3,7 +3,8 @@ import type { AgentState, Camera, RenderAgentMetadata, RenderScene, Shape, Vec2 
 import type { SimulationClient } from '../worker/simulationClient.ts'
 import { HAIR_TONES, SKIN_TONES, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, type AgentDrawMode } from './agentStyle.ts'
 import { FigureAtlas, type FigurePose } from './figureAtlas.ts'
-import { fitCamera, panBy, worldToScreen, zoomAt } from './camera.ts'
+import { fitCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera.ts'
+import { pickAt, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
 import { displayPositions } from './interpolate.ts'
 import { COLORS, layoutMap, type MapLayout } from './mapLayout.ts'
 
@@ -57,6 +58,12 @@ const INSET_TWEEN_MS = 360
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3)
 
 const DEFAULT_FONT = 'system-ui, sans-serif'
+/** A press that moves less than this is a click, not a pan. */
+const CLICK_SLOP_PX = 5
+/** Extra reach around small targets (people, doors), in screen pixels. */
+const PICK_SLOP_PX = 6
+/** Selection accent: a blue no scenario uses, so it reads as "selected" against sage, pastel and agent colours. */
+const SELECTION = { color: '#2F6FEB', width: 2, glowWidth: 9, glowAlpha: 0.22, tintAlpha: 0.16 }
 
 /**
  * PixiJS bird's-eye renderer (Technical PRD §12). Reads the SimulationClient view on every
@@ -101,6 +108,14 @@ export class CrowdRenderer {
   private tween: { from: Camera; start: number } | null = null
   private atlasGeneration = 0
   private readonly font: string
+  /** World positions drawn on the last frame, so clicks hit what the user sees. */
+  private positions = new Map<string, Vec2>()
+  private pickable: readonly PickKind[] = []
+  private readonly pickListeners = new Set<(pick: Pick | null) => void>()
+  private selection: Pick | null = null
+  private readonly selectionMark = new Graphics()
+  /** The selected room's floor strips, cached until the scene or selection changes. */
+  private selectedFloor: { scene: RenderScene; id: string; strips: { x: number; y: number; width: number; height: number }[] } | null = null
 
   static async create(host: HTMLElement, client: SimulationClient, options: RendererOptions = {}): Promise<CrowdRenderer> {
     const app = new Application()
@@ -129,7 +144,7 @@ export class CrowdRenderer {
     this.hostObserver.observe(host)
     const { floor, heatmap, structures, mapLabels, agents, annotations, labels } = this.layers
     this.mapRoot.addChild(floor, heatmap, structures, mapLabels)
-    app.stage.addChild(this.mapRoot, agents, annotations, labels)
+    app.stage.addChild(this.mapRoot, agents, this.selectionMark, annotations, labels)
     this.detachInput = this.attachPointerInput(app.canvas)
     app.ticker.add(() => this.draw())
   }
@@ -188,6 +203,31 @@ export class CrowdRenderer {
     this.refit(false, true)
   }
 
+  /** Which kinds of thing a click can pick; the cursor shows a hand over them. Empty disables picking. */
+  setPickable(kinds: readonly PickKind[]) {
+    this.pickable = [...kinds]
+  }
+
+  /** Notified with what was clicked (null for empty floor or wall). Dragging never counts as a click. */
+  onPick(listener: (pick: Pick | null) => void): () => void {
+    this.pickListeners.add(listener)
+    return () => {
+      this.pickListeners.delete(listener)
+    }
+  }
+
+  /** Outlines the selected person, door or room; null clears it. */
+  setSelection(pick: Pick | null) {
+    this.selection = pick
+  }
+
+  /** What is under a screen point (canvas pixels), among the pickable kinds. */
+  pickAtScreen(point: Vec2): Pick | null {
+    if (!this.scene || this.pickable.length === 0) return null
+    const frame = this.client.getView().current?.frame ?? null
+    return pickAt(this.scene, frame, this.positions, screenToWorld(this.camera, point), PICK_SLOP_PX / this.camera.pixelsPerUnit, this.pickable)
+  }
+
   /** Current camera, for DOM overlays positioned in world coordinates. */
   getCamera(): Camera {
     return this.camera
@@ -204,6 +244,7 @@ export class CrowdRenderer {
   destroy() {
     this.hostObserver.disconnect()
     this.cameraListeners.clear()
+    this.pickListeners.clear()
     this.atlas.clear()
     this.detachInput()
     this.app.destroy(true, { children: true })
@@ -230,6 +271,7 @@ export class CrowdRenderer {
       this.redrawMap()
     }
     if (view.current) this.drawAgents(view.previous, view.current)
+    this.drawSelection()
   }
 
   private acceptScene(scene: RenderScene | null) {
@@ -420,6 +462,7 @@ export class CrowdRenderer {
     const generation = this.atlas.generation
     if (generation !== this.atlasGeneration) for (const view of this.agentViews.values()) view.mode = null
     const positions = displayPositions(previous, current, now)
+    this.positions = positions
     const ppu = this.camera.pixelsPerUnit
     const seen = new Set<string>()
     for (const agent of current.frame.agents) {
@@ -573,6 +616,52 @@ export class CrowdRenderer {
     view.label?.destroy()
   }
 
+  /**
+   * Selection in one accent colour used nowhere else on the map: a ring with a soft glow
+   * around a person, a glowing outline around a door, and a light tint over a room's floor.
+   */
+  private drawSelection() {
+    const mark = this.selectionMark
+    mark.clear()
+    const pick = this.selection
+    if (!pick || !this.scene) return
+    const ppu = this.camera.pixelsPerUnit
+    if (pick.kind === 'agent') {
+      const at = this.positions.get(pick.id)
+      const view = this.agentViews.get(pick.id)
+      if (!at || !view) return
+      const centre = worldToScreen(this.camera, at)
+      const radius = Math.max(view.radiusPx, view.topPx * 0.6) + 4
+      mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
+      mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.width, color: SELECTION.color })
+      return
+    }
+    if (pick.kind === 'portal') {
+      const rect = portalRects(this.scene).find((r) => r.id === pick.id)
+      if (!rect) return
+      const corner = worldToScreen(this.camera, rect)
+      const outline = () => mark.roundRect(corner.x - 3, corner.y - 3, rect.width * ppu + 6, rect.height * ppu + 6, 4)
+      outline().stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
+      outline().stroke({ width: SELECTION.width, color: SELECTION.color })
+      return
+    }
+    if (this.selectedFloor?.scene !== this.scene || this.selectedFloor.id !== pick.id) {
+      this.selectedFloor = { scene: this.scene, id: pick.id, strips: zoneStrips(this.scene, pick.id) }
+    }
+    for (const strip of this.selectedFloor.strips) {
+      const corner = worldToScreen(this.camera, strip)
+      // Strips overlap by a fraction of a pixel so the tint has no seams between rows.
+      mark.rect(corner.x, corner.y, strip.width * ppu, strip.height * ppu + 0.5)
+    }
+    mark.fill({ color: SELECTION.color, alpha: SELECTION.tintAlpha })
+    // Rectangular rooms also get a border; on grid maps the tinted cells already show the shape.
+    const room = this.scene.map.rooms.find((r) => r.id === pick.id)
+    if (room && !('grid' in this.scene.map && this.scene.map.grid)) {
+      const corner = worldToScreen(this.camera, room)
+      mark.rect(corner.x, corner.y, room.width * ppu, room.height * ppu).stroke({ width: SELECTION.width, color: SELECTION.color, alpha: 0.8 })
+    }
+  }
+
   private clearAgents() {
     for (const view of this.agentViews.values()) this.destroyAgentView(view)
     this.agentViews.clear()
@@ -581,23 +670,47 @@ export class CrowdRenderer {
   // ---------------------------------------------------------------- input
 
   private attachPointerInput(canvas: HTMLCanvasElement): () => void {
-    let dragging: { x: number; y: number; id: number } | null = null
+    let dragging: { x: number; y: number; id: number; travelled: number } | null = null
+    const local = (event: PointerEvent) => {
+      const bounds = canvas.getBoundingClientRect()
+      return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    }
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       const bounds = canvas.getBoundingClientRect()
       this.zoomAround({ x: event.clientX - bounds.left, y: event.clientY - bounds.top }, event.deltaY < 0 ? 1.1 : 1 / 1.1)
     }
     const onDown = (event: PointerEvent) => {
-      dragging = { x: event.clientX, y: event.clientY, id: event.pointerId }
+      if (event.button !== 0) return
+      dragging = { x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0 }
       canvas.setPointerCapture(event.pointerId)
     }
     const onMove = (event: PointerEvent) => {
-      if (!dragging || dragging.id !== event.pointerId) return
-      this.pan({ x: event.clientX - dragging.x, y: event.clientY - dragging.y })
-      dragging = { ...dragging, x: event.clientX, y: event.clientY }
+      if (!dragging || dragging.id !== event.pointerId) {
+        // Hovering: a hand over anything a click would act on.
+        if (event.pointerType === 'mouse') canvas.style.cursor = this.pickAtScreen(local(event)) ? 'pointer' : ''
+        return
+      }
+      const dx = event.clientX - dragging.x, dy = event.clientY - dragging.y
+      const travelled = dragging.travelled + Math.hypot(dx, dy)
+      // Small jitters during a click don't pan; past the slop the whole drag pans.
+      if (travelled > CLICK_SLOP_PX) {
+        this.pan({ x: dx, y: dy })
+        dragging = { ...dragging, x: event.clientX, y: event.clientY, travelled }
+        canvas.style.cursor = 'grabbing'
+      } else {
+        dragging = { ...dragging, travelled }
+      }
     }
     const onUp = (event: PointerEvent) => {
-      if (dragging?.id === event.pointerId) dragging = null
+      if (dragging?.id !== event.pointerId) return
+      const click = dragging.travelled <= CLICK_SLOP_PX && event.type === 'pointerup'
+      dragging = null
+      canvas.style.cursor = ''
+      if (click && this.pickable.length > 0) {
+        const pick = this.pickAtScreen(local(event))
+        for (const listener of this.pickListeners) listener(pick)
+      }
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('pointerdown', onDown)

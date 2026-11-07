@@ -278,6 +278,35 @@
 .sim .sim-draw-mode button:hover { color: var(--text); }
 .sim .sim-draw-mode button[aria-checked='true'] { background: var(--well-strong); color: var(--text); font-weight: 600; }
 
+/* Map tools mirror the People/Markers switch, at the map's top-left corner. */
+.sim-tools {
+  top: calc(var(--gap) * 2 + var(--top-h));
+  left: var(--inset-l);
+  display: flex;
+  padding: 3px;
+  border-radius: 11px;
+  transition: left var(--slide) var(--ease);
+}
+
+.sim .sim-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.sim .sim-tools button:hover { color: var(--text); }
+.sim .sim-tools button[aria-checked='true'] { background: var(--green); color: #ffffff; font-weight: 600; }
+.sim .sim-tools button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
 .sim-zoom {
   right: var(--inset-r);
   bottom: calc(var(--gap) * 2 + var(--bottom-h));
@@ -591,6 +620,41 @@
   font-weight: 500;
 }
 
+/* ---- Selection and changes ---- */
+
+.sim-selected { display: grid; gap: 10px; }
+.sim-selected-name { font-weight: 600; }
+.sim-facts { display: grid; gap: 4px; }
+.sim-facts div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 10px; }
+.sim-facts dt { color: var(--muted); }
+
+.sim .sim-action {
+  justify-self: start;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms ease-out;
+}
+
+.sim .sim-action:hover { background: var(--green-hover); }
+.sim .sim-action:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+.sim-changes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.sim-changes li:last-child { border-bottom: 0; }
+.sim-changes time { flex: none; color: var(--faint); font-size: 11px; }
+
 /* ---- Legend ---- */
 
 .sim-legend summary { display: flex; align-items: center; gap: 8px; margin-bottom: 0; list-style: none; cursor: pointer; }
@@ -644,6 +708,8 @@
   .sim-playback { flex-wrap: wrap; gap: 6px 12px; height: auto; padding: 10px 14px; }
   .timeline { flex-basis: 100%; padding-top: 2px; }
   .sim-zoom { bottom: 150px; }
+  .sim .sim-tools button span { display: none; }
+  .sim .sim-tools button { padding: 0 9px; }
 }
 
 @media (max-width: 520px) {

@@ -16,7 +16,13 @@ import { PlanSigns } from './PlanSigns.tsx'
 import { StatusIcon } from './StatusIcon.tsx'
 import { Timeline } from './Timeline.tsx'
 import { formatClock, toIncidents, type Incident } from './incidents.ts'
+import type { Pick, PickKind } from '../render/hitTest.ts'
+import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
+import { actionFor, type MapAction } from './mapActions.ts'
 import { describeScenario, scenarios, startScenario } from './scenario.ts'
+
+/** What each tool can click: Select anything, Trip people, Doors doors. */
+const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -121,10 +127,42 @@ export default function SimulatorApp() {
   const chooseScenario = (id: string) => {
     setScenarioId(id)
     setLayoutSeed(null)
+    setSelection(null)
     rememberScenario(id)
   }
   /** Same description, a different building: the plan's seed first, then the next seeds in turn. */
-  const nextLayout = () => setLayoutSeed((seed) => (seed === null ? scenario.plan.seed : (seed + 1) >>> 0))
+  const nextLayout = () => {
+    setLayoutSeed((seed) => (seed === null ? scenario.plan.seed : (seed + 1) >>> 0))
+    setSelection(null)
+  }
+
+  // Map tools: Select inspects; Trip and Doors change the simulation with one click.
+  const [tool, setTool] = useState<MapTool>('select')
+  const [selection, setSelection] = useState<Pick | null>(null)
+  const toolRef = useRef(tool)
+  /** Applies a map action as a follow-up request; failures show in the event log. */
+  const applyAction = (action: MapAction) => void client.apply(action.label, action.operations)
+  /** What a click on the map does with the current tool. Read through a ref by the renderer. */
+  const onPickRef = useRef<(pick: Pick | null) => void>(() => {})
+  useEffect(() => {
+    onPickRef.current = (pick) => {
+      setSelection(pick)
+      const current = client.getView()
+      if (!pick || toolRef.current === 'select' || !current.scene) return
+      const action = actionFor(toolRef.current, current.scene, current.current?.frame ?? null, pick.kind, pick.id)
+      if (action) void client.apply(action.label, action.operations)
+    }
+  }, [client])
+
+  useEffect(() => {
+    toolRef.current = tool
+    rendererRef.current?.setPickable(PICKABLE[tool])
+  }, [tool])
+
+  useEffect(() => {
+    rendererRef.current?.setSelection(selection)
+  }, [selection])
+
 
   useEffect(() => {
     // A plan that fails to compile never reaches the worker; its error shows in the event log.
@@ -140,6 +178,7 @@ export default function SimulatorApp() {
     let cancelled = false
     let renderer: CrowdRenderer | null = null
     let stopCamera = () => {}
+    let stopPick = () => {}
     void CrowdRenderer.create(host, client, { fontFamily: MAP_FONT, zoneTint: 0.4, paddingPx: 40, agentDrawMode: drawModeRef.current }).then((created) => {
       if (cancelled) {
         created.destroy()
@@ -148,11 +187,14 @@ export default function SimulatorApp() {
       renderer = created
       rendererRef.current = created
       stopCamera = created.onCameraChange(setCamera)
+      stopPick = created.onPick((pick) => onPickRef.current(pick))
+      created.setPickable(PICKABLE[toolRef.current])
       if (panelsRef.current) created.setInsets(insetsFor(panelsRef.current))
     })
     return () => {
       cancelled = true
       stopCamera()
+      stopPick()
       renderer?.destroy()
       rendererRef.current = null
     }
@@ -188,8 +230,11 @@ export default function SimulatorApp() {
           case '[': setPanels((p) => ({ ...p, left: !p.left })); return true
           case ']': setPanels((p) => ({ ...p, right: !p.right })); return true
           case '\\': setPanels((p) => { const open = !(p.left || p.right); return { left: open, right: open } }); return true
+          case 'v': case 'V': setTool('select'); return true
+          case 'f': case 'F': setTool('trip'); return true
+          case 'd': case 'D': setTool('doors'); return true
           case 'Escape':
-            if (window.innerWidth >= WIDE) return false
+            if (window.innerWidth >= WIDE) { setSelection(null); return true }
             setPanels({ left: false, right: false })
             return true
           case '+': case '=': renderer?.zoom(1.25); return true
@@ -243,6 +288,8 @@ export default function SimulatorApp() {
         {view.endpointKind === 'mock' && <p className="sim-tag" title="Driven by the development mock worker, not the simulation engine">Mock data</p>}
       </header>
 
+      <MapToolbar tool={tool} onTool={setTool} />
+
       <div className="sim-float sim-draw-mode" role="radiogroup" aria-label="Show people as">
         {(['people', 'markers'] as const).map((mode) => (
           <button key={mode} type="button" role="radio" aria-checked={drawMode === mode} onClick={() => setDrawMode(mode)}>
@@ -270,6 +317,9 @@ export default function SimulatorApp() {
 
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
         <Overview view={view} />
+        <Section title="Selected">
+          <SelectionDetails selection={selection} view={view} onAction={applyAction} />
+        </Section>
         <Section title="Density">
           <p className="sim-muted">
             {view.scene?.map.units === 'm'
@@ -279,7 +329,7 @@ export default function SimulatorApp() {
         </Section>
         <EventLog incidents={incidents} error={view.lastError} />
         <Section title="Changes">
-          <p className="sim-muted">No changes yet. Changes from the assistant or the map are listed here with edit and undo.</p>
+          <ChangesList changes={view.changes} />
         </Section>
         <Legend />
       </SidePanel>
