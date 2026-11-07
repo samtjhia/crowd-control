@@ -2,6 +2,9 @@ import { Container, Graphics, type Renderer, type Texture } from 'pixi.js'
 
 export type FigurePose = 'stand' | 'stepA' | 'stepB' | 'fallen'
 
+/** How a person is drawn beyond colour, so a crowd reads as mixed. Presentation only: never size or speed. */
+export type FigureLook = { hair: 'short' | 'long' | 'bun' | 'ponytail'; outfit: 'trousers' | 'skirt' }
+
 export type FigureTexture = {
   texture: Texture
   /** Sprite anchor that puts the person's torso on their simulated position. */
@@ -11,7 +14,8 @@ export type FigureTexture = {
   height: number
 }
 
-const MAX_TEXTURES = 300
+/** Colours × skin × hair × look × pose can reach ~800 figures per size; each is a few KB. */
+const MAX_TEXTURES = 2000
 /** Figure heights snap to ~12% steps so zooming reuses textures instead of minting new ones. */
 const SIZE_STEP = 1.12
 
@@ -37,9 +41,9 @@ export class FigureAtlas {
     this.renderer = renderer
   }
 
-  get(body: string, skin: string, hair: string, pose: FigurePose, heightPx: number): FigureTexture {
+  get(body: string, skin: string, hair: string, look: FigureLook, pose: FigurePose, heightPx: number): FigureTexture {
     const size = bucket(heightPx)
-    const key = `${body}|${skin}|${hair}|${pose}|${size}`
+    const key = `${body}|${skin}|${hair}|${look.hair}|${look.outfit}|${pose}|${size}`
     const hit = this.cache.get(key)
     if (hit) return hit
     if (this.cache.size >= MAX_TEXTURES) {
@@ -48,7 +52,7 @@ export class FigureAtlas {
       this.cache.clear()
       this.generation++
     }
-    const made = this.draw(body, skin, hair, pose, size)
+    const made = this.draw(body, skin, hair, look, pose, size)
     this.cache.set(key, made)
     return made
   }
@@ -65,7 +69,7 @@ export class FigureAtlas {
     this.cache.clear()
   }
 
-  private draw(body: string, skin: string, hair: string, pose: FigurePose, size: number): FigureTexture {
+  private draw(body: string, skin: string, hair: string, look: FigureLook, pose: FigurePose, size: number): FigureTexture {
     // Figure units: feet at y=0, top of the hair at about y=-15 (16 units tall).
     const scale = size / 16
     const step = pose === 'stepA' ? 1 : pose === 'stepB' ? -1 : 0
@@ -76,8 +80,14 @@ export class FigureAtlas {
     g.moveTo(-2.5, -9).lineTo(-3.2 + step, -5.5).moveTo(2.5, -9).lineTo(3.2 - step, -5.5)
       .stroke({ width: 1.5, color: skin, cap: 'round' })
     g.roundRect(-2.6, -10, 5.2, 6.8, 2).fill(body)
+    // A skirt or dress flares out over the tops of the legs, in the outfit colour.
+    if (look.outfit === 'skirt') g.poly([-2.6, -5.6, 2.6, -5.6, 3.5 - step * 0.3, -2.1, -3.5 - step * 0.3, -2.1]).fill(body)
+    // Hair that sits behind the head is drawn before it: long hair to the shoulders, a ponytail.
+    if (look.hair === 'long') g.roundRect(-2.55, -14.7, 5.1, 6.1, 2.4).fill(hair)
+    if (look.hair === 'ponytail') g.ellipse(2.5, -12.2, 0.95, 1.9).fill(hair)
     g.circle(0, -12.4, 2.2).fill(skin)
     g.ellipse(-0.2, -13.6, 2.15, 1.2).fill(hair)
+    if (look.hair === 'bun') g.circle(0, -15.1, 1.25).fill(hair)
     g.scale.set(scale)
 
     const holder = new Container()

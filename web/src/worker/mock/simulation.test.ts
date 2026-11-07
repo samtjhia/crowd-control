@@ -170,6 +170,22 @@ test('a closed door blocks the only route instead of being walked through', () =
   assert.ok(lastFrame(send(sim, { type: 'run_to', time: 80 })).agents.every((agent) => agent.state === 'departed'), 'reopening lets everyone out')
 })
 
+test('people blocked by a closed exit gather at it instead of freezing where they were', () => {
+  const { sim } = loaded()
+  send(sim, { type: 'apply_request', request: request('shut-exit', [{ op: 'set', targets: { ids: ['exit'] }, values: { components: { portal: { open: false } } } }]) })
+  const frame = lastFrame(send(sim, { type: 'run_to', time: 50 }))
+  // The exit is the doorway at x 17-18, y 2-4; the foyer is x 12-17 on its near side.
+  for (const agent of frame.agents) {
+    assert.equal(agent.state, 'blocked', agent.id)
+    assert.ok(agent.x >= 12 && agent.x < 17, `${agent.id} waits in the foyer, at x ${agent.x}`)
+    assert.ok(Math.hypot(agent.x - 17.5, agent.y - 3) < 5, `${agent.id} waits near the exit`)
+  }
+  const spots = new Set(frame.agents.map((agent) => `${agent.x.toFixed(2)},${agent.y.toFixed(2)}`))
+  assert.ok(spots.size >= frame.agents.length - 1, 'they cluster rather than stack on one point')
+  send(sim, { type: 'apply_request', request: request('open-exit', [{ op: 'set', targets: { ids: ['exit'] }, values: { components: { portal: { open: true } } } }]) })
+  assert.ok(lastFrame(send(sim, { type: 'run_to', time: 80 })).agents.every((agent) => agent.state === 'departed'), 'reopening lets everyone out')
+})
+
 test('reset starts a new stream from the initial definition', () => {
   const { sim, messages } = loaded()
   send(sim, { type: 'run_to', time: 12 })

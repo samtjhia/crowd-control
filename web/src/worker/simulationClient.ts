@@ -1,5 +1,6 @@
 import {
   SCHEMA_VERSION,
+  type ApplyAck,
   type CompileOutput,
   type ContractError,
   type DensityGrid,
@@ -7,13 +8,18 @@ import {
   type Frame,
   type HistoryState,
   type MetricSample,
+  type Operation,
   type RenderScene,
   type WorkerCommand,
   type WorkerEndpoint,
   type WorkerMessage,
+  type Result,
 } from '@crowd-control/contract'
 
 export type TimedFrame = { frame: Frame; receivedAt: number }
+
+/** A change applied to this run (a fall, a door, later chat edits), newest last. */
+export type AppliedChange = { interventionId: string; label: string; at: number }
 
 /** Immutable snapshot of what the screen should show. A new object is created on every change. */
 export type SimulationView = {
@@ -31,6 +37,8 @@ export type SimulationView = {
   playing: boolean
   speed: number
   lastError: ContractError | null
+  /** Changes applied in this stream; cleared when a new stream starts (load or reset). */
+  changes: AppliedChange[]
 }
 
 export type CommandBody = WorkerCommand extends infer C
@@ -59,6 +67,7 @@ export class SimulationClient {
   private readonly pending = new Map<string, { type: CommandBody['type']; multiplier?: number; resolve: (message: WorkerMessage) => void }>()
   private readonly detach: () => void
   private nextCommand = 1
+  private nextRequest = 1
   private view: SimulationView
 
   constructor(endpoint: WorkerEndpoint, now: () => number = () => performance.now()) {
@@ -66,7 +75,7 @@ export class SimulationClient {
     this.now = now
     this.view = {
       endpointKind: endpoint.kind, simulationId: null, streamId: null, scene: null, sceneVersion: 0, historyRevision: 0,
-      current: null, previous: null, metrics: null, density: null, events: [], playing: false, speed: 1, lastError: null,
+      current: null, previous: null, metrics: null, density: null, events: [], playing: false, speed: 1, lastError: null, changes: [],
     }
     this.detach = endpoint.subscribe((message) => this.receive(message))
   }
@@ -86,6 +95,21 @@ export class SimulationClient {
   }
   /** Shows an error that happened before the worker was involved, e.g. a plan that failed to compile. */
   reportError(error: ContractError) { this.update({ lastError: error }) }
+  /**
+   * Applies a change now as a follow-up request (the same path chat edits use). On success it
+   * joins `changes`; on failure the error is returned and shown as `lastError`.
+   */
+  async apply(label: string, operations: Operation[]): Promise<Result<ApplyAck>> {
+    const simulationId = this.view.simulationId
+    if (!simulationId) return { ok: false, error: { code: 'NOT_FOUND', message: 'No simulation is loaded' } }
+    const requestId = `ui-${this.nextRequest++}-${Math.random().toString(36).slice(2, 8)}`
+    const reply = await this.command({ type: 'apply_request', request: { schemaVersion: SCHEMA_VERSION, simulationId, requestId, label, operations } })
+    if (reply.type === 'error') return { ok: false, error: reply.error }
+    if (reply.type !== 'ack' || !reply.applied) return { ok: false, error: { code: 'INVALID_SCHEMA', message: 'The worker did not confirm the change' } }
+    const { interventionId, at } = reply.applied
+    this.update({ lastError: null, changes: [...this.view.changes, { interventionId, label, at }] })
+    return { ok: true, value: reply.applied }
+  }
   play() { return this.command({ type: 'resume' }) }
   pause() { return this.command({ type: 'pause' }) }
   step(ticks = 1) { return this.command({ type: 'step', ticks }) }
@@ -152,7 +176,9 @@ export class SimulationClient {
     if (this.retired.has(streamId)) return
     if (streamId !== this.view.streamId) {
       if (this.view.streamId) this.retired.add(this.view.streamId)
-      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [] })
+      // A new stream (load or reset) has its own history: a reset goes back to the initial
+      // revision, so the old stream's higher revision must not make its frames look stale.
+      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [], historyRevision })
     } else if (sceneVersion < this.view.sceneVersion) {
       return
     }

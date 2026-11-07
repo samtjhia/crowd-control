@@ -68,6 +68,16 @@ export const GROUP_PALETTE = {
 export const SKIN_TONES = ['#D6A37C', '#9E6A4B', '#E6BC99', '#77513E'] as const
 export const HAIR_TONES = ['#303C31', '#564639'] as const
 
+const HAIRSTYLES = ['short', 'long', 'bun', 'ponytail'] as const
+
+/** A stable mix of hairstyles and outfits picked from the person's ID, so the same person always looks the same. */
+export function figureLook(id: string): { hair: (typeof HAIRSTYLES)[number]; outfit: 'trousers' | 'skirt' } {
+  return {
+    hair: HAIRSTYLES[stableIndex(`${id}-hairstyle`, HAIRSTYLES.length)]!,
+    outfit: stableIndex(`${id}-outfit`, 3) === 0 ? 'skirt' : 'trousers',
+  }
+}
+
 function hue(hex: string): { h: number; s: number } | null {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
   if (!m) return null

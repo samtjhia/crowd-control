@@ -92,3 +92,26 @@ test('frames wait for their scene, and stale streams or history revisions are dr
   assert.equal(client.getView().current?.frame.tick, 5, 'superseded history revision ignored')
   client.dispose()
 })
+
+test('reset after changes shows the fresh run instead of waiting forever', async () => {
+  const client = new SimulationClient(createMockEndpoint({ clock: idleClock }))
+  await client.load(compiled)
+  await flush()
+  for (const id of ['a1', 'a2', 'a3']) {
+    const applied = await client.apply(`${id} falls`, [{ op: 'set', targets: { ids: [id] }, values: { components: { mobility: { speedMultiplier: 0 } } } }])
+    assert.equal(applied.ok, true)
+  }
+  await client.step(5)
+  await flush()
+  assert.equal(client.getView().historyRevision, 3)
+
+  await client.reset()
+  await flush()
+  const view = client.getView()
+  assert.ok(view.current, 'the reset run has a frame (the bug left this null: "Loading the venue…")')
+  assert.equal(view.current.frame.tick, 0)
+  assert.equal(view.historyRevision, 0)
+  await client.step(2)
+  await flush()
+  assert.equal(client.getView().current?.frame.tick, 2, 'and it keeps playing')
+})

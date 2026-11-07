@@ -13,6 +13,7 @@ import {
   type AgentState,
   type Appearance,
   type ApplyAck,
+  type PortalRecord,
   type CompactSpawn,
   type CompileOutput,
   type CompiledGoal,
@@ -85,6 +86,8 @@ type MockAgent = {
   routeKey: string | null
   /** No open doorway leads to the target; waits until the topology changes. */
   blocked: boolean
+  /** The current route ends in front of a closed door rather than at the target. */
+  waitingAtDoor: boolean
   random: number
   departedAt: number | null
 }
@@ -361,6 +364,7 @@ export class MockSimulation {
       route: null,
       routeKey: null,
       blocked: false,
+      waitingAtDoor: false,
       random: streamSeed(world.seed, spec.id),
       departedAt: null,
     }
@@ -444,20 +448,22 @@ export class MockSimulation {
 
   /**
    * Walks toward `target` via the doorways between rooms; returns true on arrival. The
-   * route is replanned when the target or the door layout (topology) changes. With no open
-   * route the agent stays put and reports blocked, as the real engine does.
+   * route is replanned when the target or the door layout (topology) changes.
+   *
+   * With no open route the agent keeps its goal and never passes a closed door: it walks up
+   * to the first closed door on its way and waits there, reporting blocked, so a crowd forms
+   * at the door. When the door reopens the topology changes and the route is replanned.
    */
   private travel(agent: MockAgent, target: Vec2, step: number): boolean {
     const key = `${target.x},${target.y}|${this.world!.state.topologyVersion}`
     if (agent.routeKey !== key) {
-      agent.route = this.planRoute(agent.position, target)
+      const open = this.planRoute(agent.position, target)
+      agent.route = open ?? this.routeToClosedDoor(agent, target)
+      agent.waitingAtDoor = open === null
       agent.routeKey = key
     }
-    if (!agent.route) {
-      agent.blocked = true
-      return false
-    }
     agent.blocked = false
+    if (!agent.route) return false
     let budget = step
     while (agent.route.length > 0 && budget > EPS) {
       const next = agent.route[0]!
@@ -472,17 +478,63 @@ export class MockSimulation {
       }
     }
     if (agent.route.length > 0) return false
+    if (agent.waitingAtDoor) {
+      agent.blocked = true
+      return false
+    }
     agent.routeKey = null
     return true
   }
 
+  /**
+   * The way to the first closed door between the agent and its target, ending at a waiting
+   * spot on the agent's side of it. Spots spread across the door's width and a few body
+   * widths back (stable per person), so waiting people form a cluster rather than a stack.
+   * Empty when even closed doors don't lead there; the agent then waits where it is.
+   */
+  private routeToClosedDoor(agent: MockAgent, to: Vec2): Vec2[] {
+    const hops = this.routeHops(agent.position, to, () => true)
+    const index = hops?.findIndex((portal) => !portal.open) ?? -1
+    if (!hops || index < 0) return []
+    const centre = (portal: PortalRecord) => ({ x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 })
+    const door = hops[index]!
+    const before = index > 0 ? centre(hops[index - 1]!) : agent.position
+    const middle = centre(door)
+    // A door taller than it is wide is crossed left-right; otherwise top-bottom.
+    const acrossX = door.height >= door.width
+    const side = Math.sign(acrossX ? before.x - middle.x : before.y - middle.y) || 1
+    const spread = streamSeed(0, `${agent.id}-door-spread`) / 4294967296 - 0.5
+    const back = streamSeed(0, `${agent.id}-door-back`) / 4294967296
+    const span = Math.max(0, (acrossX ? door.height : door.width) - agent.radius * 2)
+    const half = (acrossX ? door.width : door.height) / 2
+    // Between about half a body and three bodies back from the door.
+    const depth = half + agent.radius * (1.2 + back * 4.8)
+    const spot = acrossX
+      ? { x: middle.x + side * depth, y: middle.y + spread * span }
+      : { x: middle.x + spread * span, y: middle.y + side * depth }
+    // Keep the spot in the room the agent arrives from; fall back to just in front of the door.
+    const zoneId = this.zoneOf(before)
+    const zone = zoneId ? this.world!.zones.get(zoneId) : undefined
+    const front = half + agent.radius * 1.2
+    const near = acrossX ? { x: middle.x + side * front, y: middle.y } : { x: middle.x, y: middle.y + side * front }
+    const waitAt = !zone || inZone(zone, spot) ? spot : near
+    return [...hops.slice(0, index).map(centre), waitAt]
+  }
+
   /** Doorway centres from the agent's room to the target's room (breadth-first over open portals). */
   private planRoute(from: Vec2, to: Vec2): Vec2[] | null {
+    const hops = this.routeHops(from, to, (portal) => portal.open)
+    if (!hops) return null
+    return [...hops.map((portal) => ({ x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 })), { ...to }]
+  }
+
+  /** The doors passed, in order, from one room to another (breadth-first over `usable` doors); null when unreachable. */
+  private routeHops(from: Vec2, to: Vec2, usable: (portal: PortalRecord) => boolean): PortalRecord[] | null {
     const start = this.zoneOf(from)
     const goal = this.zoneOf(to)
-    if (!start || !goal || start === goal) return [{ ...to }]
-    const portals = this.world!.state.map.portals.filter((portal) => portal.open)
-    const previous = new Map<string, { zone: string; door: Vec2 }>()
+    if (!start || !goal || start === goal) return []
+    const portals = this.world!.state.map.portals.filter(usable)
+    const previous = new Map<string, { zone: string; door: PortalRecord }>()
     const queue = [start]
     const seen = new Set([start])
     while (queue.length > 0) {
@@ -495,18 +547,32 @@ export class MockSimulation {
         const other = a === zone ? b : a
         if (seen.has(other)) continue
         seen.add(other)
-        previous.set(other, { zone, door: { x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 } })
+        previous.set(other, { zone, door: portal })
         queue.push(other)
       }
     }
     if (!seen.has(goal)) return null
-    const doors: Vec2[] = []
+    const zones = [goal]
     for (let zone = goal; zone !== start;) {
-      const hop = previous.get(zone)!
-      doors.unshift(hop.door)
-      zone = hop.zone
+      zone = previous.get(zone)!.zone
+      zones.unshift(zone)
     }
-    return [...doors, { ...to }]
+    // Between each pair of rooms, use the nearest door, so a crowd spreads over every exit
+    // instead of all taking whichever door is listed first.
+    const doors: PortalRecord[] = []
+    let at = from
+    for (let i = 0; i + 1 < zones.length; i++) {
+      const here = zones[i]!, next = zones[i + 1]!
+      const centre = (portal: PortalRecord) => ({ x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 })
+      const options = portals.filter((portal) => {
+        const [a, b] = portal.connects
+        return (a === here && b === next) || (!portal.oneWay && a === next && b === here)
+      })
+      const door = options.reduce((best, portal) => (distance(at, centre(portal)) < distance(at, centre(best)) ? portal : best))
+      doors.push(door)
+      at = centre(door)
+    }
+    return doors
   }
 
   /** Straight-line movement toward one waypoint; returns true on arrival. */
