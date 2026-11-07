@@ -20,3 +20,5 @@ Four scenarios come from the Product PRD:
 These are illustrative looping previews with humanoid figures, scenario selection, reversible scripted changes, and scenario pause and reset. The hero’s bottom text and ambient pause strip are removed as requested. Scenario selection supports keyboard navigation; motion respects reduced-motion preferences and pauses offscreen or when the document is hidden. They are not live engine output. The live application/AI connection remains future work. No invented safety statistics, performance improvements, or customer proof.
 
 The opening sky includes ambient bird flocking, wing motion, and independently drifting clouds. These are decorative scene behaviors, separate from the product's crowd-simulation engine, and remain static for reduced-motion users.
+
+The story now embeds its three headings into distinct campus, transit/operations, and garden architecture along the original connected cream path and animated crowd. The latest approved scope completes all three environments before user review. Supporting copy stays readable HTML, with a scenario kiosk and process wayfinding display.

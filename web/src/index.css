@@ -329,3 +329,115 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
  .hero-primary { min-height: 48px; padding: 12px 25px; font-size: 14px; }
  .sky-simulation { height: 270px; }
 }
+
+/* The original crowd path stays in front of ambient everyday city scenery. */
+.city-scenery { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; opacity: .7; }
+.story { display: block; height: 1700px; padding: 0; }
+.story-stop { position: absolute; width: 38%; max-width: 420px; padding: 0; background: transparent; border: 0; box-shadow: none; }
+.stop-one { top: 75px; left: 8%; right: auto; }
+.stop-two { top: 680px; right: 5%; left: auto; }
+.stop-three { top: 1300px; left: 8%; right: auto; }
+.plain-checks { list-style: disc; padding-left: 17px; }
+.plain-checks li { display: list-item; line-height: 1.7; padding-left: 2px; }
+@media (max-width: 700px) {
+ .story { height: 1760px; }
+ .story-stop { width: 65%; max-width: 340px; left: 6%; right: auto; }
+ .stop-one { top: 65px; }
+ .stop-two { top: 630px; }
+ .stop-three { top: 1200px; }
+ .city-scenery { opacity: .3; }
+}
+
+/* First environmental stop: a campus facade, plaza, and small prompt kiosk. */
+.campus-plaza { top: 10px; left: -3%; width: 57%; max-width: 680px; }
+.plaza-building { position: relative; width: 100%; aspect-ratio: 700 / 450; }
+.plaza-artwork, .plaza-residents { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.campus-plaza h2 { position: absolute; top: 27%; left: 32.5%; width: 59%; font-size: clamp(25px, 2.9vw, 40px); line-height: 1.18; letter-spacing: -.04em; margin: 0; text-wrap: initial; }
+.campus-plaza h2 span { color: #657e59; white-space: nowrap; }
+.plaza-copy { margin: 2px 0 0 16%; width: 57%; max-width: 370px; }
+.plaza-copy p { font-size: 13px; line-height: 1.8; margin-bottom: 14px; }
+.plaza-kiosk { position: relative; width: max-content; max-width: 100%; margin-top: 21px; padding: 13px 18px 14px 12px; background: #eef2e4; border-top: 5px solid #859b78; border-bottom: 4px solid #d3ddc4; }
+.plaza-kiosk::after { content: ''; position: absolute; top: 100%; height: 24px; width: 10px; left: 47%; background: #a9b49c; }
+.plaza-kiosk .example-prompt { margin: 0; gap: 10px; font-size: 11px; line-height: 1.7; }
+@media (min-width: 701px) and (max-width: 1000px) {
+ .campus-plaza { width: 62%; }
+ .campus-plaza h2 { font-size: clamp(22px, 3vw, 29px); }
+ .plaza-copy { width: 65%; }
+}
+@media (max-width: 700px) {
+ .campus-plaza { top: 28px; left: -2%; width: 78%; max-width: none; }
+ .campus-plaza h2 { top: 27%; left: 32.5%; width: 62%; font-size: clamp(18px, 5.15vw, 26px); line-height: 1.18; }
+ .plaza-copy { margin-top: 15px; margin-left: 12%; width: 79%; }
+ .plaza-copy p { font-size: 12px; line-height: 1.85; }
+ .plaza-kiosk { margin-top: 20px; padding: 12px 10px; }
+ .plaza-kiosk .example-prompt { font-size: 10px; gap: 8px; }
+}
+
+/* The narrow side of the mobile path cannot fit a building footprint. */
+@media (max-width: 700px) { .city-scenery .city-east { display: none; } }
+
+/* Shared terrain is below every scene object; the existing crowd road is above. */
+.journey-ground { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 0; pointer-events: none; }
+.campus-plaza { top: -8px; left: -3%; width: 68%; max-width: 800px; }
+.plaza-copy { margin-left: 12%; width: 45%; max-width: 330px; }
+@media (min-width: 701px) and (max-width: 1000px) {
+ .campus-plaza { width: 65%; }
+ .plaza-copy { width: 64%; }
+}
+@media (max-width: 700px) {
+ .campus-plaza { top: 28px; left: -2%; width: 78%; }
+ .plaza-copy { width: 79%; margin-left: 12%; }
+}
+
+/* Three distinct locations along one connected pedestrian strip. */
+.story { height: 2420px; }
+.story-building { position: relative; width: 100%; aspect-ratio: 700 / 450; }
+.location-art, .location-residents { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.campus-plaza { top: 12px; left: -3%; width: 65%; max-width: 780px; }
+.operations-location { top: 825px; left: auto; right: -3%; width: 60%; max-width: 740px; }
+.garden-location { top: 1660px; left: -3%; right: auto; width: 65%; max-width: 780px; }
+.operations-location h2, .garden-location h2 { position: absolute; margin: 0; letter-spacing: -.04em; text-wrap: initial; }
+.operations-location h2 { top: 50.3%; left: 35%; width: 50%; font-size: clamp(25px, 2.25vw, 32px); line-height: 1.12; }
+.garden-location h2 { top: 39%; left: 32%; width: 55%; font-size: clamp(28px, 2.8vw, 40px); line-height: 1.17; }
+.garden-location h2 span { white-space: nowrap; }
+.location-copy { position: relative; width: 48%; max-width: 360px; margin-top: 20px; }
+.location-copy p { font-size: 13px; line-height: 1.85; margin-bottom: 14px; }
+.operations-copy { margin-left: 40%; }
+.garden-copy { margin-left: 15%; }
+.plaza-copy { margin-top: 18px; width: 48%; max-width: 360px; }
+.process-wayfinding { position: relative; padding: 12px 17px; margin-top: 20px; border-top: 5px solid #8ba184; background: #eff2e4; }
+.process-wayfinding::after { content: ''; position: absolute; top: 100%; left: 13px; height: 25px; width: 7px; background: #a7b39a; }
+.process-wayfinding .plain-checks { padding-left: 14px; margin: 0; font-size: 11px; }
+.process-wayfinding .plain-checks li { margin: 7px 0; }
+@media (min-width: 701px) and (max-width: 1000px) {
+ .campus-plaza, .garden-location { width: 65%; }
+ .operations-location { width: 62%; }
+ .operations-location h2 { font-size: clamp(21px, 2.5vw, 25px); }
+ .garden-location h2 { font-size: clamp(23px, 3vw, 30px); }
+ .location-copy { width: 64%; }
+ .operations-copy { margin-left: 30%; }
+ .plaza-copy { width: 65%; }
+}
+@media (max-width: 700px) {
+ .story { height: 2320px; }
+ .campus-plaza, .operations-location, .garden-location { left: -2%; right: auto; width: 78%; max-width: none; }
+ .campus-plaza { top: 28px; }
+ .operations-location { top: 775px; }
+ .garden-location { top: 1530px; }
+ .operations-location h2 { top: 50.3%; font-size: clamp(14px, 3.9vw, 20px); line-height: 1.1; }
+ .garden-location h2 { font-size: clamp(17px, 4.7vw, 26px); }
+ .plaza-copy, .location-copy { margin-left: 12%; margin-top: 20px; width: 79%; max-width: none; }
+ .location-copy p { font-size: 12px; }
+ .process-wayfinding { padding: 10px 12px; }
+ .process-wayfinding .plain-checks { font-size: 10px; }
+}
+
+@media (min-width: 701px) and (max-width: 1300px) { .operations-location { right: 0; } }
+
+@media (min-width: 701px) and (max-width: 1000px) { .garden-location { width: 63%; } }
+@media (max-width: 700px) { .operations-location h2 { left: 32.5%; width: 58%; } }
+@media (max-width: 700px) {
+ .story { height: 1950px; }
+ .operations-location { top: 650px; }
+ .garden-location { top: 1270px; }
+}

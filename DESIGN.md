@@ -193,3 +193,20 @@ SkySimulation.tsx renders six independently drifting cloud clusters and nine bir
 The supplied park reference now governs the landscape arrangement as well as the palette. The opening uses a larger centered headline and supporting sentence over a low panorama: pond and arched timber bridge at left, amphitheatre behind it, open pedestrian courtyard in the middle, and warm cream classrooms with blue glazing on the right. Rolling lawn contours, faceted shrubs, small stones and lamps frame the paved routes. Tree canopies remain block-shaped and all artwork remains native SVG. The campus and story retain one continuous cream road and shared pedestrian coordinates.
 
 The scene uses warm white `#fbfaf8`, cream paving `#fcf2e5`, yellow-green lawns `#d5e7a6` / `#c2df8a`, lime crowns `#d8e99d`, leafy shaded faces `#91b959` / `#719c48`, pond blue `#92cee0`, glass blue `#96cee7`, and warm classroom floors `#f6ebdb`. These are a visual match to the inline reference rather than sampled source pixels. The previous cool, flat lawn slabs are superseded by this park composition.
+
+### Typography entrances
+
+Hero, story-stop, scenario-introduction, and closing copy use a restrained, one-time fade and rise. Headings move 16px over 680ms; supporting copy moves 12px over 560ms, starting 140ms later with 75ms increments capped at 340ms. Natural deceleration uses `cubic-bezier(0.16, 1, 0.3, 1)`. IntersectionObserver triggers at 80% viewport height; the native Web Animations API preserves text nodes, wrapping, and layout. Completed effects are removed. No GSAP dependency or scroll listener is added. Reduced motion, printing, keyboard focus, and unsupported/failed initialization expose original visible content immediately. There is no CSS-hidden default state.
+
+
+### Environmental story: three locations, one connected strip
+
+The latest user direction authorizes completing all three locations together, following the supplied campus/transit references closely and explicitly retaining the connected cream strip and walking people. It supersedes prior first-stop-only staging and narrow-connector-removal experiments.
+
+The story keeps the original journeyGeometry.ts path and shared crowd stream. Journey measures all three story-building viewports and renders one ground SVG beneath the original path SVG. Each location has a broad paved terrace, planted shoulder, and an explicit cream approach strip joining the actual route. The same cream `#fcf2e5` is used across the strip and forecourts. Rolling green land spans scene edges; the story closes with a shared landscaped verge before the existing falling-crowd handoff.
+
+The first location is a campus plaza: cream facade carrying the first HTML headline, skylight roof, glass entrance, steps, planters, bench, and prompt kiosk. The second is a transit/operations pavilion: wide skylight canopy, glass back wall, architectural display carrying the second HTML headline, benches, planting, lamp, and freestanding process information board. The third is an open garden pavilion: curved cream headline wall, planted terraces, amphitheatre steps, benches, and a central tree planter. Native SVG draws all architecture and landscape. Tiny resident groups and slow walkers occupy level ground in separate lightweight canvases; existing path people remain uninterrupted.
+
+Headings remain selectable HTML on architectural surfaces. Supporting copy remains level HTML aligned below each location. Existing words are preserved; no decorative emoji badges return. Functional arrows remain. The established one-time type entrances and reduced-motion support apply to all three locations. Scene canvases pause offscreen and when hidden through useCanvas.
+
+Desktop uses a 2420px story with alternating large left/right/left locations. Mobile uses a 1950px story with the three locations aligned left of the existing right-hand crowd lane, omitting the extra shared-landscape trees on narrow screens. Tablet headings and footprint widths preserve a clear pedestrian corridor. The hero and scenario explorer are unchanged by this redesign.

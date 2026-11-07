@@ -40,7 +40,7 @@ export function ScenarioExplorer({ reduced }: { reduced: boolean }) {
         <div className="simulation-bottom"><span><span className="person-key" />100 illustrated people</span><span>{reduced ? 'Reduced motion enabled' : 'A little world, in motion'}</span></div>
       </div>
     </div>
-    <div className="what-if-bar"><div><span className="what-if-icon"><Icon name="spark" /></span><p>“{scenario.prompt}”</p></div><button className={changed ? 'button button-subtle' : 'button button-green'} onClick={() => setChanged(!changed)}>{changed ? 'Restore original' : 'Try this what-if'}<Icon name={changed ? 'reset' : 'arrow'} size={17} /></button></div>
+    <div className="what-if-bar"><div><p>“{scenario.prompt}”</p></div><button className={changed ? 'button button-subtle' : 'button button-green'} onClick={() => setChanged(!changed)}>{changed ? 'Restore original' : 'Try this what-if'}<Icon name={changed ? 'reset' : 'arrow'} size={17} /></button></div>
     <p className="scenario-result" aria-live="polite">{changed ? scenario.result : 'These are scripted previews. In the full product, describe a change, review it, and apply it.'}</p>
   </section>
 }
