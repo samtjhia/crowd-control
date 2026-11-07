@@ -39,7 +39,7 @@ fn malformed_or_unsupported_loads_preserve_the_previous_world() {
     for (field, value, expected) in [
         ("seed", json!(-1), "INVALID_SCHEMA"),
         ("seed", json!(4294967296u64), "INVALID_SCHEMA"),
-        ("jobs", json!([{}]), "UNSUPPORTED_CAPABILITY"),
+        ("jobs", json!([{}]), "INVALID_SCHEMA"),
         ("surprise", json!(true), "INVALID_SCHEMA"),
     ] {
         let mut bad = load();

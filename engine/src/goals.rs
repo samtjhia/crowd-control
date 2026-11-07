@@ -213,6 +213,10 @@ pub fn install(spec: GoalSpec, id: Id, now: f64, pending: bool) -> GoalRuntime {
     r
 }
 fn activate(a: &mut AgentRuntime, now: f64) {
+    if let Some(failure) = a.current_goal.as_ref().and_then(|g| g.failure.clone()) {
+        fail(a, &failure.code, &failure.message);
+        return;
+    }
     if let Some(r) = &mut a.current_goal {
         r.status = if a.components.mobility.speed_multiplier.0 == 0.0 {
             "suspended"
@@ -266,7 +270,7 @@ pub fn release(
         reset_route(a);
     }
 }
-fn fail(a: &mut AgentRuntime, code: &str, message: &str) {
+pub fn fail(a: &mut AgentRuntime, code: &str, message: &str) {
     if let Some(r) = &mut a.current_goal {
         r.status = "failed".into();
         r.failure = Some(GoalFailure {

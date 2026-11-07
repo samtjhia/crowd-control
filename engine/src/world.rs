@@ -24,6 +24,7 @@ pub struct World {
     pub departures: Vec<Value>,
     pub events: Vec<Value>,
     pub removed_count: u64,
+    pub runtime: crate::scheduling::Runtime,
     #[serde(skip)]
     pub wander_cells: Vec<Vec<usize>>,
     pub topology_version: u64,
@@ -60,10 +61,8 @@ impl World {
         {
             return Err(unsupported("Unsupported random or engine version"));
         }
-        if !s.jobs.is_empty() || !s.rules.is_empty() || model.contact.is_some() {
-            return Err(unsupported(
-                "Jobs, rules and contact physics are not currently enabled",
-            ));
+        if model.contact.is_some() {
+            return Err(unsupported("Contact physics is not currently enabled"));
         }
         if s.agents.len() > 2000 {
             return Err(("RESOURCE_LIMIT", "Agent budget exceeded".into()));
@@ -234,7 +233,15 @@ impl World {
             rule_sampling: Default::default(),
         };
         let allocations = Allocation {
-            next_entity: Counter(ids.len() as f64 + 1.0),
+            next_entity: Counter(
+                s.agents
+                    .iter()
+                    .filter_map(|a| a.id.0.strip_prefix("a").and_then(|s| s.parse::<u64>().ok()))
+                    .max()
+                    .unwrap_or(0)
+                    .min(9_007_199_254_740_990) as f64
+                    + 1.0,
+            ),
             next_goal: Counter(next_goal as f64),
             next_job: Counter(1.0),
             next_ticket: Counter(1.0),
@@ -263,6 +270,7 @@ impl World {
             departures: vec![],
             events: vec![],
             removed_count: 0,
+            runtime: Default::default(),
             wander_cells: vec![],
             topology_version: 0,
             scene_version: 1,
@@ -276,6 +284,7 @@ impl World {
             initial_scene_hash: format!("fnv1a64-v1:{hash:016x}"),
         };
         world.initialize_services();
+        world.initialize_runtime()?;
         world.prepare_navigation()?;
         Ok(world)
     }
@@ -292,15 +301,29 @@ impl World {
                     && (*n as f64 * self.initial.scene.model.dt.0).is_finite()
             })
             .ok_or_else(|| ("RESOURCE_LIMIT", "Tick/time range exceeded".into()))?;
-        let before = (
-            self.agents.clone(),
-            self.queues.clone(),
-            self.slots.clone(),
-            self.allocations.clone(),
-            self.departures.clone(),
-            self.events.clone(),
-            self.tick,
-        );
+        let dynamic_before = if self.has_runtime_work() {
+            // Derived navigation caches are rebuilt on rollback; do not copy them twice.
+            let navigator = std::mem::take(&mut self.navigator);
+            let before = self.clone();
+            self.navigator = navigator;
+            Some(before)
+        } else {
+            None
+        };
+        let before = if dynamic_before.is_none() {
+            Some((
+                self.agents.clone(),
+                self.queues.clone(),
+                self.slots.clone(),
+                self.allocations.clone(),
+                self.departures.clone(),
+                self.events.clone(),
+                self.tick,
+                self.runtime.processed_events,
+            ))
+        } else {
+            None
+        };
         let result = (|| -> Result<(), Failure> {
             while self.tick < next {
                 self.before_goals()?;
@@ -315,10 +338,22 @@ impl World {
                 )?;
                 self.after_goals()?;
                 self.tick += 1;
+                if self.events.len() > 10000 {
+                    return Err(("RESOURCE_LIMIT", "Event retention budget exceeded".into()));
+                }
+                if self.has_runtime_work() {
+                    self.pump()?;
+                } else {
+                    self.runtime.processed_events = self.events.len();
+                }
             }
             Ok(())
         })();
         if let Err(error) = result {
+            if let Some(before) = dynamic_before {
+                *self = before;
+                return Err(error);
+            }
             (
                 self.agents,
                 self.queues,
@@ -327,7 +362,8 @@ impl World {
                 self.departures,
                 self.events,
                 self.tick,
-            ) = before;
+                self.runtime.processed_events,
+            ) = before.unwrap();
             self.navigator = Navigator::default();
             return Err(error);
         }
@@ -386,8 +422,8 @@ impl World {
             overlays.push(json!({"id":format!("portal-{i}"),"entityId":portal.id,"cells":self.grid.portal_index.iter().enumerate().filter_map(|(i,p)|(*p==index).then_some(i)).collect::<Vec<_>>(),"kind":"portal"}));
         }
         json!({"schemaVersion":1,"simulationId":self.initial.scene.simulation_id,"id":id,"initialSceneHash":self.initial_scene_hash,"versions":versions,
-            "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":self.map_state.entities().iter().map(wire).collect::<Vec<_>>(),"entityOrigins":[],
-            "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":[],"rules":[],"queues":self.queues,"slots":self.slots,"allocations":self.allocations,"random":self.random,
+            "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":self.map_state.entities().iter().map(wire).collect::<Vec<_>>(),"entityOrigins":self.runtime.entity_origins,
+            "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":self.runtime.jobs,"rules":self.runtime.rules,"queues":self.queues,"slots":self.slots,"allocations":self.allocations,"random":self.random,
             "metrics":{"samples":[],"departures":self.departures,"removedCount":self.removed_count,"portalCrossings":[],"queueTotals":[],"clearance":null},"events":self.events,"historyRevision":self.history.history_revision,
             "appliedThrough":{"tick":self.tick,"order":self.history.records.len(),"prefixHash":fingerprint(&self.history.records)},"contactState":null})
     }
@@ -402,7 +438,7 @@ pub fn fingerprint<T: Serialize>(value: &T) -> String {
     format!("fnv1a64-v1:{hash:016x}")
 }
 
-fn resolve_components(
+pub(crate) fn resolve_components(
     base: &Components,
     profile: &Profile,
     overrides: Option<&Overrides>,
@@ -492,6 +528,24 @@ pub fn wire<T: Serialize>(value: &T) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pending_jobs_rules_and_sampling_resume_and_batch_independently() {
+        let input: Value =
+            serde_json::from_str(include_str!("../../contract/fixtures/engine-load.json")).unwrap();
+        let initial = serde_json::from_value(input["compiled"].clone()).unwrap();
+        let mut batched = World::load(initial, &Id("engine-demo".into())).unwrap();
+        batched.advance(7).unwrap();
+        let mut restored: World =
+            serde_json::from_value(serde_json::to_value(&batched).unwrap()).unwrap();
+        batched.advance(220).unwrap();
+        for _ in 0..220 {
+            restored.advance(1).unwrap();
+        }
+        assert_eq!(
+            batched.snapshot(&Id("same".into())),
+            restored.snapshot(&Id("same".into()))
+        );
+    }
     #[test]
     fn service_serialization_preserves_fifo_credit_slots_and_nested_cursors() {
         let input: Value = serde_json::from_str(include_str!(

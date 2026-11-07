@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "goals-engine-v5";
+pub const ENGINE_VERSION: &str = "operations-engine-v6";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -10,6 +10,7 @@ const MAX_BYTES: usize = 32 * 1024 * 1024;
 pub struct Engine {
     loaded: Option<World>,
     stream: u64,
+    published_events: usize,
 }
 pub(crate) type Failure = (&'static str, String);
 pub(crate) fn invalid(message: impl Into<String>) -> Failure {
@@ -97,6 +98,7 @@ impl Engine {
             }
             let world = World::load(compiled, &c.simulation_id)?;
             let stream = self.next_stream()?;
+            self.published_events = 0;
             self.loaded = Some(world);
             self.stream = stream;
             return Ok(self.publication(&c.command_id, true));
@@ -112,6 +114,7 @@ impl Engine {
             "reset" => {
                 let world = World::load(world.initial.clone(), &c.simulation_id)?;
                 let stream = self.next_stream()?;
+                self.published_events = 0;
                 self.loaded = Some(world);
                 self.stream = stream;
                 Ok(self.publication(&c.command_id, true))
@@ -122,8 +125,12 @@ impl Engine {
                 if ticks == 0 {
                     return Err(invalid("Step ticks must be positive"));
                 }
+                let version = world.scene_version;
                 self.advance(ticks)?;
-                Ok(self.publication(&c.command_id, false))
+                Ok(self.publication(
+                    &c.command_id,
+                    self.loaded.as_ref().unwrap().scene_version != version,
+                ))
             }
             "run_to" => {
                 let requested = c.time.unwrap().0;
@@ -144,8 +151,12 @@ impl Engine {
                 if target < world.tick {
                     return Err(invalid("run_to cannot go backward without a valid restore"));
                 }
+                let version = world.scene_version;
                 self.advance(target - world.tick)?;
-                Ok(self.publication(&c.command_id, false))
+                Ok(self.publication(
+                    &c.command_id,
+                    self.loaded.as_ref().unwrap().scene_version != version,
+                ))
             }
             "snapshot" => Ok(vec![
                 json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"snapshot","commandId":c.command_id,"snapshot":world.snapshot(c.snapshot_id.as_ref().unwrap())}),
@@ -207,7 +218,7 @@ impl Engine {
     fn ack(&self, id: &Id) -> Value {
         json!({"schemaVersion":1,"simulationId":self.loaded.as_ref().unwrap().initial.scene.simulation_id,"type":"ack","commandId":id,"stamp":self.stamp()})
     }
-    fn publication(&self, id: &Id, scene: bool) -> Vec<Value> {
+    fn publication(&mut self, id: &Id, scene: bool) -> Vec<Value> {
         let world = self.loaded.as_ref().unwrap();
         let simulation = &world.initial.scene.simulation_id;
         let mut out = vec![self.ack(id)];
@@ -217,6 +228,10 @@ impl Engine {
         let mut frame = self.stamp();
         frame["agents"] = world.frame_agents();
         out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"frame","frame":frame}));
+        if self.published_events < world.events.len() {
+            out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"events","stamp":self.stamp(),"events":world.events[self.published_events..]}));
+            self.published_events = world.events.len();
+        }
         out
     }
 }

@@ -81,7 +81,7 @@ impl Shape {
             }
         }
     }
-    fn extent(&self) -> (f64, f64, f64, f64) {
+    pub fn extent(&self) -> (f64, f64, f64, f64) {
         match self {
             Self::Rectangle {
                 x,
@@ -154,7 +154,7 @@ impl Shape {
             }
         }
     }
-    fn intersects(&self, l: f64, t: f64, size: f64) -> bool {
+    pub fn intersects(&self, l: f64, t: f64, size: f64) -> bool {
         let e = size * 1e-10;
         let r = l + size - e;
         let b = t + size - e;

@@ -382,7 +382,7 @@ fn closing_one_of_two_doors_reroutes_mid_edge_toward_the_same_destination() {
 }
 
 #[test]
-fn fast_motion_visits_each_waypoint_and_future_or_unknown_goal_work_is_rejected() {
+fn fast_motion_visits_each_waypoint_future_work_is_scheduled_and_unknown_goals_rejected() {
     let mut input = load();
     input["compiled"]["scene"]["profiles"]["person"]["preferredSpeed"] = json!(80);
     input["compiled"]["scene"]["profiles"]["person"]["maximumSpeed"] = json!(80);
@@ -402,11 +402,8 @@ fn fast_motion_visits_each_waypoint_and_future_or_unknown_goal_work_is_rejected(
     assert_eq!(snapshot(&mut e), before);
     let mut c = command("apply_request");
     c["request"] = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"future","at":10,"operations":[{"op":"set","targets":{"ids":["door"]},"values":{"components":{"portal":{"open":false}}}}]});
-    assert_eq!(
-        send(&mut e, c)[0]["error"]["code"],
-        "UNSUPPORTED_CAPABILITY"
-    );
-    assert_eq!(snapshot(&mut e), before);
+    assert_eq!(send(&mut e, c)[0]["type"], "ack");
+    assert_eq!(snapshot(&mut e)["jobs"][0]["dueTick"], 200);
 }
 
 #[test]

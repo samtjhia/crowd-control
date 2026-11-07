@@ -56,7 +56,7 @@ npm run typecheck --workspace @crowd-control/contract
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits and the performance target
-remain implementation work. Parts one–five now provide Rust world initialization,
+remain implementation work. Parts one–six now provide Rust world initialization,
 full runtime agents, both grid encodings, seeded streams, fixed-clock playback and
 snapshot export, basic reach navigation and recorded immediate portal.open changes.
 Actual Wasm tests include native parity and host pacing. Browser worker/PixiJS
@@ -70,8 +70,7 @@ Part five adds static entities, all eight goals, nested cursors and authoritativ
 queue/slot claims. Optional GoalRuntime.execution stores leaf phase/elapsed/target;
 it is runtime-only and excluded from planner JSON. reach.departOnArrival is
 optional/default false in writable and compiled goals. Explicit agent removal is
-separate. Recorded assign_goal/clear_goal/remove currently use explicit IDs;
-full selectors, scheduling and rules are later parts. engine-services-load.json
+separate. Recorded assign_goal/clear_goal/remove now support live selectors through part six. engine-services-load.json
 is the running queue/interact/departure example; it has no jobs/rules.
 
 ## Engine input example
@@ -145,3 +144,12 @@ streams and buffer frames awaiting their scene metadata. Physics ticks and rende
 frames have independent cadences. At dt=0.05 the engine advances 20 ticks per
 simulation second; 4× playback requires 80 ticks per wall second, regardless of
 the display's frame rate. This handoff is specified, not implemented yet.
+
+Part six implements all operations, live selectors/sampling, nested scalar patches,
+static geometry, current-occupancy placement, compact jobs/controller rules,
+time-zero/absolute/relative schedules and event/time/count conditions. Pending
+jobs/rules and entity/event origins use the existing snapshot DTOs; schema/ABI stay
+1 and engine version is operations-engine-v6. Native/actual Wasm tests cover atomic
+failure and frontend client compatibility. Future create_intervention works;
+past work/edit/delete/restore remain rejected. Density conditions and unavailable
+contact sensors reject registration. No automatic fall model is enabled.

@@ -206,3 +206,51 @@ test('actual Wasm service goals preserve claims, edits, cursors and departures w
   assert.equal(removed.metrics.departures.length, 2)
   bindings.destroy_engine(handle)
 })
+
+test('part six runs every compiled frontend scenario through the real host and SimulationClient', async () => {
+  const { scenarios, startScenario, movementPreset } = await import('../../web/src/sim/scenario.ts')
+  const { SimulationClient } = await import('../../web/src/worker/simulationClient.ts')
+  const worked = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
+  const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
+  const bindings = await engine()
+  for (const scenario of scenarios(worked, movementPreset(preset))) {
+    const compiled = startScenario(scenario.plan, scenario.model)
+    assert.equal(compiled.ok, true, `${scenario.id}: ${JSON.stringify(compiled)}`)
+    if (!compiled.ok) continue
+    const listeners = new Set<(m: WorkerMessage) => void>()
+    const host = createEngineHost(bindings, (m) => queueMicrotask(() => listeners.forEach((listener) => listener(m))))
+    const client = new SimulationClient({ kind: 'real', send: (command) => host.send(command), subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } } })
+    try {
+      assert.equal((await client.load(compiled.value)).type, 'ack', scenario.id)
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(client.getView().scene?.agents.length, compiled.value.scene.agents.length, scenario.id)
+      assert.equal((await client.step()).type, 'ack', scenario.id)
+      const id = compiled.value.scene.agents[0]!.id
+      assert.equal((await client.apply('Colour attendee', [{ op: 'set', targets: { ids: [id] }, values: { appearance: { fill: '#AABBCC' } } }])).ok, true)
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(client.getView().scene?.agents.find((a) => a.id === id)?.appearance.fill, '#AABBCC')
+      const snapshot = await client.command({ type: 'snapshot', snapshotId: 'part-six' })
+      assert.equal(snapshot.type, 'snapshot')
+      if (snapshot.type === 'snapshot') assert.equal(parseSnapshot(snapshot.snapshot).ok, true, JSON.stringify(snapshot.snapshot))
+      assert.equal(client.getView().lastError, null)
+    } finally { client.dispose(); host.dispose() }
+  }
+})
+
+test('part six scheduled arrivals, rules, origins and failures match native Rust in actual Wasm', async () => {
+  const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-load.json', import.meta.url), 'utf8'))
+  const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: 'engine-demo', commandId: type, type, ...extra })
+  const commands = [load, h('step', { ticks: 100 }), h('snapshot', { snapshotId: 'arrivals' }), h('step', { ticks: 100 }), h('snapshot', { snapshotId: 'alarm' }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'deferred', operations: [{ op: 'schedule', id: 'bad-arrival', after: 0.1, operations: [{ op: 'spawn', count: 2000, template: { kind: 'agent', profile: 'person' }, placement: { inside: { ids: ['hall'] } } }] }] } }), h('step', { ticks: 2 }), h('snapshot', { snapshotId: 'failed' })]
+  const bindings = await engine(), handle = bindings.create_engine()
+  try {
+    const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+    for (const batch of wasm) for (const message of batch) { const parsed = parseWorkerMessage(message); assert.equal(parsed.ok, true, JSON.stringify(parsed)) }
+    assert.equal(wasm[2][0].snapshot.agents.length, 3)
+    assert.ok(wasm[4][0].snapshot.agents.every((a: EngineSnapshot['agents'][number]) => a.currentGoal?.spec.kind === 'reach'))
+    assert.equal(wasm[7][0].snapshot.events.at(-1).name, 'job_failed')
+    assert.equal(wasm[7][0].snapshot.events.at(-1).origin.parentJobId, 'bad-arrival')
+    const executable = fileURLToPath(new URL('../../target/debug/examples/protocol', import.meta.url))
+    const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((v) => JSON.parse(v))
+    assert.deepEqual(wasm, native)
+  } finally { bindings.destroy_engine(handle) }
+})

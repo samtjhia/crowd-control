@@ -145,3 +145,10 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
     },
   ]
 }
+
+/** Explicit movement-only variant: contact physics remains unavailable in the Rust engine. */
+export function movementPreset(preset: ModelPreset): ModelPreset {
+  const model = { ...preset, id: `${preset.id}-movement`, version: `${preset.version}-movement` }
+  delete model.contact
+  return model
+}

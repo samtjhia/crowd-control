@@ -59,3 +59,20 @@ test('error correlation never invokes invalid input accessors or echoes invalid 
   const input = Object.defineProperty({ commandId: '__proto__' }, 'simulationId', { get() { throw new Error('accessor ran') } })
   assert.deepEqual(commandError(input, { code: 'INVALID_SCHEMA', message: 'bad input' }), { schemaVersion: 1, simulationId: 'unknown', type: 'error', error: { code: 'INVALID_SCHEMA', message: 'bad input' } })
 })
+test('unused endpoints do not construct workers during discarded React renders', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'Worker')
+  let constructions = 0
+  const ports: Port[] = []
+  class BrowserPort extends Port { constructor() { super(); constructions++; ports.push(this) } }
+  Object.defineProperty(globalThis, 'Worker', { configurable: true, value: BrowserPort })
+  try {
+    const unused = createRealEndpoint(); unused.dispose()
+    assert.equal(constructions, 0)
+    const active = createRealEndpoint(); active.send(pause); active.send({ ...pause, commandId: 'second' })
+    assert.equal(constructions, 1); assert.equal(ports[0]!.sent.length, 2)
+    active.dispose(); assert.equal(ports[0]!.stopped, true)
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'Worker', previous)
+    else Reflect.deleteProperty(globalThis, 'Worker')
+  }
+})

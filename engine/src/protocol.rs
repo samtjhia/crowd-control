@@ -289,33 +289,9 @@ pub enum CreateAction {
     #[serde(rename = "create_intervention")]
     Create,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SetKind {
-    #[serde(rename = "set")]
-    Set,
-}
+dto!(AgentTemplate { kind: EntityKind, label: Option<String>, tags: Option<Vec<Id>>, profile: Option<Id>, components: Option<Overrides>, appearance: Option<Appearance> });
 dto!(PortalRequest { schema_version: Counter, simulation_id: Id, request_id: Id, action: Option<CreateAction>, label: Option<String>, at: Option<Nonnegative>, operations: Vec<Value> });
 dto!(PortalSelector { ids: Vec<Id>, kind: Option<EntityKind> });
-dto!(PortalOpen { open: bool });
-dto!(ChangeComponents { portal: Option<PortalOpen>, mobility: Option<Mobility> });
-dto!(PoseOverride { pose: Pose });
-dto!(ChangeValues { components: ChangeComponents, appearance: Option<PoseOverride> });
-dto!(ChangeOperation {
-    op: SetKind,
-    targets: PortalSelector,
-    values: ChangeValues
-});
-dto!(GoalChange { op: String, targets: PortalSelector, goal: Option<Value>, mode: Option<String>, scope: Option<String> });
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RemoveKind {
-    #[serde(rename = "remove")]
-    Remove,
-}
-dto!(RemoveOperation {
-    op: RemoveKind,
-    targets: PortalSelector
-});
-
 pub fn preflight(value: &Value) -> Result<(), &'static str> {
     fn visit(
         value: &Value,
@@ -341,7 +317,8 @@ pub fn preflight(value: &Value) -> Result<(), &'static str> {
                             || k == "zoneIds"
                             || k == "portalIds"
                             || k == "calibration"
-                            || k == "snapshot",
+                            || k == "snapshot"
+                            || k == "data",
                     )?;
                 }
             }
