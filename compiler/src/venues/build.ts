@@ -28,10 +28,15 @@ export type VenuePortal = {
   connects: [string, string]
   open?: boolean
   oneWay?: boolean
+  /** Seconds to pass through, e.g. a check-in desk scanning badges. */
+  traversalTime?: number
 }
 
 /** A patch of higher (or lower) movement cost, such as the uphill stretch of a sloped alley. */
 export type VenueCost = { rect: MetreRect; cost: number }
+
+/** Fixed furniture (tables, desks, a stage edge): blocked cells inside an area. */
+export type VenueObstacle = { label?: string; rect: MetreRect }
 
 /**
  * A prepared venue as authored in TypeScript: measured rectangles in metres. Everything not
@@ -50,6 +55,7 @@ export type VenueSpec = {
   areas: VenueArea[]
   portals: VenuePortal[]
   costs?: VenueCost[]
+  obstacles?: VenueObstacle[]
 }
 
 const EPSILON = 1e-6
@@ -149,6 +155,18 @@ export function buildPreparedMap(spec: VenueSpec): Result<PreparedMap> {
     })
   }
 
+  for (const [o, obstacle] of (spec.obstacles ?? []).entries()) {
+    const cells = toCells(obstacle.rect, `venue.obstacles.${o}.rect`)
+    if (!cells.ok) return cells
+    let door = false
+    each(cells.value, (i) => {
+      if (portalIndex[i] !== 0) door = true
+      blocked[i] = 1
+      zoneIndex[i] = 0
+    })
+    if (door) return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `${obstacle.label ?? 'An obstacle'} blocks a doorway`, { path: `venue.obstacles.${o}.rect` })
+  }
+
   const cut = unreachableZones(blocked, zoneIndex, columns, rows, zoneIds)
   if (cut.length > 0) return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Not every area connects: ${cut.join(', ')} cannot be reached`, { path: 'venue', affectedIds: cut })
 
@@ -162,7 +180,7 @@ export function buildPreparedMap(spec: VenueSpec): Result<PreparedMap> {
     ...spec.areas.map((area, a): EntityBlueprint => ({ id: area.id, kind: 'zone', ...metadata(area), shape: { kind: 'rectangle', ...cellBounds(zoneIndex, a + 1, columns, cellSize) } })),
     ...spec.portals.map((portal, p): EntityBlueprint => ({
       id: portal.id, kind: 'portal', ...metadata(portal),
-      components: { portal: { connects: [portal.connects[0], portal.connects[1]], open: portal.open ?? true, ...(portal.oneWay !== undefined && { oneWay: portal.oneWay }) } },
+      components: { portal: { connects: [portal.connects[0], portal.connects[1]], open: portal.open ?? true, ...(portal.oneWay !== undefined && { oneWay: portal.oneWay }), ...(portal.traversalTime !== undefined && { traversalTime: portal.traversalTime }) } },
       shape: { kind: 'rectangle', ...cellBounds(portalIndex, p + 1, columns, cellSize) },
     })),
   ]

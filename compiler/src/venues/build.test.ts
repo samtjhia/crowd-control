@@ -68,3 +68,16 @@ test('broken venues fail with the path of the problem', () => {
   assert.equal(code(edited((spec) => { spec.portals[0]!.id = 'lobby' })), 'INVALID_SCHEMA')
   assert.equal(code(edited((spec) => { spec.areas[0]!.rects[0]!.width = 20 })), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
 })
+
+test('obstacles are wall inside an area, and may not block a doorway', () => {
+  const { grid } = value(edited((spec) => { spec.obstacles = [{ label: 'Table', rect: { x: 2, y: 2, width: 2, height: 0.75 } }] }))
+  assert.equal(count(grid, 'zoneIndex', 'lobby'), 24 * 20 - 8 * 3)
+  assert.equal(grid.blocked[Math.floor(2.5 / 0.25) * grid.width + Math.floor(3 / 0.25)], 1)
+  const blocking = edited((spec) => { spec.obstacles = [{ label: 'Bin', rect: { x: 6.5, y: 1, width: 0.5, height: 0.5 } }] })
+  assert.match(blocking.ok ? '' : blocking.error.message, /Bin blocks a doorway/)
+})
+
+test('a door can take time to pass through, like a check-in desk', () => {
+  const { entities } = value(edited((spec) => { spec.portals[0]!.traversalTime = 4 }))
+  assert.equal(entities.find((e) => e.id === 'cafe_door')?.components?.portal?.traversalTime, 4)
+})
