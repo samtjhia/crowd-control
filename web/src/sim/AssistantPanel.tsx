@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useAuth0 } from '@auth0/auth0-react'
 import { Check, LoaderCircle, Play, RotateCcw, SendHorizontal, X } from 'lucide-react'
 import type { CreateInterventionRequest, InterventionSummary, InventoryItem, ScenarioPlan } from '@crowd-control/contract'
 import { describeOperations, describePlan, displayName } from '../planner/describe.ts'
@@ -44,6 +45,14 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
   const [kind, setKind] = useState<AskKind>('change')
   const [where, setWhere] = useState<string>(currentVenueId ?? GENERATE)
   const [busy, setBusy] = useState(false)
+  // The planner API needs the signed-in person's Auth0 token, like the planner page sends.
+  const { getAccessTokenSilently } = useAuth0()
+  const authFetch = useCallback(async (url: string, init: RequestInit) => {
+    const token = await getAccessTokenSilently()
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return fetch(url, { ...init, headers })
+  }, [getAccessTokenSilently])
   const nextId = useRef(messages.reduce((max, m) => Math.max(max, m.id), 0) + 1)
   const list = useRef<HTMLOListElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
@@ -86,7 +95,7 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
       ...(venue && { layout: venue.layout }), inventory: venue?.inventory ?? [], interventions: [],
     })
     if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that request: ${request.error.message}`, tone: 'error' })
-    const outcome = await askPlanner(request.value, 'scenario')
+    const outcome = await askPlanner(request.value, 'scenario', authFetch)
     if (outcome.type === 'message') return add({ from: 'assistant', text: outcome.text, tone: outcome.tone })
     if (outcome.type !== 'scenario') return add({ from: 'assistant', text: 'That came back as a change rather than a scenario. Try again.', tone: 'info' })
     // The person chose where: the planner sometimes invents a lookalike building instead, whose
@@ -114,7 +123,7 @@ ${places}` : prompt, kind: 'change',
       ...(venue && { layout: venue.layout }), inventory, ...(view.metrics && { summary: view.metrics }), interventions,
     })
     if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that request: ${request.error.message}`, tone: 'error' })
-    const outcome = await askPlanner(request.value, 'change')
+    const outcome = await askPlanner(request.value, 'change', authFetch)
     if (outcome.type === 'change') add({ from: 'assistant', change: pinGoalTargets(outcome.request, inventory), prompt, inventory, status: 'ready' })
     else if (outcome.type === 'message') add({ from: 'assistant', text: outcome.text, tone: outcome.tone })
     else add({ from: 'assistant', text: 'That came back as a whole new scenario rather than a change. Switch to “New scenario” if that’s what you want.', tone: 'info' })

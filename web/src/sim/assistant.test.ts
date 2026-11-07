@@ -206,3 +206,9 @@ test('goal targets chosen by tag become the explicit IDs the engine needs; who s
   assert.deepEqual(target(pinned[3]!), { tags: ['nowhere'] }, 'a tag matching nothing is left for the simulator to report')
   assert.match(explainRefusal('Selector matched no agents'), /Nobody matches that right now/)
 })
+
+test('a sign-in refusal from the server is shown as it is, not as an unreadable reply', async () => {
+  const gate = server(() => ({ ok: false, error: 'A valid Auth0 access token is required.' }))
+  const outcome = await askPlanner(request('change'), 'change', gate.fetcher)
+  assert.deepEqual(outcome, { type: 'message', tone: 'error', text: 'The assistant is unavailable: A valid Auth0 access token is required.' })
+})

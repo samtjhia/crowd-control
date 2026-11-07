@@ -99,6 +99,10 @@ export async function askPlanner(request: PlannerRequest, kind: AskKind, fetcher
         : 'Can’t reach the assistant. Start the planner server (npm run dev:server) and try again.',
     }
   }
+  // The server's sign-in check answers { ok: false, error: "…" } before the planner runs.
+  if (typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string') {
+    return { type: 'message', tone: 'error', text: `The assistant is unavailable: ${payload.error}` }
+  }
   const result = parseContract(serviceResultSchema(PlannerReplySchema), payload)
   if (!result.ok) return { type: 'message', tone: 'error', text: 'The assistant sent back something unreadable. Try again.' }
   if (!result.value.ok) return { type: 'message', tone: 'error', text: result.value.error.message }
