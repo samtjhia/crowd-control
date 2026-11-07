@@ -81,7 +81,6 @@ h1, h2 { font-family: 'Manrope', sans-serif; font-weight: 500; letter-spacing: -
 .text-link:hover { color: #204e34; }
 .crowd-handoff { position: relative; height: 220px; max-width: 1240px; margin: 0 auto; }
 .falling-crowd { display: block; width: 100%; height: 100%; }
-.handoff-line { position: absolute; left: 50%; top: 0; height: 100%; width: 1px; background: #dce4d6; }
 .explore-section { max-width: 1240px; margin: 0 auto; padding: 65px 30px 80px; scroll-margin-top: 15px; }
 .section-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; margin-bottom: 43px; }
 .section-heading h2 { font-size: clamp(34px, 3.6vw, 49px); line-height: 1.14; margin-bottom: 0; }
@@ -251,12 +250,9 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
 .hero h1 { margin-bottom: 0; }
 .campus-scene { top: 54%; bottom: 0; height: 46%; overflow: hidden; }
 .story { margin-top: 0; }
-.handoff-line { width: 86px; left: 50%; transform: translateX(-50%); height: 55px; background: #fcf2e5; }
-.handoff-line::after { content: ''; position: absolute; left: 0; right: 0; bottom: -5px; height: 5px; background: #e1dcca; }
 @media (max-width: 700px) {
   .hero-copy { top: 38%; }
   .story { margin-top: 0; height: 1320px; }
-  .handoff-line { width: 48px; }
 }
 
 /* One uninterrupted Bézier road and one stream of walkers across both scenes. */
@@ -330,114 +326,158 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
  .sky-simulation { height: 270px; }
 }
 
-/* The original crowd path stays in front of ambient everyday city scenery. */
-.city-scenery { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; opacity: .7; }
-.story { display: block; height: 1700px; padding: 0; }
-.story-stop { position: absolute; width: 38%; max-width: 420px; padding: 0; background: transparent; border: 0; box-shadow: none; }
-.stop-one { top: 75px; left: 8%; right: auto; }
-.stop-two { top: 680px; right: 5%; left: auto; }
-.stop-three { top: 1300px; left: 8%; right: auto; }
-.plain-checks { list-style: disc; padding-left: 17px; }
-.plain-checks li { display: list-item; line-height: 1.7; padding-left: 2px; }
-@media (max-width: 700px) {
- .story { height: 1760px; }
- .story-stop { width: 65%; max-width: 340px; left: 6%; right: auto; }
- .stop-one { top: 65px; }
- .stop-two { top: 630px; }
- .stop-three { top: 1200px; }
- .city-scenery { opacity: .3; }
-}
 
-/* First environmental stop: a campus facade, plaza, and small prompt kiosk. */
-.campus-plaza { top: 10px; left: -3%; width: 57%; max-width: 680px; }
-.plaza-building { position: relative; width: 100%; aspect-ratio: 700 / 450; }
-.plaza-artwork, .plaza-residents { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.campus-plaza h2 { position: absolute; top: 27%; left: 32.5%; width: 59%; font-size: clamp(25px, 2.9vw, 40px); line-height: 1.18; letter-spacing: -.04em; margin: 0; text-wrap: initial; }
-.campus-plaza h2 span { color: #657e59; white-space: nowrap; }
-.plaza-copy { margin: 2px 0 0 16%; width: 57%; max-width: 370px; }
-.plaza-copy p { font-size: 13px; line-height: 1.8; margin-bottom: 14px; }
-.plaza-kiosk { position: relative; width: max-content; max-width: 100%; margin-top: 21px; padding: 13px 18px 14px 12px; background: #eef2e4; border-top: 5px solid #859b78; border-bottom: 4px solid #d3ddc4; }
-.plaza-kiosk::after { content: ''; position: absolute; top: 100%; height: 24px; width: 10px; left: 47%; background: #a9b49c; }
-.plaza-kiosk .example-prompt { margin: 0; gap: 10px; font-size: 11px; line-height: 1.7; }
-@media (min-width: 701px) and (max-width: 1000px) {
- .campus-plaza { width: 62%; }
- .campus-plaza h2 { font-size: clamp(22px, 3vw, 29px); }
- .plaza-copy { width: 65%; }
-}
-@media (max-width: 700px) {
- .campus-plaza { top: 28px; left: -2%; width: 78%; max-width: none; }
- .campus-plaza h2 { top: 27%; left: 32.5%; width: 62%; font-size: clamp(18px, 5.15vw, 26px); line-height: 1.18; }
- .plaza-copy { margin-top: 15px; margin-left: 12%; width: 79%; }
- .plaza-copy p { font-size: 12px; line-height: 1.85; }
- .plaza-kiosk { margin-top: 20px; padding: 12px 10px; }
- .plaza-kiosk .example-prompt { font-size: 10px; gap: 8px; }
-}
-
-/* The narrow side of the mobile path cannot fit a building footprint. */
-@media (max-width: 700px) { .city-scenery .city-east { display: none; } }
-
-/* Shared terrain is below every scene object; the existing crowd road is above. */
+/* Environmental story: a connected route through three different public places. */
+.city-scenery { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; opacity: .6; }
 .journey-ground { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 0; pointer-events: none; }
-.campus-plaza { top: -8px; left: -3%; width: 68%; max-width: 800px; }
-.plaza-copy { margin-left: 12%; width: 45%; max-width: 330px; }
+.story { display: block; position: relative; height: 2480px; padding: 0; }
+.story-stop { position: absolute; padding: 0; background: transparent; border: 0; box-shadow: none; }
+.story-building { position: relative; width: 100%; aspect-ratio: 700 / 450; }
+.plaza-artwork, .plaza-residents, .location-art, .location-residents { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.campus-plaza { top: 40px; left: -3%; right: auto; width: 65%; max-width: 780px; }
+.operations-location { top: 865px; left: auto; right: -3%; width: 60%; max-width: 740px; }
+.garden-location { top: 1660px; left: -3%; right: auto; width: 64%; max-width: 760px; }
+.story-building h2 { position: absolute; margin: 0; line-height: 1.17; letter-spacing: -.035em; text-wrap: initial; }
+.campus-plaza h2 { top: 27.5%; left: 29.5%; width: 49%; font-size: clamp(27px, 2.45vw, 34px); }
+.campus-plaza h2 span, .garden-location h2 span { white-space: nowrap; color: #637d57; }
+.operations-location h2 { top: 34%; left: 20.5%; width: 43%; font-size: clamp(24px, 2.1vw, 30px); line-height: 1.15; }
+.garden-location h2 { top: 27%; left: 19%; width: 48%; font-size: clamp(28px, 2.5vw, 35px); }
+.plaza-copy, .location-copy { position: relative; margin-top: 56px; }
+.plaza-copy p, .location-copy p { font-size: 17px; line-height: 1.7; color: #52664f; margin-bottom: 18px; max-width: none; }
+.plaza-copy { display: grid; grid-template-columns: minmax(0, 1fr) 185px; column-gap: 30px; align-items: start; width: 77%; max-width: 600px; margin-left: 12%; }
+.plaza-copy > p { grid-column: 1; }
+.plaza-copy > p:nth-of-type(2) { margin-bottom: 0; }
+.plaza-kiosk { grid-column: 2; grid-row: 1 / span 2; position: relative; padding: 20px 12px 17px; margin: 0; background: #eef2e2; border: 7px solid #6e8a73; border-top-width: 13px; border-radius: 4px; }
+.plaza-kiosk::before, .plaza-kiosk::after { content: ''; position: absolute; top: calc(100% + 7px); width: 8px; height: 35px; background: #8c9e86; }
+.plaza-kiosk::before { left: 16%; }
+.plaza-kiosk::after { right: 16%; }
+.plaza-kiosk .example-prompt { margin: 0; display: block; font-size: 13px; line-height: 1.75; color: #304f3b; }
+.plaza-kiosk .prompt-avatar { margin-bottom: 10px; border-radius: 3px; width: auto; height: auto; display: block; background: none; color: #526a48; font-size: 11px; }
+.location-copy { width: 57%; max-width: 420px; }
+.operations-copy { margin-left: 34%; }
+.garden-copy { margin-left: 12%; }
+.process-wayfinding { position: relative; margin: 27px 0 0 8px; padding: 0 0 4px 16px; border-left: 5px solid #8ba084; }
+.process-wayfinding::after { content: ''; position: absolute; bottom: -25px; left: -5px; width: 5px; height: 28px; background: #8ba084; }
+.process-wayfinding .plain-checks { margin: 0; padding: 0; list-style: none; }
+.process-wayfinding .plain-checks li { position: relative; display: block; margin: 0 14px 9px 0; padding: 10px 16px 10px 12px; background: #eef1e3; color: #405c43; font-size: 14px; line-height: 1.5; }
+.process-wayfinding .plain-checks li::after { content: ''; position: absolute; left: 100%; top: 0; width: 14px; height: 100%; background: #eef1e3; clip-path: polygon(0 0,100% 50%,0 100%); }
+.garden-copy .text-link { font-size: 14px; margin-top: 8px; }
+@media (min-width: 701px) and (max-width: 1300px) { .operations-location { right: 0; } }
 @media (min-width: 701px) and (max-width: 1000px) {
  .campus-plaza { width: 65%; }
- .plaza-copy { width: 64%; }
-}
-@media (max-width: 700px) {
- .campus-plaza { top: 28px; left: -2%; width: 78%; }
- .plaza-copy { width: 79%; margin-left: 12%; }
-}
-
-/* Three distinct locations along one connected pedestrian strip. */
-.story { height: 2420px; }
-.story-building { position: relative; width: 100%; aspect-ratio: 700 / 450; }
-.location-art, .location-residents { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
-.campus-plaza { top: 12px; left: -3%; width: 65%; max-width: 780px; }
-.operations-location { top: 825px; left: auto; right: -3%; width: 60%; max-width: 740px; }
-.garden-location { top: 1660px; left: -3%; right: auto; width: 65%; max-width: 780px; }
-.operations-location h2, .garden-location h2 { position: absolute; margin: 0; letter-spacing: -.04em; text-wrap: initial; }
-.operations-location h2 { top: 50.3%; left: 35%; width: 50%; font-size: clamp(25px, 2.25vw, 32px); line-height: 1.12; }
-.garden-location h2 { top: 39%; left: 32%; width: 55%; font-size: clamp(28px, 2.8vw, 40px); line-height: 1.17; }
-.garden-location h2 span { white-space: nowrap; }
-.location-copy { position: relative; width: 48%; max-width: 360px; margin-top: 20px; }
-.location-copy p { font-size: 13px; line-height: 1.85; margin-bottom: 14px; }
-.operations-copy { margin-left: 40%; }
-.garden-copy { margin-left: 15%; }
-.plaza-copy { margin-top: 18px; width: 48%; max-width: 360px; }
-.process-wayfinding { position: relative; padding: 12px 17px; margin-top: 20px; border-top: 5px solid #8ba184; background: #eff2e4; }
-.process-wayfinding::after { content: ''; position: absolute; top: 100%; left: 13px; height: 25px; width: 7px; background: #a7b39a; }
-.process-wayfinding .plain-checks { padding-left: 14px; margin: 0; font-size: 11px; }
-.process-wayfinding .plain-checks li { margin: 7px 0; }
-@media (min-width: 701px) and (max-width: 1000px) {
- .campus-plaza, .garden-location { width: 65%; }
  .operations-location { width: 62%; }
- .operations-location h2 { font-size: clamp(21px, 2.5vw, 25px); }
- .garden-location h2 { font-size: clamp(23px, 3vw, 30px); }
- .location-copy { width: 64%; }
- .operations-copy { margin-left: 30%; }
- .plaza-copy { width: 65%; }
+ .garden-location { width: 62%; }
+ .campus-plaza h2 { font-size: clamp(22px, 2.9vw, 28px); }
+ .operations-location h2 { font-size: clamp(20px, 2.55vw, 25px); }
+ .garden-location h2 { font-size: clamp(22px, 2.8vw, 28px); }
+ .plaza-copy { display: block; width: 76%; }
+ .plaza-kiosk { width: 185px; margin-top: 25px; }
+ .location-copy { width: 68%; }
+ .operations-copy { margin-left: 25%; }
 }
 @media (max-width: 700px) {
- .story { height: 2320px; }
+ .story { height: 2250px; }
  .campus-plaza, .operations-location, .garden-location { left: -2%; right: auto; width: 78%; max-width: none; }
  .campus-plaza { top: 28px; }
- .operations-location { top: 775px; }
- .garden-location { top: 1530px; }
- .operations-location h2 { top: 50.3%; font-size: clamp(14px, 3.9vw, 20px); line-height: 1.1; }
- .garden-location h2 { font-size: clamp(17px, 4.7vw, 26px); }
- .plaza-copy, .location-copy { margin-left: 12%; margin-top: 20px; width: 79%; max-width: none; }
- .location-copy p { font-size: 12px; }
- .process-wayfinding { padding: 10px 12px; }
- .process-wayfinding .plain-checks { font-size: 10px; }
+ .operations-location { top: 760px; }
+ .garden-location { top: 1510px; }
+ .campus-plaza h2 { font-size: clamp(16px, 4.4vw, 23px); }
+ .operations-location h2 { font-size: clamp(14px, 3.7vw, 19px); }
+ .garden-location h2 { width: 51%; font-size: clamp(16px, 4.4vw, 23px); }
+ .plaza-copy, .location-copy { display: block; margin: 32px 0 0 12%; width: 80%; max-width: none; }
+ .plaza-copy p, .location-copy p { font-size: 15px; line-height: 1.7; margin-bottom: 16px; }
+ .plaza-kiosk { width: 185px; max-width: 100%; margin-top: 23px; padding: 13px 12px; border-width: 5px; border-top-width: 10px; }
+ .plaza-kiosk::before, .plaza-kiosk::after { top: calc(100% + 5px); height: 24px; }
+ .plaza-kiosk .example-prompt { font-size: 12px; }
+ .plaza-kiosk .prompt-avatar { margin-bottom: 4px; }
+ .process-wayfinding { margin-top: 22px; padding-left: 10px; }
+ .process-wayfinding .plain-checks li { font-size: 12px; padding: 8px; }
+ .city-scenery { opacity: .3; }
+ .city-scenery .city-east, .city-scenery .city-west { display: none; }
 }
 
-@media (min-width: 701px) and (max-width: 1300px) { .operations-location { right: 0; } }
-
-@media (min-width: 701px) and (max-width: 1000px) { .garden-location { width: 63%; } }
-@media (max-width: 700px) { .operations-location h2 { left: 32.5%; width: 58%; } }
+.station-display-mobile { display: none; }
+.kiosk-visitors { position: absolute; top: calc(100% + 7px); left: -12px; width: calc(100% + 24px); height: 39px; pointer-events: none; }
 @media (max-width: 700px) {
- .story { height: 1950px; }
- .operations-location { top: 650px; }
- .garden-location { top: 1270px; }
+ .station-display-desktop { display: none; }
+ .station-display-mobile { display: block; }
+ .kiosk-visitors { top: calc(100% + 5px); height: 29px; }
 }
+
+/* All story copy lives on environmental surfaces, on the shared paved ground. */
+.story { height: 2580px; }
+.plaza-copy, .location-copy { margin-top: 20px; }
+.environmental-display { position: relative; min-width: 0; }
+.display-canopy { display: block; width: calc(100% + 24px); height: 43px; margin: 0 -12px -5px; overflow: visible; }
+.display-content { position: relative; padding: 24px 24px 22px; background: #faf4e5; border: 6px solid #8ba38a; border-top-width: 4px; }
+.display-shelter .display-content { border-color: #96ad98; background: #f8f2e4; }
+.display-station .display-content { border-color: #5d8069; background: #f0f3e4; }
+.display-garden .display-content { border-color: #b69e7b; background: #faf1de; }
+.display-supports { display: block; width: 100%; height: 54px; margin-top: -1px; }
+.display-content > :last-child { margin-bottom: 0; }
+.plaza-copy { align-items: start; }
+.plaza-copy > .environmental-display { grid-column: 1; }
+.plaza-kiosk { grid-row: auto; margin-top: 43px; }
+.display-content p { color: #405b45; }
+.display-content .process-wayfinding { margin-top: 20px; }
+.display-content .process-wayfinding::after { content: none; }
+.display-content .text-link { margin-top: 5px; }
+@media (min-width: 701px) and (max-width: 1000px) {
+ .display-content { padding: 19px 18px; }
+ .plaza-copy p, .location-copy p { font-size: 16px; }
+ .plaza-kiosk { margin-top: 15px; }
+}
+@media (max-width: 700px) {
+ .story { height: 2850px; }
+ .operations-location { top: 945px; }
+ .garden-location { top: 1910px; }
+ .plaza-copy, .location-copy { margin-top: 18px; }
+ .display-canopy { height: 32px; }
+ .display-content { padding: 18px 16px; border-width: 4px; }
+ .display-supports { height: 42px; }
+ .plaza-kiosk { margin-top: 12px; }
+}
+@media (min-width: 701px) and (max-width: 1000px) {
+ .story { height: 2480px; }
+ .garden-copy { width: 62%; }
+}
+
+/* The landing uses the same route layer; pedestrians stay above its paving. */
+.falling-crowd { position: relative; z-index: 2; }
+
+/* Thin manufactured faces with a visible return, rather than heavy flat frames. */
+.operations-location h2 { top: 32%; }
+.display-content { border-width: 2px; border-top-width: 2px; }
+.display-side, .kiosk-depth { position: absolute; left: -9px; top: -7px; width: 7px; height: calc(100% + 7px); display: block; overflow: visible; pointer-events: none; color: #78927d; }
+.display-station .display-side { color: #4f705d; }
+.display-garden .display-side { color: #a58d6b; }
+.plaza-kiosk { border-width: 3px; border-top-width: 6px; }
+.kiosk-depth { left: -10px; top: -6px; height: calc(100% + 6px); color: #5e7b65; }
+.city-scenery { overflow: visible; }
+@media (max-width: 700px) {
+ .display-content { border-width: 2px; }
+ .display-side, .kiosk-depth { width: 5px; left: -7px; top: -5px; height: calc(100% + 5px); }
+ .plaza-kiosk { border-width: 3px; border-top-width: 6px; }
+}
+.plaza-kiosk::before, .plaza-kiosk::after { top: calc(100% + 3px); }
+.kiosk-visitors { top: calc(100% + 3px); }
+/* One joined frame replaces the detached roof / flat card / tiny bench stack. */
+.environmental-display { padding-bottom: 44px; isolation: isolate; }
+.display-structure { position: absolute; left: 0; z-index: 0; display: block; overflow: visible; pointer-events: none; }
+.environmental-display .display-content { position: relative; z-index: 1; border: 0; background: #faf4e8; }
+.environmental-display[data-framed='true'] .display-content { background: transparent; }
+.display-content > p, .display-content > .process-wayfinding, .display-content > .text-link { position: relative; }
+
+/* Text follows its own sign plane; entrance motion stays on the outer heading. */
+.campus-plaza { --heading-shear: -.07972665; }
+.operations-location { --heading-shear: -.08510638; }
+.garden-location { --heading-shear: -.00793651; }
+.story-building h2 > .heading-plane { display: block; color: var(--ink); white-space: normal; transform-origin: 0 0; transform: matrix(1, var(--heading-shear), 0, 1, 0, 0); }
+.story-building .heading-plane > .heading-accent { color: #637d57; }
+
+/* The example board uses the same joined cap/face construction as the signs. */
+.plaza-kiosk { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.plaza-kiosk::before, .plaza-kiosk::after { content: none; }
+.plaza-kiosk .display-content { padding: 18px 12px 16px; }
+.plaza-kiosk .kiosk-visitors { top: auto; bottom: 0; height: 44px; }
+@media (max-width: 700px) { .plaza-kiosk { padding: 0; border: 0; } }

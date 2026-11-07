@@ -1,7 +1,7 @@
 import { TRAIL_COLOR, trailWidth } from './campusFrame'
 import type { JourneyGeometry } from './journeyGeometry'
 
-export type StorySite = { x: number; y: number; width: number; height: number }
+export type StorySite = { x: number; y: number; width: number; height: number; content?: { x: number; y: number; width: number; height: number } }
 
 function LandscapeTree({ x, y, size = 1 }: { x: number; y: number; size?: number }) {
   return <g transform={`translate(${x} ${y}) scale(${size})`}>
@@ -26,14 +26,16 @@ export function PlazaLandscape({ geometry, sites }: { geometry: JourneyGeometry;
       const front = at(right ? 55 : 670, 407), join = nearest(front.y)
       const farX = right ? width : 0
       const shoulder = join.x + (right ? radius + 34 : -radius - 34)
-      const bottom = at(0, 449).y
+      const bottom = Math.max(at(0, 449).y, site.content ? site.content.y + site.content.height + 30 : 0)
+      const contentLeft = site.content ? site.content.x - 25 : site.x
+      const contentRight = site.content ? site.content.x + site.content.width + 25 : site.x + site.width
       const terrace = right
-        ? `M${farX} ${at(0, 275).y}Q${site.x + site.width * .45} ${at(0, 250).y} ${join.x - radius} ${join.y - 40}L${join.x - radius} ${join.y + 25}Q${site.x + site.width * .4} ${bottom + 36} ${farX} ${bottom - 12}Z`
-        : `M0 ${at(0, 280).y}Q${site.x + site.width * .55} ${at(0, 255).y} ${join.x + radius} ${join.y - 40}L${join.x + radius} ${join.y + 25}Q${site.x + site.width * .48} ${bottom + 42} 0 ${bottom - 12}Z`
+        ? `M${farX} ${at(0, 275).y}Q${site.x + site.width * .45} ${at(0, 250).y} ${join.x - radius} ${join.y - 40}L${join.x - radius} ${join.y + 25}C${join.x - radius + 30} ${join.y + 100} ${contentLeft - 40} ${bottom - 90} ${contentLeft} ${bottom + 5}Q${site.x + site.width * .4} ${bottom + 45} ${farX} ${bottom - 12}Z`
+        : `M0 ${at(0, 280).y}Q${site.x + site.width * .55} ${at(0, 255).y} ${join.x + radius} ${join.y - 40}L${join.x + radius} ${join.y + 25}C${join.x + radius - 30} ${join.y + 100} ${contentRight + 40} ${bottom - 90} ${contentRight} ${bottom + 5}Q${site.x + site.width * .48} ${bottom + 45} 0 ${bottom - 12}Z`
       const connector = `M${front.x} ${front.y}C${front.x + (join.x - front.x) * .5} ${front.y + 4} ${join.x} ${join.y} ${join.x} ${join.y}`
       return <g key={index} className="location-ground">
-        <path d={`M${farX} ${site.y + 88}Q${site.x + site.width * .5} ${site.y - 10} ${shoulder} ${site.y + site.height * .62}L${shoulder} ${bottom + 15}Q${site.x + site.width * .5} ${bottom + 77} ${farX} ${bottom - 15}Z`} fill={index === 2 ? '#e4ebd0' : '#e9eedb'} />
-        <path className="location-terrace" d={terrace} fill={TRAIL_COLOR} />
+        <path d={`M${farX} ${site.y + 88}Q${site.x + site.width * .5} ${site.y - 10} ${shoulder} ${site.y + site.height * .62}L${shoulder} ${bottom + 15}Q${site.x + site.width * .5} ${bottom + (mobile ? 24 : 45)} ${farX} ${bottom - 15}Z`} fill={index === 2 ? '#e4ebd0' : '#e9eedb'} />
+        <path className="location-terrace" d={terrace} fill="#f2efe5" />
         <path className="scene-connection" d={connector} stroke={TRAIL_COLOR} strokeWidth={mobile ? 26 : 46} fill="none" strokeLinecap="round" data-route-x={join.x} data-route-y={join.y} />
         {!mobile && <g>
           <LandscapeTree x={shoulder + (right ? 26 : -26)} y={site.y + site.height * .53} size={.68} />

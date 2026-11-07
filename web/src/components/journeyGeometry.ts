@@ -3,9 +3,9 @@ import type { Point } from './canvas'
 
 type Box = { x: number; y: number; width: number; height: number }
 export type Cubic = { start: Point; a: Point; b: Point; end: Point }
-export type JourneyGeometry = { width: number; height: number; campus: Box; story: Box; curves: Cubic[]; points: Point[]; distances: number[]; length: number; path: string }
+export type JourneyGeometry = { width: number; height: number; campus: Box; story: Box; handoff?: Box; curves: Cubic[]; points: Point[]; distances: number[]; length: number; path: string }
 
-export function buildJourneyGeometry(width: number, height: number, campus: Box, story: Box): JourneyGeometry {
+export function buildJourneyGeometry(width: number, height: number, campus: Box, story: Box, handoff?: Box): JourneyGeometry {
   const frame = campusFrame(campus.width, campus.height)
   const project = (x: number, y: number) => ({ x: campus.x + frame.offsetX + x * frame.scale, y: campus.y + frame.offsetY + (frame.campusY + y * frame.campusScaleY) * frame.scale })
   const seam = { x: trailEntryX(width), y: story.y }
@@ -22,6 +22,12 @@ export function buildJourneyGeometry(width: number, height: number, campus: Box,
       a: i === 0 ? { x: start.x, y: start.y + handle } : { x: start.x + (end.x - before.x) / 6, y: start.y + (end.y - before.y) / 6 },
       b: i === points.length - 2 ? { x: end.x, y: end.y - 55 } : { x: end.x - (after.x - start.x) / 6, y: end.y - (after.y - start.y) / 6 }, end })
   }
+  // The same paved strip continues onto the ledge before the crowd falls.
+  if (handoff) {
+    const start = curves[curves.length - 1].end
+    const end = { x: handoff.x + handoff.width / 2, y: handoff.y + 55 }
+    curves.push({ start, a: { x: start.x, y: start.y + 18 }, b: { x: end.x, y: end.y - 18 }, end })
+  }
   const samples: Point[] = [curves[0].start]
   for (const curve of curves) for (let step = 1; step <= 64; step++) {
     const t = step / 64, u = 1 - t
@@ -31,7 +37,7 @@ export function buildJourneyGeometry(width: number, height: number, campus: Box,
   const distances = [0]
   for (let i = 1; i < samples.length; i++) distances.push(distances[i - 1] + Math.hypot(samples[i].x - samples[i - 1].x, samples[i].y - samples[i - 1].y))
   const path = `M${curves[0].start.x} ${curves[0].start.y} ` + curves.map(c => `C${c.a.x} ${c.a.y} ${c.b.x} ${c.b.y} ${c.end.x} ${c.end.y}`).join(' ')
-  return { width, height, campus, story, curves, points: samples, distances, length: distances[distances.length - 1], path }
+  return { width, height, campus, story, handoff, curves, points: samples, distances, length: distances[distances.length - 1], path }
 }
 
 export function journeyPoint(geometry: JourneyGeometry, distance: number) {

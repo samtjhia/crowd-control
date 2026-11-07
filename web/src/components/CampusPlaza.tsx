@@ -1,3 +1,4 @@
+import { EnvironmentalDisplay } from './EnvironmentalDisplay'
 import { drawPerson, useCanvas } from './canvas'
 
 export function Tree({ x, y, scale = 1 }: { x: number; y: number; scale?: number }) {
@@ -23,6 +24,7 @@ export function Shrubs({ x, y, scale = 1 }: { x: number; y: number; scale?: numb
 
 function PlazaArtwork() {
   return <svg className="plaza-artwork" viewBox="0 0 700 450" aria-hidden="true">
+    <g transform="translate(20 24) scale(.82)">
     {/* Rear hall, roof and skylights. */}
     <path d="m60 66 300-40 255 55-305 42Z" fill="#fffcf4" />
     <path d="m60 66 250 57v168L60 230Z" fill="#e6dfce" />
@@ -49,7 +51,7 @@ function PlazaArtwork() {
     {/* Headline is selectable HTML positioned on this broad cream face. */}
     <path d="m180 100 438-34 23 13-439 35Z" fill="#fffdf7" />
     <path d="M180 100 202 114v135l-22-13Z" fill="#e6ddca" />
-    <path d="m202 114 439-35v135l-439 35Z" fill="#f7efdf" />
+    <path className="campus-headline-face" d="m202 114 439-35v135l-439 35Z" fill="#f7efdf" />
     <path d="m202 246 439-35v8l-439 35Z" fill="#e6dbc4" />
     {/* Broad shallow steps and a paved landing. */}
     <path d="m187 330 440-34 28 15-441 35Z" fill="#fffaf0" />
@@ -66,35 +68,48 @@ function PlazaArtwork() {
     <Tree x={34} y={199} scale={.72} /><Tree x={660} y={239} scale={.72} /><Tree x={672} y={105} scale={.65} />
     <path d="m470 400 66-13 27 10-67 15Z" fill="#d1b68b" /><path d="M482 406v13m66-18v12" stroke="#ad997a" strokeWidth="4" />
     <g transform="translate(628 374)" fill="none" stroke="#628575" strokeWidth="3"><path d="M0 0v-66q0-12 13-12h12" /><path d="M17-78h20" strokeWidth="6" /></g>
+    </g>
+    <Tree x={58} y={350} scale={.82} /><Shrubs x={91} y={359} scale={.85} />
+    <path d="m471 355 111-20 36 14-112 24Z" fill="#fff8e9" /><path d="m506 373 112-24v17l-112 25Z" fill="#dbd7c1" />
+    <Shrubs x={527} y={347} scale={.7} /><Shrubs x={579} y={339} scale={.7} />
+    <path d="m180 399 65-13 29 10-66 14Z" fill="#dcc59c" /><path d="M192 405v13m65-13v12" stroke="#ad997b" strokeWidth="4" />
   </svg>
 }
 
 function PlazaResidents({ reduced }: { reduced: boolean }) {
   const canvas = useCanvas((ctx, width, height, time, still) => {
     const scale = Math.min(width / 700, height / 450)
-    ctx.save(); ctx.scale(scale, scale)
+    ctx.save(); ctx.scale(scale, scale); ctx.translate(20, 24); ctx.scale(.82, .82)
     // Residents wait on the upper landing; walkers stay on the level plaza.
     for (const [i, x, y] of [[2, 327, 330], [7, 398, 324], [16, 438, 322], [22, 116, 377], [25, 130, 381]]) drawPerson(ctx, x, y, 1.1, i, 0, false)
     for (let i = 0; i < 3; i++) {
       const phase = (still ? i / 3 : (time * .025 + i / 3) % 1)
-      const x = 245 + phase * 220
-      drawPerson(ctx, x, 409 - phase * 8, 1.1, i + 40, time, !still)
+      const x = 240 + phase * 350
+      drawPerson(ctx, x, 445 - phase * 5, 1.1, i + 40, time, !still)
     }
     ctx.restore()
   }, reduced, true)
   return <canvas className="plaza-residents" ref={canvas} aria-hidden="true" />
 }
 
+function KioskVisitors() {
+  const canvas = useCanvas((ctx, width, height) => {
+    drawPerson(ctx, 19, height - 5, .86, 74, 0, false)
+    drawPerson(ctx, width - 24, height - 2, .86, 81, 0, false)
+  }, true, false)
+  return <canvas className="kiosk-visitors" ref={canvas} aria-hidden="true" />
+}
+
 export function CampusPlaza({ reduced }: { reduced: boolean }) {
   return <article className="story-stop stop-one campus-plaza" aria-labelledby="plaza-title">
     <div className="plaza-building story-building">
       <PlazaArtwork /><PlazaResidents reduced={reduced} />
-      <h2 id="plaza-title">Big ideas.<br /><span>Everyday words.</span></h2>
+      <h2 id="plaza-title"><span className="heading-plane">Big Possibilities.<br /><span className="heading-accent">Little Effort.</span></span></h2>
     </div>
-    <div className="plaza-copy">
-      <p>You know your space. You have a question.<br />That’s enough to begin.</p>
-      <p>Describe your venue and the people in it. Crowd Control turns natural language into a plan you can explore, whatever your skill level.</p>
-      <div className="plaza-kiosk"><div className="example-prompt"><span className="prompt-avatar">You</span><span>“A school. 100 students.<br />Let’s run a fire drill.”</span></div></div>
+    <div className="plaza-copy embedded-copy">
+      <EnvironmentalDisplay kind="shelter"><p><strong>Start with a scenario.</strong></p>
+      <p>Tell us who's there, where they are, and what happens. Crowd Control brings your idea to life in a simulation you can explore.</p></EnvironmentalDisplay>
+      <div className="plaza-kiosk"><EnvironmentalDisplay kind="example"><div className="example-prompt"><span className="prompt-avatar">EXAMPLE PROMPT</span><span>&quot;Simulate a fire drill with 100 students in a school.&quot;</span></div></EnvironmentalDisplay><KioskVisitors /></div>
     </div>
   </article>
 }

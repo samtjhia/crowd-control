@@ -22,3 +22,11 @@ These are illustrative looping previews with humanoid figures, scenario selectio
 The opening sky includes ambient bird flocking, wing motion, and independently drifting clouds. These are decorative scene behaviors, separate from the product's crowd-simulation engine, and remain static for reduced-motion users.
 
 The story now embeds its three headings into distinct campus, transit/operations, and garden architecture along the original connected cream path and animated crowd. The latest approved scope completes all three environments before user review. Supporting copy stays readable HTML, with a scenario kiosk and process wayfinding display.
+
+The current environmental refinement makes the three locations distinct: a campus entrance, open transit plaza, and experimental pond garden with two routes. Supporting paragraphs use readable HTML at 17px desktop and 15px mobile. Ambient crowd animation uses pairs, groups, singles and local gathering areas; this remains illustrative scene behavior rather than live engine output.
+
+Latest presentation correction: all story paragraphs live on physical information displays within the environment, rather than open editorial text. The original continuous pedestrian strip and walking crowd remain prominent through the plazas.
+
+Approved first-scene copy: the building headline stays “Big ideas. Everyday words.” The large information board opens “Start with a scenario.” and explains “Tell us who's there, where they are, and what happens. Crowd Control brings your idea to life in a simulation you can explore.” The small board is labeled “EXAMPLE PROMPT” and shows “Simulate a fire drill with 100 students in a school.”
+
+Latest first-building headline: “Big Possibilities. Little Effort.” The opening hero remains “Simulate Any Crowd.” Supporting board copy and example prompt retain their latest approved wording.

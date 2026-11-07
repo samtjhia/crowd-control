@@ -1,6 +1,7 @@
 import { drawPerson, useCanvas } from './canvas'
 import { campusPeopleAt } from './campusMotion'
-import { campusFrame, trailWidth } from './campusFrame'
+import { campusFrame } from './campusFrame'
+import { journeyPeopleAt } from './journeyCrowdMotion'
 import { useJourney, drawJourneyPeople } from './journeyFlow'
 
 export function CampusCrowd({ reduced, playing }: { reduced: boolean; playing: boolean }) {
@@ -31,15 +32,21 @@ export function StoryCrowd({ reduced, playing }: { reduced: boolean; playing: bo
 }
 
 export function FallingCrowd({ reduced, playing }: { reduced: boolean; playing: boolean }) {
-  const canvas = useCanvas((ctx, width, height, time, still) => {
-    for (let i = 0; i < 32; i++) {
-      const phase = (i / 32 + (still ? 0 : time * .09)) % 1
-      const y = phase * phase * (height + 30)
-      const drop = Math.max(0, (y - 55) / Math.max(1, height - 55))
-      const spread = trailWidth(window.innerWidth) / 2 - 7 + drop * 100
-      const x = width / 2 + Math.sin(i * 9.3) * spread
-      ctx.save(); ctx.translate(x, y); ctx.rotate(still ? 0 : Math.sin(i) * drop * .4)
-      drawPerson(ctx, 0, 0, .95, i, time, !still && y < 55); ctx.restore()
+  const geometry = useJourney()
+  const canvas = useCanvas((ctx, width, height, _time, still, flowTime) => {
+    if (!geometry?.handoff) return
+    const box = geometry.handoff
+    const time = still ? 0 : flowTime
+    for (const person of journeyPeopleAt(geometry, time, 35)) {
+      const beyond = Math.max(0, person.distance - geometry.length)
+      const fallingTime = beyond / (13 * person.pace)
+      const drop = Math.min(1, fallingTime / 1.5)
+      const x = person.x - box.x + Math.sin(person.identity * 2.7) * drop * 72
+      const y = beyond ? 55 + 24 * fallingTime * fallingTime : person.y - box.y
+      if (y < 0 || y > height + 20 || x < -10 || x > width + 10) continue
+      ctx.save(); ctx.translate(x, y); ctx.rotate(still ? 0 : Math.sin(person.identity) * drop * .4)
+      drawPerson(ctx, 0, 0, person.size, person.identity, time * person.pace, !still && !beyond)
+      ctx.restore()
     }
   }, reduced, playing)
   return <canvas ref={canvas} className="falling-crowd" aria-hidden="true" />

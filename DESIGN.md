@@ -199,14 +199,52 @@ The scene uses warm white `#fbfaf8`, cream paving `#fcf2e5`, yellow-green lawns 
 Hero, story-stop, scenario-introduction, and closing copy use a restrained, one-time fade and rise. Headings move 16px over 680ms; supporting copy moves 12px over 560ms, starting 140ms later with 75ms increments capped at 340ms. Natural deceleration uses `cubic-bezier(0.16, 1, 0.3, 1)`. IntersectionObserver triggers at 80% viewport height; the native Web Animations API preserves text nodes, wrapping, and layout. Completed effects are removed. No GSAP dependency or scroll listener is added. Reduced motion, printing, keyboard focus, and unsupported/failed initialization expose original visible content immediately. There is no CSS-hidden default state.
 
 
-### Environmental story: three locations, one connected strip
+### Environmental story: a connected campus, transit stop, and garden
 
-The latest user direction authorizes completing all three locations together, following the supplied campus/transit references closely and explicitly retaining the connected cream strip and walking people. It supersedes prior first-stop-only staging and narrow-connector-removal experiments.
+The current art-direction brief prioritizes a believable miniature world over oversized architecture. The hero and the original journeyGeometry.ts strip remain unchanged. Shared ground, branch connections, native SVG scenery, and the existing text-entrance system are reused.
 
-The story keeps the original journeyGeometry.ts path and shared crowd stream. Journey measures all three story-building viewports and renders one ground SVG beneath the original path SVG. Each location has a broad paved terrace, planted shoulder, and an explicit cream approach strip joining the actual route. The same cream `#fcf2e5` is used across the strip and forecourts. Rolling green land spans scene edges; the story closes with a shared landscaped verge before the existing falling-crowd handoff.
+The campus retains its cream building and facade headline, scaled to 82% within a larger forecourt so benches, planting and residents have room. Supporting copy forms an editorial column beside a properly framed, two-post scenario kiosk; people gather near the kiosk and entrance. The transit location replaces the large roof/facade with a smaller freestanding station display and a transparent waiting shelter. Its original process steps sit on directional signs along a shared support post. The garden removes the roof and glass building entirely: a low landscaped headline wall overlooks a pond and two cream routes that split, cross the scenic footbridge or take the direct way, and rejoin. Route geometry is shared by the SVG paths and local walking animation. Bridge coverage is checked against the pond fill.
 
-The first location is a campus plaza: cream facade carrying the first HTML headline, skylight roof, glass entrance, steps, planters, bench, and prompt kiosk. The second is a transit/operations pavilion: wide skylight canopy, glass back wall, architectural display carrying the second HTML headline, benches, planting, lamp, and freestanding process information board. The third is an open garden pavilion: curved cream headline wall, planted terraces, amphitheatre steps, benches, and a central tree planter. Native SVG draws all architecture and landscape. Tiny resident groups and slow walkers occupy level ground in separate lightweight canvases; existing path people remain uninterrupted.
+Headlines and copy remain selectable HTML with unchanged wording. Supporting paragraphs are 17px / 1.7 on desktop and 15px / 1.7 on mobile. Desktop campus copy and kiosk sit alongside one another; narrow layouts stack them. Body copy is never skewed or perspective-transformed. The station display has a shallower desktop face and a taller mobile face to accommodate responsive wrapping. The main structural materials remain cream, muted pastel green, forest-green lettering, pale pond water, and timber details, without heavy outlines or decorative shadows.
 
-Headings remain selectable HTML on architectural surfaces. Supporting copy remains level HTML aligned below each location. Existing words are preserved; no decorative emoji badges return. Functional arrows remain. The established one-time type entrances and reduced-motion support apply to all three locations. Scene canvases pause offscreen and when hidden through useCanvas.
+The original crowd stream now travels as deterministic pairs, small groups, and singles with uneven gaps, modest lane variation relative to the path tangent, and bounded changes in walking speed. All regions use the same shared clock and coordinates at the campus/story seam. Bounded speed variation keeps group order stable over time. Local residents wait near entrances, benches and information displays; the garden walkers visibly use both branches. Reduced motion freezes the scene, while offscreen and hidden-document rendering behavior continues through useCanvas.
 
-Desktop uses a 2420px story with alternating large left/right/left locations. Mobile uses a 1950px story with the three locations aligned left of the existing right-hand crowd lane, omitting the extra shared-landscape trees on narrow screens. Tablet headings and footprint widths preserve a clear pedestrian corridor. The hero and scenario explorer are unchanged by this redesign.
+Desktop story height is 2480px; mobile is 2250px. Distant ambient building blocks are omitted on mobile where they would sit behind the larger body copy. The original continuous path, its walking people, hero, scenario explorer, and existing scroll functionality are preserved.
+
+
+### Correction: embedded copy and a clearly continuous route
+
+The latest user correction supersedes the open editorial-body placement. Every story paragraph is now inside an EnvironmentalDisplay: a glazed-canopy campus shelter, a green station information display, or a timber garden information sign. The unchanged example prompt remains in its own campus kiosk, and process steps remain inside the station display. All copy remains selectable, level HTML with the established entrance animations and readable type sizes. The distinct architectural headline scenes and local residents remain intact.
+
+Journey now measures the actual embedded-copy footprints as well as the illustrations. Shared terraces extend under the full information objects and their supports. Neutral plaza paving `#f2efe5` separates the forecourts from the original cream pedestrian strip. The original route geometry and walkers remain; a subtle 2.5px planted paving edge makes the strip visibly continuous through the larger plazas. The approach strips remain connected.
+
+Desktop story height is 2580px, tablet 2480px, and mobile 2850px to fit physical information structures without text-path overlap. Supporting paragraphs remain 17px desktop, 16px tablet, 15px mobile. SVG roofs and supports size independently from the HTML text faces. The hero, scenario explorer and existing wording are unchanged.
+
+
+### One route from the opening campus to the downward transition
+
+The user's connected-path clarification refers to the entire opening-campus → story → downward-handoff route. Journey now wraps all three regions. The original courtyard-to-story curves remain unchanged; one final vertical segment extends the same native SVG path 55px onto the downward ledge. The separate CSS landing strip is removed. FallingCrowd uses the same deterministic pedestrian model, identities, lanes, and global clock as CampusCrowd and StoryCrowd. Beyond the ledge, those same people accelerate downward and spread gently instead of being replaced by a separate looping crowd. Embedded text structures remain intact. The landing canvas sits above its paving; reduced motion renders a static snapshot.
+
+
+### Alignment and material refinement
+
+The signs retain all embedded copy and the existing layouts, with thinner front borders, slimmer station header rails, reduced canopy edge thickness, and explicit shaded return faces behind the HTML panels and scenario kiosk. These native SVG side faces give depth without perspective-transforming text. Kiosk posts and nearby people meet at the same ground level. Local walking routes now pass below bench seats; waiting residents stand in front of seating, and the garden bench is moved clear of the direct branch.
+
+CityScenery no longer draws separate rectangular land slabs. Distant buildings share the existing ground with small contact shadows and access lanes that join the main walkway. The SVG uses the actual story dimensions with uniformly scaled objects, keeping isometric proportions instead of vertically stretching a fixed backdrop. Route-aware placement preserves space for the full building and streetlight bounds, and all objects remain inset from the viewport edges. The connected route, embedded text, wording, and responsive type sizes are unchanged.
+
+
+### Rebuilt sign assemblies
+
+The latest sign correction replaces the detached canopy, separate CSS side-strip, and decorative miniature bench arrangement. EnvironmentalDisplay measures the HTML content box and draws a single native SVG assembly using those pixel dimensions. Front face, flush cap, shaded return, posts and footings share vertices. The face has a restrained isometric rise of at most 20px across its width; HTML paragraphs and process labels remain level and untransformed. The three material variants retain their cream/green/timber palettes. Supports attach to the actual angled lower edge and cast a matching ground shadow. Text-fit checks verify real paragraph, list and link bounds inside each front face at desktop, tablet and mobile widths. The separate scenario kiosk, other scene architecture, wording, and continuous path remain intact.
+
+
+### Text follows the sign vector
+
+The latest user request changes the first building headline to “Big Possibilities. Little Effort.” and explicitly aligns text with each sign face, superseding the earlier level-baseline constraint. EnvironmentalDisplay applies the exact face mapping to its HTML content: x stays unchanged and y follows `tilt / 2 - tilt * x / width`. ResizeObserver reads untransformed border-box dimensions so this projection cannot feed back into frame height. Building headlines use inner text-plane wrappers with face-specific shear: campus -35/439, station -28/329, garden -3/378. Existing entrance animation stays on the outer heading, preserving the angle throughout the reveal. The flat example kiosk remains horizontal to match its own rectangular face. Text remains selectable HTML, and character-fit checks cover 320, 390, 820, 1440 and 1676px widths. The hero, connected path and other wording remain unchanged.
+
+
+### Example-board corner and shelter layering repair
+
+The small example board now uses EnvironmentalDisplay's joined native SVG frame with an `example` material variant. Its face stays horizontal, preserving the approved prompt layout, while the cap, return, frame and supports meet at shared vertices. The old rounded CSS border, separate side strip and pseudo-element posts are removed. Its pale-green palette and wording remain unchanged.
+
+The transit shelter's glazing and supports now share the roof underside geometry: the front edge descends from (484,209) to (659,178), and the left side meets (405,184.422). Glazing and posts are drawn before the roof, and all ground paving lines are drawn before benches and planters. The roof occludes support joins; raised furniture occludes paving. Waiting residents stand in front of the shelter base rather than on the seat/glass edges. Connected paths, text-plane angles and copy are unchanged.

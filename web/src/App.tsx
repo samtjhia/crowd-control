@@ -40,8 +40,8 @@ function App() {
         <OperationsPavilion reduced={reduced} />
         <DecisionGarden reduced={reduced} />
       </section>
+      <div className="crowd-handoff" aria-hidden="true"><FallingCrowd reduced={reduced} playing /></div>
       </Journey>
-      <div className="crowd-handoff" aria-hidden="true"><span className="handoff-line" /><FallingCrowd reduced={reduced} playing /></div>
       <ScenarioExplorer reduced={reduced} />
       <section className="closing"><h2>A little curiosity.<br /><span>A better way forward.</span></h2><p>For the school day, the big night,<br />and everyone in between.</p><a className="button button-green" href="#scenarios">Explore another possibility <Icon name="arrow" size={18} /></a></section>
     </main>
