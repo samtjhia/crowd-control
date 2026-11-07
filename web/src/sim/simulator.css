@@ -755,6 +755,13 @@
 .sim-facts { display: grid; gap: 4px; }
 .sim-facts div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 10px; }
 .sim-facts dt { color: var(--muted); }
+/* What a point of interest is, under its name; dangers in the same red as their map badge. */
+.sim-place-kind { margin-top: -8px; color: var(--muted); font-size: 12px; }
+.sim-place-kind.is-hazard { color: #b91c1c; font-weight: 600; }
+.sim-reasons { display: grid; gap: 4px; }
+.sim-reasons-title { color: var(--muted); }
+.sim-reasons ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; }
+.sim-reasons li { line-height: 1.4; }
 
 .sim .sim-action {
   justify-self: start;

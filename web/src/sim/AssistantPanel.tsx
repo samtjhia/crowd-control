@@ -3,7 +3,8 @@ import { Check, LoaderCircle, Play, RotateCcw, SendHorizontal, X } from 'lucide-
 import type { CreateInterventionRequest, InterventionSummary, InventoryItem, ScenarioPlan } from '@crowd-control/contract'
 import { describeOperations, describePlan, displayName } from '../planner/describe.ts'
 import type { SimulationClient, SimulationView } from '../worker/simulationClient.ts'
-import { askPlanner, buildRequest, capacityNote, titleFrom, type AskKind } from './assistant.ts'
+import { askPlanner, buildRequest, capacityNote, explainRefusal, pinGoalTargets, placesNote, titleFrom, type AskKind } from './assistant.ts'
+import { placesInScene } from './places.ts'
 import { loadAssistant, saveMessages, type Message } from './assistantStore.ts'
 import type { VenueOption } from './scenario.ts'
 
@@ -73,9 +74,11 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
   const askScenario = async (prompt: string, place: string | null, problems: string[] = []): Promise<void> => {
     const venue = venueFor(place)
     const capacity = venue ? capacityNote(venue.capacities) : ''
+    const places = venue ? placesNote(venue.places) : ''
     const wording = [
       prompt,
       ...(capacity ? [capacity] : []),
+      ...(places ? [places] : []),
       ...(problems.length > 0 ? [`Your previous plans could not be built by the simulator: ${problems.join(' ')}\nReturn a corrected complete plan that keeps to what was asked but fits.`] : []),
     ].join('\n\n')
     const request = buildRequest({
@@ -86,26 +89,33 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
     const outcome = await askPlanner(request.value, 'scenario')
     if (outcome.type === 'message') return add({ from: 'assistant', text: outcome.text, tone: outcome.tone })
     if (outcome.type !== 'scenario') return add({ from: 'assistant', text: 'That came back as a change rather than a scenario. Try again.', tone: 'info' })
-    const problem = onCheckPlan(outcome.plan)
+    // The person chose where: the planner sometimes invents a lookalike building instead, whose
+    // rooms and desks don't match the IDs it used, so the plan always runs in the chosen venue.
+    const plan = venue ? { ...outcome.plan, layout: venue.layout } : outcome.plan
+    const problem = onCheckPlan(plan)
     // Up to two corrections, each told every problem found so far.
     if (problem && problems.length < 2) {
       add({ from: 'assistant', text: `That plan didn’t fit: ${problem} Asking for a corrected version…`, tone: 'info' })
       return askScenario(prompt, place, [...problems, problem])
     }
-    add({ from: 'assistant', plan: outcome.plan, prompt, where: place, status: 'ready', ...(problem && { note: `This still can’t be built: ${problem}` }) })
+    add({ from: 'assistant', plan, prompt, where: place, status: 'ready', ...(problem && { note: `This still can’t be built: ${problem}` }) })
   }
 
   const askChange = async (prompt: string) => {
     const interventions: InterventionSummary[] = view.changes.map((change) => ({ id: change.interventionId, revision: 1, label: change.label, at: change.at, deleted: false }))
     const inventory = await liveInventory()
     const venue = venueFor(currentVenueId)
+    // What the tables, desks and any dangers on the map do, so the change can use them by ID.
+    const places = view.scene ? placesNote(placesInScene(view.scene)) : ''
     const request = buildRequest({
-      simulationId: view.simulationId ?? 'assistant', prompt, kind: 'change',
+      simulationId: view.simulationId ?? 'assistant', prompt: places ? `${prompt}
+
+${places}` : prompt, kind: 'change',
       ...(venue && { layout: venue.layout }), inventory, ...(view.metrics && { summary: view.metrics }), interventions,
     })
     if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that request: ${request.error.message}`, tone: 'error' })
     const outcome = await askPlanner(request.value, 'change')
-    if (outcome.type === 'change') add({ from: 'assistant', change: outcome.request, prompt, inventory, status: 'ready' })
+    if (outcome.type === 'change') add({ from: 'assistant', change: pinGoalTargets(outcome.request, inventory), prompt, inventory, status: 'ready' })
     else if (outcome.type === 'message') add({ from: 'assistant', text: outcome.text, tone: outcome.tone })
     else add({ from: 'assistant', text: 'That came back as a whole new scenario rather than a change. Switch to “New scenario” if that’s what you want.', tone: 'info' })
   }
@@ -144,8 +154,11 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
   }
 
   const apply = async (id: number, change: CreateInterventionRequest, prompt: string) => {
-    const result = await client.apply(change.label ?? titleFrom(prompt), change.operations, change.at)
-    update(id, result.ok ? { status: 'applied', note: undefined } : { note: `The simulator refused it: ${result.error.message}` })
+    // A time already passed (the planner often writes "at": 0 for "now") means now, not a replay.
+    const now = client.getView().current?.frame.time ?? 0
+    const when = change.at !== undefined && change.at > now ? change.at : undefined
+    const result = await client.apply(change.label ?? titleFrom(prompt), change.operations, when)
+    update(id, result.ok ? { status: 'applied', note: undefined } : { note: explainRefusal(result.error.message) })
   }
 
   return (

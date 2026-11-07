@@ -1,7 +1,7 @@
 import type { Frame, RenderScene, Vec2 } from '@crowd-control/contract'
 
-/** Something on the map the user can point at. */
-export type Pick = { kind: 'agent' | 'portal' | 'zone'; id: string }
+/** Something on the map the user can point at: a person, a door, a room, or an object (a table, a danger). */
+export type Pick = { kind: 'agent' | 'portal' | 'zone' | 'object'; id: string }
 export type PickKind = Pick['kind']
 
 type Rect = { x: number; y: number; width: number; height: number }
@@ -15,6 +15,23 @@ export function portalRects(scene: RenderScene): (Rect & { id: string })[] {
     if (entity.kind !== 'portal' || entity.shape?.kind !== 'rectangle' || rects.some((r) => r.id === entity.id)) continue
     const { x, y, width, height } = entity.shape
     rects.push({ id: entity.id, x, y, width, height })
+  }
+  return rects
+}
+
+/** Object bounds: tables, counters and dangers, from the map and anything added since. */
+export function objectRects(scene: RenderScene): (Rect & { id: string })[] {
+  const rects: (Rect & { id: string })[] = []
+  for (const entity of [...(scene.map.entities ?? []), ...scene.entities]) {
+    if (entity.kind !== 'object' || !entity.shape || rects.some((r) => r.id === entity.id)) continue
+    const shape = entity.shape
+    if (shape.kind === 'rectangle') rects.push({ id: entity.id, x: shape.x, y: shape.y, width: shape.width, height: shape.height })
+    else if (shape.kind === 'circle') rects.push({ id: entity.id, x: shape.center.x - shape.radius, y: shape.center.y - shape.radius, width: shape.radius * 2, height: shape.radius * 2 })
+    else {
+      const xs = shape.points.map((p) => p.x), ys = shape.points.map((p) => p.y)
+      const x = Math.min(...xs), y = Math.min(...ys)
+      rects.push({ id: entity.id, x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y })
+    }
   }
   return rects
 }
@@ -34,7 +51,7 @@ export function zoneAt(scene: RenderScene, p: Vec2): string | null {
 
 /**
  * What is under a world point, most specific first: the nearest person whose body (plus
- * `slop` world units) covers it, then a door, then the room. Departed people can't be picked.
+ * `slop` world units) covers it, then an object (smallest first, so a danger on a table wins), then a door, then the room. Departed people can't be picked.
  * `slop` lets small targets be hit at any zoom; callers pass a few screen pixels in world units.
  */
 export function pickAt(scene: RenderScene, frame: Frame | null, positions: Map<string, Vec2>, p: Vec2, slop: number, kinds: readonly PickKind[]): Pick | null {
@@ -48,6 +65,10 @@ export function pickAt(scene: RenderScene, frame: Frame | null, positions: Map<s
       if (distance <= (radii.get(agent.id) ?? 0.5) + slop && (!best || distance < best.distance)) best = { id: agent.id, distance }
     }
     if (best) return { kind: 'agent', id: best.id }
+  }
+  if (kinds.includes('object')) {
+    const hit = objectRects(scene).filter((rect) => within(p, rect, slop)).sort((a, b) => a.width * a.height - b.width * b.height)[0]
+    if (hit) return { kind: 'object', id: hit.id }
   }
   if (kinds.includes('portal')) {
     const door = portalRects(scene).find((rect) => within(p, rect, slop))

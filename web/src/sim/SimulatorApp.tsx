@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
 } from 'lucide-react'
-import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
+import type { Camera, ModelPreset, ScenarioPlan, Vec2 } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
 import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
@@ -20,16 +20,16 @@ import { formatClock, toIncidents, type Incident } from './incidents.ts'
 import type { Pick, PickKind } from '../render/hitTest.ts'
 import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
 import { DensityPanel } from './DensityPanel.tsx'
-import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
+import { actionFor, placeDanger, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
 import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startScenario, venueOptions, type Scenario } from './scenario.ts'
 import { loadAssistant, saveScenarios } from './assistantStore.ts'
 import { AssistantPanel } from './AssistantPanel.tsx'
 import { loadSavedVenues, presetFor } from './savedVenues.ts'
 
-/** What each tool can click: Select anything, Trip people, Doors doors. */
-const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], box: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
+/** What each tool can click: Select anything, Trip people, Doors doors, Danger the floor. */
+const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'object', 'portal', 'zone'], box: ['agent', 'object', 'portal', 'zone'], trip: ['agent'], doors: ['portal'], danger: ['zone'] }
 /** Box always drags a selection box; Select does with Shift held; the others always pan. */
-const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', trip: 'off', doors: 'off' }
+const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', trip: 'off', doors: 'off', danger: 'off' }
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -217,20 +217,30 @@ export default function SimulatorApp() {
   /** Applies a map action as a follow-up request; failures show in the event log. */
   const applyAction = (action: MapAction) => void client.apply(action.label, action.operations)
   /** What a click on the map does with the current tool. Read through a ref by the renderer. */
-  const onPickRef = useRef<(pick: Pick | null, additive: boolean) => void>(() => {})
+  const onPickRef = useRef<(pick: Pick | null, additive: boolean, at: Vec2) => void>(() => {})
   const onBoxRef = useRef<(picks: Pick[], additive: boolean) => void>(() => {})
   useEffect(() => {
-    onPickRef.current = (pick, additive) => {
+    onPickRef.current = (pick, additive, at) => {
       if (toolRef.current === 'select' || toolRef.current === 'box') {
         // Shift-click adds or removes one item; a plain click replaces the selection.
         if (additive) { if (pick) setSelection((current) => toggleIn(current, pick)) }
         else setSelection(pick ? [pick] : [])
         return
       }
-      setSelection(pick ? [pick] : [])
       const current = client.getView()
+      if (toolRef.current === 'danger') {
+        // A danger goes wherever the floor was clicked; then it is selected, so its details show.
+        if (pick?.kind !== 'zone' || !current.scene) return
+        const action = placeDanger(current.scene, current.current?.frame ?? null, at)
+        const added = action.operations[0]
+        void client.apply(action.label, action.operations).then((result) => {
+          if (result.ok && added?.op === 'add') setSelection([{ kind: 'object', id: added.entity.id }])
+        })
+        return
+      }
+      setSelection(pick ? [pick] : [])
       if (!pick || !current.scene) return
-      const action = actionFor(toolRef.current, current.scene, current.current?.frame ?? null, pick.kind, pick.id)
+      const action = actionFor(toolRef.current as 'trip' | 'doors', current.scene, current.current?.frame ?? null, pick.kind, pick.id)
       if (action) void client.apply(action.label, action.operations)
     }
     // A box replaces the selection; with Shift held it adds to it.
@@ -271,7 +281,7 @@ export default function SimulatorApp() {
       renderer = created
       rendererRef.current = created
       stopCamera = created.onCameraChange(setCamera)
-      stopPick = created.onPick((pick, additive) => onPickRef.current(pick, additive))
+      stopPick = created.onPick((pick, additive, at) => onPickRef.current(pick, additive, at))
       stopBox = created.onBoxSelect((picks, additive) => onBoxRef.current(picks, additive))
       created.setPickable(PICKABLE[toolRef.current])
       created.setBoxSelect(BOX_MODE[toolRef.current])
@@ -328,6 +338,7 @@ export default function SimulatorApp() {
           case 'b': case 'B': setTool('box'); return true
           case 'f': case 'F': setTool('trip'); return true
           case 'd': case 'D': setTool('doors'); return true
+          case 'x': case 'X': setTool('danger'); return true
           case 'h': case 'H': setHeatmap((on) => !on); return true
           case 'Escape':
             if (window.innerWidth >= WIDE) { setSelection([]); return true }
@@ -428,7 +439,7 @@ export default function SimulatorApp() {
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
         <Overview view={view} />
         <Section title="Selected">
-          <SelectionDetails selection={selection} view={view} onAction={applyAction} onClear={() => setSelection([])} />
+          <SelectionDetails selection={selection} view={view} plan={compiled.ok ? scenario.plan : null} onAction={applyAction} onClear={() => setSelection([])} />
         </Section>
         <Section title="Density">
           <DensityPanel view={view} on={heatmap} onToggle={() => setHeatmap((on) => !on)} />
@@ -545,6 +556,8 @@ function Legend() {
         <li><MapSwatch kind="down" /> Down (lying figure or capsule)</li>
         <li><MapSwatch kind="open" /> Open door</li>
         <li><MapSwatch kind="closed" /> Closed door</li>
+        <li><MapSwatch kind="service" /> Something people use (table, counter, desk): click for details</li>
+        <li><MapSwatch kind="danger" /> Danger: people nearby keep away</li>
         <li><StatusIcon kind="exit" size={18} /> Exit or safe</li>
         <li><StatusIcon kind="warning" size={18} /> Fall or hazard</li>
         <li><StatusIcon kind="closed" size={18} /> Closure or alarm</li>
@@ -558,13 +571,14 @@ function Legend() {
         <div><dt><kbd>\</kbd></dt><dd>Hide or show both panels</dd></div>
         <div><dt><kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd></dt><dd>Zoom in, out, fit</dd></div>
         <div><dt>Arrows, drag</dt><dd>Pan the map</dd></div>
+        <div><dt><kbd>V</kbd> <kbd>B</kbd> <kbd>F</kbd> <kbd>D</kbd> <kbd>X</kbd></dt><dd>Select, Box, Trip, Doors, Danger</dd></div>
       </dl>
     </details>
   )
 }
 
 /** Legend swatches for the map's own cues, drawn to match what the canvas paints. */
-function MapSwatch({ kind }: { kind: 'person' | 'left' | 'down' | 'open' | 'closed' }) {
+function MapSwatch({ kind }: { kind: 'person' | 'left' | 'down' | 'open' | 'closed' | 'service' | 'danger' }) {
   const box = { width: 18, height: 18, viewBox: '0 0 18 18', 'aria-hidden': true, focusable: false } as const
   switch (kind) {
     case 'person':
@@ -585,6 +599,10 @@ function MapSwatch({ kind }: { kind: 'person' | 'left' | 'down' | 'open' | 'clos
       return <svg {...box}><rect x="1" y="1" width="16" height="16" rx="3" fill="#B9D6AE" /></svg>
     case 'closed':
       return <svg {...box}><rect x="1" y="1" width="16" height="16" rx="3" fill="#BB6479" /><path d="M6 6l6 6M12 6l-6 6" stroke="#FFFFFF" strokeWidth="1.75" /></svg>
+    case 'service':
+      return <svg {...box}><circle cx="9" cy="9" r="7" fill="#2F6FEB" stroke="#FFFFFF" strokeWidth="1.5" /><path d="M9 8v4.5" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" /><circle cx="9" cy="5.6" r="1.1" fill="#FFFFFF" /></svg>
+    case 'danger':
+      return <svg {...box}><circle cx="9" cy="9" r="7.5" fill="#DC2626" fillOpacity="0.35" stroke="#B91C1C" strokeWidth="1.5" /><path d="M9 5v5" stroke="#B91C1C" strokeWidth="1.8" strokeLinecap="round" /><circle cx="9" cy="12.8" r="1.1" fill="#B91C1C" /></svg>
   }
 }
 

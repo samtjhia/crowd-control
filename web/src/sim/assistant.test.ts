@@ -4,6 +4,7 @@ import test from 'node:test'
 import type { CompileOutput, PlannerRequest, ScenarioPlan } from '@crowd-control/contract'
 import { CHANGE_CAPABILITIES, SCENARIO_CAPABILITIES, askPlanner, buildRequest, titleFrom } from './assistant.ts'
 import { startScenario } from './scenario.ts'
+import { describeOperations } from '../planner/describe.ts'
 
 const fixture = <T>(name: string) => JSON.parse(readFileSync(new URL(`../../../contract/fixtures/${name}.json`, import.meta.url), 'utf8')) as T
 const plan = fixture<ScenarioPlan>('scenario-plan')
@@ -56,9 +57,18 @@ test('a change reply is checked against the request and the simulator’s rules 
   const mismatched = await askPlanner(request('change'), 'change', otherRun.fetcher)
   assert.equal(mismatched.type === 'message' && mismatched.tone, 'error', 'a change for another simulation is refused')
 
-  const remove = server((r) => ({ ok: true, value: { kind: 'followup', request: { schemaVersion: 1, simulationId: r.simulationId, requestId: r.requestId, operations: [{ op: 'remove', targets: { ids: ['exit'] } }] } } }))
-  const unsupported = await askPlanner(request('change'), 'change', remove.fetcher)
+  // Live changes can place an object inside a room (a danger), but not draw shapes such as walls.
+  const addWall = server((r) => ({ ok: true, value: { kind: 'followup', request: { schemaVersion: 1, simulationId: r.simulationId, requestId: r.requestId, operations: [{ op: 'add', entity: { id: 'wall_1', kind: 'barrier', shape: { kind: 'rectangle', x: 1, y: 1, width: 2, height: 0.5 } } }] } } }))
+  const unsupported = await askPlanner(request('change'), 'change', addWall.fetcher)
   assert.equal(unsupported.type, 'message', 'operations the simulator can’t apply live are refused')
+  const fire = [
+    { op: 'add', entity: { id: 'danger_1', kind: 'object', label: 'Fire', tags: ['hazard'] }, placement: { inside: { ids: ['hall'] } } },
+    { op: 'assign_goal', targets: { kind: 'agent', inside: { ids: ['hall'] } }, goal: { kind: 'avoid', target: { ids: ['danger_1'] }, distance: 6 } },
+  ]
+  const addFire = server((r) => ({ ok: true, value: { kind: 'followup', request: { schemaVersion: 1, simulationId: r.simulationId, requestId: r.requestId, operations: fire } } }))
+  const danger = await askPlanner(request('change'), 'change', addFire.fetcher)
+  assert.equal(danger.type, 'change', 'a danger placed in a room, and people avoiding it, is accepted')
+  if (danger.type === 'change') assert.deepEqual(describeOperations(danger.request.operations, []), ['Place a danger in hall', 'Have everyone in hall keep away from danger 1'])
 })
 
 test('a reply of the wrong kind is explained instead of applied', async () => {
@@ -140,4 +150,59 @@ test('the conversation and the assistant’s scenarios survive a reload', async 
     delete global.localStorage
   }
   assert.deepEqual(loadAssistant(), { messages: [], scenarios: [] }, 'without storage it simply starts fresh')
+})
+
+test('wider live changes are allowed and read as plain English', async () => {
+  const { describeOperations } = await import('../planner/describe.ts')
+  const inventory = [
+    { id: 'outside', kind: 'zone' as const, label: 'Outside', tags: ['outside'], componentNames: [] },
+    { id: 'main_door', kind: 'portal' as const, label: 'Main door', tags: [], componentNames: ['portal'] },
+  ]
+  const operations = [
+    { op: 'emit' as const, event: { name: 'alarm' } },
+    { op: 'assign_goal' as const, targets: { kind: 'agent' as const }, goal: { kind: 'reach' as const, target: { ids: ['outside'] } } },
+    { op: 'assign_goal' as const, targets: { tags: ['late'] }, goal: { kind: 'sequence' as const, goals: [{ kind: 'wait' as const, duration: 10 }, { kind: 'reach' as const, target: { ids: ['outside'] } }] } },
+    { op: 'define_rule' as const, id: 'shut', when: { kind: 'event' as const, name: 'alarm' }, once: true, operations: [{ op: 'set' as const, targets: { ids: ['main_door'] }, values: { components: { portal: { open: false } } } }] },
+    { op: 'clear_goal' as const, targets: { tags: ['staff'] } },
+  ]
+  assert.deepEqual(describeOperations(operations, inventory), [
+    'Sound the alarm',
+    'Send everyone to Outside',
+    'Have people tagged late wait 10 s, then go to Outside',
+    'When the alarm sounds: Close Main door',
+    'Stop people tagged staff from what they are doing',
+  ])
+  const close = { op: 'set' as const, targets: { ids: ['main_door'] }, values: { components: { portal: { open: false } } } }
+  const evacuate = server((r) => ({ ok: true, value: { kind: 'followup', request: { schemaVersion: 1, simulationId: r.simulationId, requestId: r.requestId, operations: [...operations, close] } } }))
+  const outcome = await askPlanner(request('change'), 'change', evacuate.fetcher)
+  assert.equal(outcome.type, 'change', JSON.stringify(outcome))
+})
+
+test('goal targets chosen by tag become the explicit IDs the engine needs; who stays as written', async () => {
+  const { pinGoalTargets, explainRefusal } = await import('./assistant.ts')
+  const inventory = [
+    { id: 'street_exit_west', kind: 'portal' as const, label: 'West street exit', tags: ['exit'], componentNames: ['portal'] },
+    { id: 'street_exit_east', kind: 'portal' as const, label: 'East street exit', tags: ['exit'], componentNames: ['portal'] },
+    { id: 'foyer', kind: 'zone' as const, label: 'Foyer', tags: [], componentNames: [] },
+    { id: 'a1', kind: 'agent' as const, tags: ['exit'], componentNames: [] },
+  ]
+  const toExits = { op: 'assign_goal' as const, targets: { tags: ['audience'] }, goal: { kind: 'reach' as const, target: { tags: ['exit'] }, selection: 'nearest' as const } }
+  const request = {
+    schemaVersion: 1 as const, simulationId: 's', requestId: 'r',
+    operations: [
+      toExits,
+      { op: 'schedule' as const, id: 'later', at: 30, operations: [toExits] },
+      { op: 'assign_goal' as const, targets: { kind: 'agent' as const }, goal: { kind: 'reach' as const, target: { ids: ['foyer'] } } },
+      { op: 'assign_goal' as const, targets: { kind: 'agent' as const }, goal: { kind: 'reach' as const, target: { tags: ['nowhere'] } } },
+    ],
+  }
+  const pinned = pinGoalTargets(request, inventory).operations
+  const target = (o: (typeof pinned)[number]) => (o.op === 'assign_goal' && o.goal.kind === 'reach' ? o.goal.target : null)
+  assert.deepEqual(target(pinned[0]!), { ids: ['street_exit_west', 'street_exit_east'] }, 'the exits, not the person also tagged exit')
+  assert.deepEqual(pinned[0]!.op === 'assign_goal' && pinned[0]!.targets, { tags: ['audience'], kind: 'agent' }, 'who it applies to stays a live tag, limited to people (the concert floor zone is also tagged audience)')
+  const later = pinned[1]!
+  assert.ok(later.op === 'schedule' && later.operations[0]!.op === 'assign_goal' && 'ids' in (later.operations[0]!.goal as { target: object }).target, 'scheduled goals are pinned too')
+  assert.deepEqual(target(pinned[2]!), { ids: ['foyer'] }, 'explicit IDs are left alone')
+  assert.deepEqual(target(pinned[3]!), { tags: ['nowhere'] }, 'a tag matching nothing is left for the simulator to report')
+  assert.match(explainRefusal('Selector matched no agents'), /Nobody matches that right now/)
 })

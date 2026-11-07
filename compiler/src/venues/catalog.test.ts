@@ -3,6 +3,7 @@ import test from 'node:test'
 import { CompileOutputSchema, PreparedMapSchema, type CompiledMap, type Goal, type PreparedMap, type Result } from '@crowd-control/contract'
 import { compile } from '../compile.ts'
 import { capabilities, limits, metricModel } from '../testing.ts'
+import { buildPreparedMap } from './build.ts'
 import { CONCERT_FLOOR, HACKATHON_HALL, HILLSIDE_ALLEY, preparedVenues, SCHOOL_WING, VENUES } from './catalog.ts'
 
 function value<T>(result: Result<T>): T {
@@ -85,10 +86,24 @@ test('concert floor: a stage, a 40 × 25 m standing floor, a bar and two street 
   assert.equal(concert.entities.filter((e) => e.tags?.includes('exit')).length, 2)
 })
 
-test('hackathon hall: two four-second check-in desks and 24 tables that block movement', () => {
+test('hackathon hall: two four-second check-in desks, and 24 tables and a snack table people use and walk around', () => {
   const hall = map(HACKATHON_HALL.id)
   for (const id of ['checkin_a', 'checkin_b']) assert.deepEqual(portal(hall, id).components?.portal, { connects: ['lobby', 'hall'], open: true, traversalTime: 4 })
-  assert.equal(cells(hall, 'hall'), 160 * 120 - 24 * 24 * 3, 'table cells are not floor')
+  assert.equal(cells(hall, 'hall'), 160 * 120 - 24 * 24 * 3 - 16 * 4, 'table cells are not floor')
+  const objects = hall.entities.filter((e) => e.kind === 'object')
+  assert.equal(objects.length, 25)
+  assert.deepEqual(portal(hall, 'table_1').components, { interaction: { duration: 120, slots: 6 } })
+  assert.deepEqual(portal(hall, 'snacks').components, { interaction: { duration: 8, slots: 3 } })
+})
+
+test('objects must stand on floor and keep doorways clear', () => {
+  const base = { ...HACKATHON_HALL, objects: [] }
+  const outside = buildPreparedMap({ ...base, objects: [{ id: 'kiosk', rect: { x: 0, y: 0, width: 0.5, height: 0.5 } }] })
+  assert.equal(outside.ok ? null : outside.error.code, 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
+  const door = buildPreparedMap({ ...base, objects: [{ id: 'kiosk', rect: { x: 5, y: 14.5, width: 1, height: 0.5 } }] })
+  assert.match(door.ok ? '' : door.error.message, /blocks a doorway/)
+  const twice = buildPreparedMap({ ...base, objects: [{ id: 'lobby', rect: { x: 2, y: 2, width: 1, height: 1 } }] })
+  assert.equal(twice.ok ? null : twice.error.code, 'INVALID_SCHEMA')
 })
 
 test('every venue compiles a realistic crowd plan that the engine can load', () => {
@@ -97,6 +112,8 @@ test('every venue compiles a realistic crowd plan that the engine can load', () 
     crowd(map(SCHOOL_WING.id), 'room_101', 30, { kind: 'wait', duration: 20, inside: { ids: ['room_101'] } }),
     crowd(map(CONCERT_FLOOR.id), 'floor', 600, { kind: 'wander', inside: { ids: ['floor'] } }),
     crowd(map(HACKATHON_HALL.id), 'lobby', 60, { kind: 'queue', target: { ids: ['checkin_a'] } }),
+    crowd(map(HACKATHON_HALL.id), 'hall', 60, { kind: 'sequence', goals: [{ kind: 'interact', target: { ids: ['snacks'] } }, { kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' }] }),
+    crowd(map(CONCERT_FLOOR.id), 'bar', 30, { kind: 'interact', target: { ids: ['bar_counter'] } }),
   ]
   for (const result of plans) {
     const output = value(result)

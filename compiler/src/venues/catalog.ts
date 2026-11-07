@@ -22,6 +22,8 @@ const FEATURE = { fill: '#FDE68A', labelVisible: true }
 const SOCIAL = { fill: '#FCE7F3', labelVisible: true }
 const EXIT = { fill: '#86EFAC' }
 const DESK = { fill: '#FDE68A' }
+const FURNITURE = { fill: '#CBD5E1' }
+const COUNTER = { fill: '#F9A8D4' }
 
 /**
  * Hero demo: a narrow, sloped alley about 4 m wide and 45 m long, running uphill from a
@@ -74,8 +76,9 @@ export const SCHOOL_WING: VenueSpec = (() => {
 })()
 
 /**
- * Breadth: a 40 × 25 m standing floor in front of a 20 m stage, a side bar, and a foyer with
- * three 3 m doors that lead to two 3 m street exits.
+ * Breadth: a 40 × 25 m standing floor in front of a 20 m stage, a side bar with a counter
+ * that serves four at a time (about 15 s each), and a foyer with three 3 m doors that lead to
+ * two 3 m street exits. Get a drink with `{ kind: "interact", target: { ids: ["bar_counter"] } }`.
  */
 export const CONCERT_FLOOR: VenueSpec = {
   id: 'concert-floor', revision: 'v1', venue: 'Harbour Concert Hall', floor: 'Main floor',
@@ -96,15 +99,23 @@ export const CONCERT_FLOOR: VenueSpec = {
     { id: 'street_exit_west', label: 'West street exit', tags: ['exit'], appearance: EXIT, rect: rect(10, 39, 3, 1), connects: ['foyer', 'street'] },
     { id: 'street_exit_east', label: 'East street exit', tags: ['exit'], appearance: EXIT, rect: rect(27, 39, 3, 1), connects: ['foyer', 'street'] },
   ],
+  objects: [
+    { id: 'bar_counter', label: 'Bar counter', tags: ['bar-counter', 'service'], appearance: COUNTER, rect: rect(45.5, 8, 1, 11), interaction: { duration: 15, slots: 4 } },
+  ],
 }
 
 /**
  * Check-in queue: a lobby off the street, two 1 m check-in desks that take four seconds per
- * person, and a 40 × 30 m hacking hall with 24 tables and two fire exits to the car park.
- * Queue at a desk with `{ kind: "queue", target: { ids: ["checkin_a"] } }`.
+ * person, and a 40 × 30 m hacking hall with 24 six-seat tables, a snack table that serves
+ * three at a time, and two fire exits to the car park. Queue at a desk with
+ * `{ kind: "queue", target: { ids: ["checkin_a"] } }`; sit at a table with `interact` on
+ * `table_1`…`table_24` (or `reach` the nearest of them); grab food with `interact` on `snacks`.
  */
 export const HACKATHON_HALL: VenueSpec = (() => {
-  const tables = [5, 9, 13, 17, 21, 25].flatMap((y) => [19, 28, 37, 46].map((x) => ({ label: 'Table', rect: rect(x, y, 6, 0.75) })))
+  const tables = [5, 9, 13, 17, 21, 25].flatMap((y) => [19, 28, 37, 46].map((x) => ({ x, y }))).map(({ x, y }, i) => ({
+    id: `table_${i + 1}`, label: `Table ${i + 1}`, tags: ['table'], appearance: FURNITURE, rect: rect(x, y, 6, 0.75),
+    interaction: { duration: 120, slots: 6 },
+  }))
   return {
     id: 'hackathon-hall', revision: 'v1', venue: 'Hackathon Hall', floor: 'Main hall',
     cellSize: 0.25, width: 62.5, height: 31,
@@ -121,7 +132,10 @@ export const HACKATHON_HALL: VenueSpec = (() => {
       { id: 'fire_exit_north', label: 'North fire exit', tags: ['exit', 'fire-exit'], appearance: EXIT, rect: rect(55.5, 5, 0.5, 2), connects: ['hall', 'car_park'] },
       { id: 'fire_exit_south', label: 'South fire exit', tags: ['exit', 'fire-exit'], appearance: EXIT, rect: rect(55.5, 24, 0.5, 2), connects: ['hall', 'car_park'] },
     ],
-    obstacles: tables,
+    objects: [
+      ...tables,
+      { id: 'snacks', label: 'Snack table', tags: ['snacks', 'service'], appearance: DESK, rect: rect(30, 28.5, 4, 1), interaction: { duration: 8, slots: 3 } },
+    ],
   }
 })()
 

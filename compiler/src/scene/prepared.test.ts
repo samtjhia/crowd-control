@@ -84,11 +84,15 @@ test('a metric venue with a model-unit preset is refused rather than mis-scaled'
   assert.equal(code(compile({ ...lookupExample(), model: workedExample().model })), 'UNSUPPORTED_CAPABILITY')
 })
 
-test('map objects the engine cannot load yet fail clearly', () => {
+test('map objects people can use reach the compiled map; barriers still fail clearly', () => {
   const input = lookupExample()
-  input.assets[0]!.entities.push({ id: 'desk_1', kind: 'object', shape: { kind: 'rectangle', x: 1, y: 1, width: 1, height: 0.5 } })
+  const desk = { id: 'desk_1', kind: 'object' as const, components: { interaction: { duration: 4, slots: 1 } }, shape: { kind: 'rectangle' as const, x: 1, y: 1, width: 1, height: 0.5 } }
+  input.assets[0]!.entities.push(desk)
   const result = compile(input)
-  assert.deepEqual(result.ok ? null : [result.error.code, result.error.affectedIds], ['UNSUPPORTED_CAPABILITY', ['desk_1']])
+  assert.deepEqual(result.ok ? result.value.scene.map.entities : result.error, [desk])
+  input.assets[0]!.entities.push({ id: 'rail', kind: 'barrier', shape: { kind: 'rectangle', x: 1, y: 2, width: 1, height: 0.5 } })
+  const refused = compile(input)
+  assert.deepEqual(refused.ok ? null : [refused.error.code, refused.error.affectedIds], ['UNSUPPORTED_CAPABILITY', ['rail']])
 })
 
 /** The test venue as if saved by the floor-plan editor: an upload source with or without a scale. */

@@ -1,6 +1,9 @@
 import type { CompiledMap, EntityBlueprint, MapAppearance, Shape } from '@crowd-control/contract'
 
 /** Map defaults, re-themed from Technical PRD §12 (which calls them replaceable UI defaults) to the landing page's paper-and-sage palette. */
+/** Point-of-interest badges: blue for things people use, red for dangers. */
+export const BADGE_COLORS = { service: '#2F6FEB', hazard: '#DC2626' } as const
+
 export const COLORS = {
   floor: '#FAFBF6',
   wall: '#7F9479',
@@ -33,6 +36,13 @@ export type EntityDrawing = {
   fill: string | null; stroke: string | null; strokeWidthPx: number; opacity: number
 }
 
+/**
+ * A small marker on a point of interest, so people can see what is clickable and what kind of
+ * place it is: `service` for things people use (tables, counters, check-in desks), `hazard`
+ * for dangers. Placed at the top-right corner of the thing, in world units.
+ */
+export type Badge = { id: string; kind: 'service' | 'hazard'; x: number; y: number }
+
 /** A label at the top-left of the region it names; width/height bound where it may be drawn. */
 export type MapLabel = { text: string; x: number; y: number; width: number; height: number }
 
@@ -47,6 +57,7 @@ export type MapLayout = {
   portals: PortalDrawing[]
   entities: EntityDrawing[]
   labels: MapLabel[]
+  badges: Badge[]
 }
 
 type CellStyle = Omit<CellRun, 'row' | 'start' | 'end'>
@@ -115,6 +126,10 @@ export function layoutMap(map: CompiledMap): MapLayout {
 
   const entities: EntityDrawing[] = []
   const labels: MapLabel[] = []
+  const badges: Badge[] = []
+  for (const portal of map.portals) {
+    if (portal.traversalTime) badges.push({ id: portal.id, kind: 'service', x: portal.x + portal.width, y: portal.y })
+  }
   for (const room of map.rooms) {
     if (room.appearance?.labelVisible) labels.push({ text: room.label ?? room.id, x: room.x, y: room.y, width: room.width, height: room.height })
   }
@@ -133,9 +148,14 @@ export function layoutMap(map: CompiledMap): MapLayout {
     if (appearance?.labelVisible) {
       labels.push({ text: entity.label ?? entity.id, ...shapeBox(entity.shape) })
     }
+    if (entity.kind === 'object') {
+      const box = shapeBox(entity.shape)
+      const hazard = entity.tags?.includes('hazard') ?? false
+      if (hazard || entity.components?.interaction || entity.components?.capacity) badges.push({ id: entity.id, kind: hazard ? 'hazard' : 'service', x: box.x + box.width, y: box.y })
+    }
   }
 
-  return { columns, rows, cellSize: map.cellSize, worldWidth: columns * map.cellSize, worldHeight: rows * map.cellSize, runs, portals, entities, labels }
+  return { columns, rows, cellSize: map.cellSize, worldWidth: columns * map.cellSize, worldHeight: rows * map.cellSize, runs, portals, entities, labels, badges }
 }
 
 function shapeBox(shape: Shape): { x: number; y: number; width: number; height: number } {

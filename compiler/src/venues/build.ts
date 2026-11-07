@@ -39,6 +39,26 @@ export type VenueCost = { rect: MetreRect; cost: number }
 export type VenueObstacle = { label?: string; rect: MetreRect }
 
 /**
+ * A point of interest people can use: a table to sit at, a bar counter, a snack stand. It is a
+ * map object the simulator knows by ID, so goals can send people to it (`interact` to use it,
+ * `queue` to line up for it). Solid ones (the default) block their floor like furniture, and
+ * people use them from beside them.
+ */
+export type VenueObject = {
+  id: string
+  label?: string
+  tags?: string[]
+  appearance?: MapAppearance
+  rect: MetreRect
+  /** Whether people walk around it (a table) rather than over it (a mat); default true. */
+  solid?: boolean
+  /** How long one use takes, in seconds, and how many people can use it at once. */
+  interaction?: { duration: number; slots: number }
+  /** How many may be at it at once, and optionally how many it serves per second. */
+  capacity?: { maximumOccupants: number; serviceRate?: number }
+}
+
+/**
  * A prepared venue as authored in TypeScript: measured rectangles in metres. Everything not
  * covered by an area or portal is wall. Every edge must sit on the cell grid, so a measured
  * door is never silently widened or narrowed (Technical PRD §7); use a finer cell instead.
@@ -56,6 +76,7 @@ export type VenueSpec = {
   portals: VenuePortal[]
   costs?: VenueCost[]
   obstacles?: VenueObstacle[]
+  objects?: VenueObject[]
 }
 
 const EPSILON = 1e-6
@@ -92,7 +113,7 @@ export function buildPreparedMap(spec: VenueSpec): Result<PreparedMap> {
     return { ok: true, value: { left, top, right, bottom } }
   }
 
-  const ids = [...spec.areas.map((area) => area.id), ...spec.portals.map((portal) => portal.id)]
+  const ids = [...spec.areas.map((area) => area.id), ...spec.portals.map((portal) => portal.id), ...(spec.objects ?? []).map((object) => object.id)]
   const duplicate = ids.find((id, index) => ids.indexOf(id) !== index)
   if (duplicate !== undefined) return fail('INVALID_SCHEMA', `Duplicate venue ID "${duplicate}"`, { path: 'venue', affectedIds: [duplicate] })
 
@@ -167,6 +188,22 @@ export function buildPreparedMap(spec: VenueSpec): Result<PreparedMap> {
     if (door) return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `${obstacle.label ?? 'An obstacle'} blocks a doorway`, { path: `venue.obstacles.${o}.rect` })
   }
 
+  // Objects: solid ones block their cells like furniture; each must stand on or beside floor.
+  for (const [o, object] of (spec.objects ?? []).entries()) {
+    const path = `venue.objects.${o}`
+    const cells = toCells(object.rect, `${path}.rect`)
+    if (!cells.ok) return cells
+    let door = false
+    let floor = false
+    each(cells.value, (i) => {
+      if (portalIndex[i] !== 0) door = true
+      if (zoneIndex[i] !== 0) floor = true
+      if (object.solid !== false) { blocked[i] = 1; zoneIndex[i] = 0 }
+    })
+    if (door) return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `${object.label ?? object.id} blocks a doorway`, { path: `${path}.rect`, affectedIds: [object.id] })
+    if (!floor) return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `${object.label ?? object.id} is not on the floor of any area`, { path: `${path}.rect`, affectedIds: [object.id] })
+  }
+
   const cut = unreachableZones(blocked, zoneIndex, columns, rows, zoneIds)
   if (cut.length > 0) return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Not every area connects: ${cut.join(', ')} cannot be reached`, { path: 'venue', affectedIds: cut })
 
@@ -183,6 +220,17 @@ export function buildPreparedMap(spec: VenueSpec): Result<PreparedMap> {
       components: { portal: { connects: [portal.connects[0], portal.connects[1]], open: portal.open ?? true, ...(portal.oneWay !== undefined && { oneWay: portal.oneWay }), ...(portal.traversalTime !== undefined && { traversalTime: portal.traversalTime }) } },
       shape: { kind: 'rectangle', ...cellBounds(portalIndex, p + 1, columns, cellSize) },
     })),
+    ...(spec.objects ?? []).map((object): EntityBlueprint => {
+      const components = {
+        ...(object.interaction && { interaction: { ...object.interaction } }),
+        ...(object.capacity && { capacity: { ...object.capacity } }),
+      }
+      return {
+        id: object.id, kind: 'object', ...metadata(object),
+        ...(Object.keys(components).length > 0 && { components }),
+        shape: { kind: 'rectangle', ...object.rect },
+      }
+    }),
   ]
   const prepared = {
     id: spec.id,
