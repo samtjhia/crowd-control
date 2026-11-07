@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ClearanceCohortSchema } from './metrics.js';
 import { FiniteSchema, HeaderSchema, IdSchema, LimitsSchema, NonnegativeSchema, PositiveIntegerSchema, PositiveSchema, RandomStateSchema, SelectionSchema, SimTimeSchema, TickSchema, UnitsSchema, VersionsSchema, uniqueIds } from './common.js';
 import { AgentOverridesSchema, AppearanceSchema, BehaviorSchema, EntityBlueprintSchema, MapAppearanceSchema, MobilitySchema, PortalSchema, RectSchema, ResolvedAgentComponentsSchema } from './entities.js';
 import { DefineRuleOperationSchema, EntitySelectorSchema, OperationSchema } from './operations.js';
@@ -53,7 +54,7 @@ export const CompactSpawnSchema = z.strictObject({ op: z.literal('spawn'), count
 export const CompiledOperationSchema = z.union([OperationSchema, CompactSpawnSchema, z.strictObject({ op: z.literal('emit'), event: IdSchema })]);
 export const CompiledJobSchema = z.strictObject({ id: IdSchema, at: SimTimeSchema, operations: z.array(CompiledOperationSchema).min(1) });
 export const EventControllerRuleSchema = z.strictObject({ id: IdSchema, event: IdSchema, match: EntitySelectorSchema, controller: IdSchema, mode: z.enum(['replace', 'enqueue']), once: z.boolean().optional(), cooldown: PositiveSchema.optional() }).refine((v) => v.once !== false || v.cooldown !== undefined, 'Repeating rule requires a positive cooldown');
-export const CompiledSceneSchema = HeaderSchema.extend({ seed: RandomStateSchema, versions: VersionsSchema, model: z.strictObject({ units: UnitsSchema, dt: PositiveSchema }), map: CompiledMapSchema, profiles: z.record(IdSchema, AgentProfileSchema), controllers: z.record(IdSchema, CompiledGoalSchema), agents: z.array(AgentBlueprintSchema), jobs: z.array(CompiledJobSchema), rules: z.array(z.union([DefineRuleOperationSchema, EventControllerRuleSchema])) }).superRefine((v, ctx) => {
+export const CompiledSceneSchema = HeaderSchema.extend({ seed: RandomStateSchema, clearance: ClearanceCohortSchema.optional(), versions: VersionsSchema, model: z.strictObject({ units: UnitsSchema, dt: PositiveSchema }), map: CompiledMapSchema, profiles: z.record(IdSchema, AgentProfileSchema), controllers: z.record(IdSchema, CompiledGoalSchema), agents: z.array(AgentBlueprintSchema), jobs: z.array(CompiledJobSchema), rules: z.array(z.union([DefineRuleOperationSchema, EventControllerRuleSchema])) }).superRefine((v, ctx) => {
   if (v.model.units !== v.map.units) ctx.addIssue({ code: 'custom', message: 'Scene and map units disagree' });
   if (!uniqueIds(v.agents) || !uniqueIds(v.jobs) || !uniqueIds(v.rules)) ctx.addIssue({ code: 'custom', message: 'Duplicate agent, job or rule IDs' });
   if (v.agents.some((a) => !Object.hasOwn(v.profiles, a.profile) || (a.controller !== undefined && !Object.hasOwn(v.controllers, a.controller)))) ctx.addIssue({ code: 'custom', message: 'Agent references unknown profile or controller' });

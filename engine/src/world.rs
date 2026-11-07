@@ -24,6 +24,7 @@ pub struct World {
     pub departures: Vec<Value>,
     pub events: Vec<Value>,
     pub removed_count: u64,
+    pub metrics: crate::metrics::Metrics,
     pub runtime: crate::scheduling::Runtime,
     #[serde(skip)]
     pub wander_cells: Vec<Vec<usize>>,
@@ -270,6 +271,7 @@ impl World {
             departures: vec![],
             events: vec![],
             removed_count: 0,
+            metrics: Default::default(),
             runtime: Default::default(),
             wander_cells: vec![],
             topology_version: 0,
@@ -283,9 +285,28 @@ impl World {
             navigator: Navigator::default(),
             initial_scene_hash: format!("fnv1a64-v1:{hash:016x}"),
         };
+        let area = world.grid.cell_size * world.grid.cell_size;
+        if area <= 0.0
+            || !area.is_finite()
+            || !(area * world.grid.blocked.len() as f64).is_finite()
+            || !(2000.0 / area).is_finite()
+        {
+            return Err(invalid("Metric cell area exceeds numeric range"));
+        }
+        if let Some(c) = &world.initial.scene.clearance {
+            if c.cohort_ids.is_empty()
+                || c.cohort_ids.len() > 20000
+                || c.cohort_ids.iter().collect::<BTreeSet<_>>().len() != c.cohort_ids.len()
+            {
+                return Err(invalid("Clearance needs a finite, nonempty, unique cohort"));
+            }
+        }
+        world.metrics.clearance = world.initial.scene.clearance.clone();
+        world.refresh_metric_geometry();
         world.initialize_services();
         world.initialize_runtime()?;
         world.prepare_navigation()?;
+        world.capture_metrics()?;
         Ok(world)
     }
 
@@ -301,10 +322,13 @@ impl World {
                     && (*n as f64 * self.initial.scene.model.dt.0).is_finite()
             })
             .ok_or_else(|| ("RESOURCE_LIMIT", "Tick/time range exceeded".into()))?;
+        let metric_before = self.metrics.checkpoint();
         let dynamic_before = if self.has_runtime_work() {
             // Derived navigation caches are rebuilt on rollback; do not copy them twice.
             let navigator = std::mem::take(&mut self.navigator);
+            let metrics = std::mem::take(&mut self.metrics);
             let before = self.clone();
+            self.metrics = metrics;
             self.navigator = navigator;
             Some(before)
         } else {
@@ -335,6 +359,7 @@ impl World {
                     &mut self.agents,
                     self.initial.scene.model.dt.0,
                     self.tick,
+                    &mut self.metrics,
                 )?;
                 self.after_goals()?;
                 self.tick += 1;
@@ -346,11 +371,14 @@ impl World {
                 } else {
                     self.runtime.processed_events = self.events.len();
                 }
+                self.capture_metrics()?;
             }
             Ok(())
         })();
         if let Err(error) = result {
-            if let Some(before) = dynamic_before {
+            if let Some(mut before) = dynamic_before {
+                self.metrics.rollback(metric_before);
+                before.metrics = std::mem::take(&mut self.metrics);
                 *self = before;
                 return Err(error);
             }
@@ -364,6 +392,7 @@ impl World {
                 self.tick,
                 self.runtime.processed_events,
             ) = before.unwrap();
+            self.metrics.rollback(metric_before);
             self.navigator = Navigator::default();
             return Err(error);
         }
@@ -424,7 +453,7 @@ impl World {
         json!({"schemaVersion":1,"simulationId":self.initial.scene.simulation_id,"id":id,"initialSceneHash":self.initial_scene_hash,"versions":versions,
             "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":self.map_state.entities().iter().map(wire).collect::<Vec<_>>(),"entityOrigins":self.runtime.entity_origins,
             "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":self.runtime.jobs,"rules":self.runtime.rules,"queues":self.queues,"slots":self.slots,"allocations":self.allocations,"random":self.random,
-            "metrics":{"samples":[],"departures":self.departures,"removedCount":self.removed_count,"portalCrossings":[],"queueTotals":[],"clearance":null},"events":self.events,"historyRevision":self.history.history_revision,
+            "metrics":self.metrics_snapshot(),"events":self.events,"historyRevision":self.history.history_revision,
             "appliedThrough":{"tick":self.tick,"order":self.history.records.len(),"prefixHash":fingerprint(&self.history.records)},"contactState":null})
     }
 }
@@ -528,6 +557,64 @@ pub fn wire<T: Serialize>(value: &T) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn portal_visit_and_metric_history_resume_mid_passage() {
+        let input: Value = serde_json::from_str(include_str!(
+            "../../contract/fixtures/engine-navigation-load.json"
+        ))
+        .unwrap();
+        let initial = serde_json::from_value(input["compiled"].clone()).unwrap();
+        let mut world = World::load(initial, &Id("engine-demo".into())).unwrap();
+        for _ in 0..100 {
+            if !world.metrics_snapshot()["portalVisits"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+            {
+                break;
+            }
+            world.advance(1).unwrap();
+        }
+        assert_eq!(
+            world.metrics_snapshot()["portalVisits"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut restored: World =
+            serde_json::from_value(serde_json::to_value(&world).unwrap()).unwrap();
+        world.advance(100).unwrap();
+        for _ in 0..100 {
+            restored.advance(1).unwrap();
+        }
+        assert_eq!(
+            world.snapshot(&Id("saved".into())),
+            restored.snapshot(&Id("saved".into()))
+        );
+        assert_eq!(
+            world.metrics_snapshot()["portalCrossings"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn metric_retention_failure_rolls_back_history_counters_and_rng() {
+        for fixture in [
+            include_str!("../../contract/fixtures/engine-navigation-load.json"),
+            include_str!("../../contract/fixtures/engine-load.json"),
+        ] {
+            let input: Value = serde_json::from_str(fixture).unwrap();
+            let initial = serde_json::from_value(input["compiled"].clone()).unwrap();
+            let mut world = World::load(initial, &Id("engine-demo".into())).unwrap();
+            world.metrics.retained_records = 100000;
+            let before = serde_json::to_value(&world).unwrap();
+            assert_eq!(world.advance(10).unwrap_err().0, "RESOURCE_LIMIT");
+            assert_eq!(serde_json::to_value(&world).unwrap(), before);
+        }
+    }
     #[test]
     fn pending_jobs_rules_and_sampling_resume_and_batch_independently() {
         let input: Value =

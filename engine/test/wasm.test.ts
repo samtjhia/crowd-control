@@ -29,7 +29,7 @@ test('actual Wasm module loads, publishes typed messages, resets and releases ha
   const command = readFileSync(new URL('../../contract/fixtures/engine-static-load.json', import.meta.url), 'utf8')
   const messages = JSON.parse(bindings.dispatch(handle, command))
   for (const message of messages) assert.equal(parseWorkerMessage(message).ok, true)
-  assert.deepEqual(messages.map((m: { type: string }) => m.type), ['ack', 'scene', 'frame'])
+  assert.deepEqual(messages.map((m: { type: string }) => m.type), ['ack', 'scene', 'frame', 'metrics'])
   assert.equal(messages[2].frame.agents[0].x, 1.5)
   const reset = JSON.parse(bindings.dispatch(handle, JSON.stringify({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'reset', type: 'reset' })))
   assert.notEqual(reset[2].frame.streamId, messages[2].frame.streamId)
@@ -233,6 +233,8 @@ test('part six runs every compiled frontend scenario through the real host and S
       assert.equal(snapshot.type, 'snapshot')
       if (snapshot.type === 'snapshot') assert.equal(parseSnapshot(snapshot.snapshot).ok, true, JSON.stringify(snapshot.snapshot))
       assert.equal(client.getView().lastError, null)
+      assert.ok(client.getView().metrics, 'real metrics reach the existing frontend client')
+      assert.ok(client.getView().density, 'real density reaches the existing frontend client')
     } finally { client.dispose(); host.dispose() }
   }
 })
@@ -249,6 +251,43 @@ test('part six scheduled arrivals, rules, origins and failures match native Rust
     assert.ok(wasm[4][0].snapshot.agents.every((a: EngineSnapshot['agents'][number]) => a.currentGoal?.spec.kind === 'reach'))
     assert.equal(wasm[7][0].snapshot.events.at(-1).name, 'job_failed')
     assert.equal(wasm[7][0].snapshot.events.at(-1).origin.parentJobId, 'bad-arrival')
+    const executable = fileURLToPath(new URL('../../target/debug/examples/protocol', import.meta.url))
+    const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((v) => JSON.parse(v))
+    assert.deepEqual(wasm, native)
+  } finally { bindings.destroy_engine(handle) }
+})
+
+test('part seven metrics, cohorts and read-only queries validate in Wasm with native parity', async () => {
+  const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-services-load.json', import.meta.url), 'utf8'))
+  load.compiled.scene.clearance = { cohortIds: ['a1', 'a2'], startedAt: 0 }
+  const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: 'engine-demo', commandId: type, type, ...extra })
+  const commands = [load, h('snapshot', { snapshotId: 'unchanged' }),
+    h('query', { query: { kind: 'inventory' } }),
+    h('query', { query: { kind: 'agents', targets: { kind: 'agent', sample: { count: 1 } } } }),
+    h('query', { query: { kind: 'metrics', from: 0, to: 0, zones: ['hall'] } }),
+    h('query', { query: { kind: 'events', names: ['departure'] } }),
+    h('snapshot', { snapshotId: 'unchanged' }), h('step', { ticks: 400 }),
+    h('query', { query: { kind: 'metrics', from: 0, to: 20, zones: ['hall'] } }),
+    h('snapshot', { snapshotId: 'complete' }), h('step', { ticks: 1 })]
+  const bindings = await engine(), handle = bindings.create_engine()
+  try {
+    const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+    for (const batch of wasm) for (const message of batch) {
+      const parsed = parseWorkerMessage(message)
+      assert.equal(parsed.ok, true, JSON.stringify(parsed))
+    }
+    assert.deepEqual(wasm[1], wasm[6], 'all five reads leave snapshot state and RNG unchanged')
+    assert.equal(wasm[8][0].result.samples.length, 41)
+    const metrics = wasm[7].find((m: WorkerMessage) => m.type === 'metrics')
+    assert.ok(metrics.sample.clearance.t100 !== null)
+    assert.equal(metrics.sample.departed, 2)
+    assert.equal(metrics.density.units, 'people/model-unit2')
+    assert.equal(metrics.sample.queues.find((q: { targetId: string }) => q.targetId === 'desk').served, 2)
+    assert.equal(metrics.sample.portals.find((p: { portalId: string }) => p.portalId === 'door').crossed, 2)
+    const frame = wasm[7].find((m: WorkerMessage) => m.type === 'frame').frame
+    for (const key of ['tick', 'time', 'historyRevision', 'sceneVersion', 'topologyVersion', 'streamId']) assert.equal(metrics.stamp[key], frame[key])
+    assert.equal(wasm[10].find((m: WorkerMessage) => m.type === 'metrics').density, undefined, 'density publication is throttled while counts remain live')
+    assert.ok(wasm[9][0].snapshot.agents.every((a: EngineSnapshot['agents'][number]) => a.sensors === null))
     const executable = fileURLToPath(new URL('../../target/debug/examples/protocol', import.meta.url))
     const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((v) => JSON.parse(v))
     assert.deepEqual(wasm, native)

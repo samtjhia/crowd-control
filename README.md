@@ -8,7 +8,7 @@ Use Node 24+, npm 10+, and Rust with edition 2024 support.
 ```text
 contract/   Strict Zod schemas, shared types and JSON fixtures — C leads, everyone reviews
 compiler/   Layout generation, maps, rasterization, placement — B
-engine/     Rust operations, scheduling, goals, movement, navigation and Wasm bridge — A
+engine/     Rust operations, scheduling, goals, movement, metrics and Wasm bridge — A
 history/    Intervention revisions and replay planning — C
 server/     Node API and Gemini planner; persistence adapters — C
 web/        React + Vite UI — B, with C owning chat
@@ -72,8 +72,8 @@ inputs and limitations.
 
 The product simulator at `/sim` defaults to the mock worker. Use
 `/sim?engine=real` for Rust/Wasm with the same PixiJS UI and compiled scenarios.
-That mode runs movement, goals, arrivals, rules and live changes; metrics/contact
-physics/replay remain pending. The preset is explicitly movement-only.
+That mode runs movement, goals, arrivals, rules, live changes and real metrics.
+Contact physics/replay remain pending. The preset is explicitly movement-only.
 
 See [contract/README.md](contract/README.md) for contract imports, validation
 boundaries and remaining engine/adapter work.

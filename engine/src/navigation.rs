@@ -860,8 +860,9 @@ impl Navigator {
         agents: &mut [AgentRuntime],
         dt: f64,
         tick: u64,
+        metrics: &mut crate::metrics::Metrics,
     ) -> Result<(), Failure> {
-        crate::movement::advance(self, grid, agents, dt, tick)
+        crate::movement::advance(self, grid, agents, dt, tick, metrics)
     }
     pub fn ready(&self, a: &mut AgentRuntime, i: usize, dt: f64) -> bool {
         if a.components.mobility.speed_multiplier.0 == 0.0 {

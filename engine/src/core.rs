@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "operations-engine-v6";
+pub const ENGINE_VERSION: &str = "metrics-engine-v7";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -11,6 +11,7 @@ pub struct Engine {
     loaded: Option<World>,
     stream: u64,
     published_events: usize,
+    published_density_tick: Option<u64>,
 }
 pub(crate) type Failure = (&'static str, String);
 pub(crate) fn invalid(message: impl Into<String>) -> Failure {
@@ -99,6 +100,7 @@ impl Engine {
             let world = World::load(compiled, &c.simulation_id)?;
             let stream = self.next_stream()?;
             self.published_events = 0;
+            self.published_density_tick = None;
             self.loaded = Some(world);
             self.stream = stream;
             return Ok(self.publication(&c.command_id, true));
@@ -115,6 +117,7 @@ impl Engine {
                 let world = World::load(world.initial.clone(), &c.simulation_id)?;
                 let stream = self.next_stream()?;
                 self.published_events = 0;
+                self.published_density_tick = None;
                 self.loaded = Some(world);
                 self.stream = stream;
                 Ok(self.publication(&c.command_id, true))
@@ -179,15 +182,9 @@ impl Engine {
                 }
             }
             "query" => {
-                let query = c.query.as_ref().unwrap();
-                if query["kind"] != "history" {
-                    return Err(unsupported("Only history queries are currently enabled"));
-                }
-                if query.as_object().is_none_or(|v| v.len() != 1) {
-                    return Err(invalid("Unknown history query fields"));
-                }
+                let result = world.read_query(c.query.as_ref().unwrap())?;
                 Ok(vec![
-                    json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"query_result","commandId":c.command_id,"stamp":self.stamp(),"result":{"kind":"history","history":world.history}}),
+                    json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"query_result","commandId":c.command_id,"stamp":self.stamp(),"result":result}),
                     self.ack(&c.command_id),
                 ])
             }
@@ -228,6 +225,16 @@ impl Engine {
         let mut frame = self.stamp();
         frame["agents"] = world.frame_agents();
         out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"frame","frame":frame}));
+        let mut metrics = json!({"schemaVersion":1,"simulationId":simulation,"type":"metrics","stamp":self.stamp(),"sample":world.metric_sample()});
+        if scene
+            || self
+                .published_density_tick
+                .is_none_or(|last| world.tick.saturating_sub(last) >= world.metric_period())
+        {
+            metrics["density"] = world.density_grid();
+            self.published_density_tick = Some(world.tick);
+        }
+        out.push(metrics);
         if self.published_events < world.events.len() {
             out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"events","stamp":self.stamp(),"events":world.events[self.published_events..]}));
             self.published_events = world.events.len();

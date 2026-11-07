@@ -254,3 +254,12 @@ test('dictionary IDs cannot bypass checks or change goal-depth interpretation', 
   check(c.CompiledSceneSchema, scene, { limits: { ...limits, maxGoalDepth: 1 } });
   check(c.JsonValueSchema, { op: 'set', targets: { binding: 'subject' }, values: { arbitrary: true } });
 });
+
+test('compiled clearance is explicit, finite and unique, including declared future members', () => {
+  const scene = fixture('compiled-scene');
+  scene.clearance = { cohortIds: ['a1', 'a2', 'future-agent'], startedAt: 30 };
+  check(c.CompiledSceneSchema, scene);
+  rejects(c.ClearanceCohortSchema, { cohortIds: [], startedAt: 0 });
+  rejects(c.ClearanceCohortSchema, { cohortIds: ['a1', 'a1'], startedAt: 0 });
+  rejects(c.ClearanceCohortSchema, { cohortIds: ['a1'], startedAt: -1 });
+});

@@ -265,7 +265,6 @@ fn future_intervention_rejects_past_edits_and_unavailable_conditions() {
         "INVALID_SCHEMA"
     );
     for (index,condition) in [
-        json!({"kind":"density","inside":{"ids":["hall"]},"comparison":"gt","value":4}),
         json!({"kind":"entity_metric","targets":{"kind":"agent"},"metric":"contactLoadRatio","comparison":"gt","value":1,"for":1}),
     ].into_iter().enumerate() {
         assert_eq!(

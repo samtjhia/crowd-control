@@ -333,6 +333,7 @@ struct Context<'a> {
     queues: &'a mut Vec<QueueRuntime>,
     slots: &'a mut Vec<SlotsRuntime>,
     allocations: &'a mut Allocation,
+    metrics: &'a mut crate::metrics::Metrics,
     now: f64,
     dt: f64,
     admitted: &'a mut BTreeMap<Id, usize>,
@@ -476,7 +477,8 @@ impl Context<'_> {
             && free_slot
             && rate.is_none_or(|_| q.service_credit.0 + 1e-9 >= 1.0)
         {
-            q.entries.remove(0);
+            let joined = q.entries.remove(0).joined_at.0;
+            self.metrics.admitted(id, self.now - joined)?;
             if rate.is_some() {
                 q.service_credit.0 = (q.service_credit.0 - 1.0).max(0.0);
             }
@@ -739,6 +741,7 @@ impl World {
                 queues: &mut self.queues,
                 slots: &mut self.slots,
                 allocations: &mut self.allocations,
+                metrics: &mut self.metrics,
                 now,
                 dt,
                 admitted: &mut admitted,
@@ -1172,6 +1175,7 @@ impl World {
                 release(a, &mut self.queues, &mut self.slots, false);
                 self.navigator.prepared = false;
                 if matches!(g.kind, GoalKind::Reach) && g.depart_on_arrival == Some(true) {
+                    self.metrics.forget_agent(&a.id);
                     a.departed_at = Some(Nonnegative(now));
                     a.state = "departed".into();
                     a.current_goal.as_mut().unwrap().status = "completed".into();
@@ -1257,6 +1261,7 @@ impl World {
                 .position(|a| &a.id == id)
                 .ok_or_else(|| ("NOT_FOUND", format!("Unknown agent {}", id.0)))?;
             let mut a = self.agents.remove(i);
+            self.metrics.forget_agent(&a.id);
             release(&mut a, &mut self.queues, &mut self.slots, false);
             self.removed_count += 1;
             let event = allocate(&mut self.allocations.next_event, "event")?;

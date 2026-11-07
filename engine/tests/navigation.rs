@@ -72,7 +72,7 @@ fn portal_changes_retain_intent_publish_versions_and_resume_without_teleporting(
             .iter()
             .map(|v| v["type"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["ack", "scene", "frame"]
+        ["ack", "scene", "frame", "metrics"]
     );
     assert_eq!(close[0]["stamp"]["topologyVersion"], 1);
     assert_eq!(close[0]["stamp"]["sceneVersion"], 2);

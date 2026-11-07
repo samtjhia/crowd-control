@@ -10,6 +10,7 @@ import {
   type MetricSample,
   type Operation,
   type RenderScene,
+  type Stamp,
   type WorkerCommand,
   type WorkerEndpoint,
   type WorkerMessage,
@@ -66,6 +67,7 @@ export class SimulationClient {
   private readonly pendingFrames = new Map<string, Frame>()
   private readonly pending = new Map<string, { type: CommandBody['type']; multiplier?: number; resolve: (message: WorkerMessage) => void }>()
   private readonly detach: () => void
+  private metricsTick = -1
   private nextCommand = 1
   private nextRequest = 1
   private view: SimulationView
@@ -152,12 +154,21 @@ export class SimulationClient {
         this.receiveFrame(message.frame)
         return
       case 'metrics':
-        if (message.stamp.streamId === this.view.streamId) this.update({ metrics: message.sample, density: message.density ?? null })
+        if (this.acceptTelemetry(message.stamp) && message.stamp.tick >= this.metricsTick && message.stamp.tick >= (this.view.current?.frame.tick ?? 0)) {
+          this.metricsTick = message.stamp.tick
+          this.update({ metrics: message.sample, density: message.density ?? this.view.density })
+        }
         return
       case 'events':
-        if (message.stamp.streamId === this.view.streamId) this.update({ events: [...this.view.events, ...message.events].slice(-MAX_EVENTS) })
+        if (this.acceptTelemetry(message.stamp)) this.update({ events: [...this.view.events, ...message.events].slice(-MAX_EVENTS) })
         return
     }
+  }
+
+  private acceptTelemetry(stamp: Stamp): boolean {
+    return stamp.streamId === this.view.streamId && stamp.sceneVersion === this.view.sceneVersion
+      && stamp.historyRevision === this.view.historyRevision
+      && (!this.view.current || stamp.topologyVersion === this.view.current.frame.topologyVersion)
   }
 
   private settle(commandId: string, message: WorkerMessage) {
@@ -173,7 +184,11 @@ export class SimulationClient {
   }
 
   private receiveScene(streamId: string, sceneVersion: number, historyRevision: number, scene: RenderScene) {
-    if (this.retired.has(streamId)) return
+    if (this.retired.has(streamId) || (streamId === this.view.streamId && (sceneVersion < this.view.sceneVersion || historyRevision < this.view.historyRevision))) return
+    if (streamId !== this.view.streamId || sceneVersion !== this.view.sceneVersion || historyRevision !== this.view.historyRevision) {
+      this.metricsTick = -1
+      this.update({ metrics: null, density: null })
+    }
     if (streamId !== this.view.streamId) {
       if (this.view.streamId) this.retired.add(this.view.streamId)
       // A new stream (load or reset) has its own history: a reset goes back to the initial

@@ -3,6 +3,7 @@ mod core;
 mod geometry;
 mod goals;
 mod grid;
+mod metrics;
 mod movement;
 mod navigation;
 mod operations;

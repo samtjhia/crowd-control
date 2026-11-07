@@ -13,7 +13,7 @@ test('native Rust output conforms to shared Zod worker schemas', () => {
   for (const messages of output) for (const message of messages) {
     const result = parseWorkerMessage(message); assert.equal(result.ok, true, JSON.stringify(result));
   }
-  assert.deepEqual(output[0].map((m) => m.type), ['ack', 'scene', 'frame']);
+  assert.deepEqual(output[0].map((m) => m.type), ['ack', 'scene', 'frame', 'metrics']);
   assert.equal(output[0][1].scene.agents.length, 2);
   assert.equal(output[0][1].scene.agents[0].appearance.fill, '#2563EB');
   assert.notEqual(output[0][2].frame.streamId, output[1][2].frame.streamId);

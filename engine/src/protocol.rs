@@ -165,7 +165,8 @@ dto!(SceneModel {
     units: Units,
     dt: Positive
 });
-dto!(Scene { schema_version: Counter, simulation_id: Id, seed: Counter, versions: Versions, model: SceneModel, map: Map, profiles: BTreeMap<Id,Profile>, controllers: BTreeMap<Id,Value>, agents: Vec<Agent>, jobs: Vec<Value>, rules: Vec<Value> });
+dto!(ClearanceCohort { cohort_ids: Vec<Id>, started_at: Nonnegative });
+dto!(Scene { clearance: Option<ClearanceCohort>, schema_version: Counter, simulation_id: Id, seed: Counter, versions: Versions, model: SceneModel, map: Map, profiles: BTreeMap<Id,Profile>, controllers: BTreeMap<Id,Value>, agents: Vec<Agent>, jobs: Vec<Value>, rules: Vec<Value> });
 dto!(Layout {
     body_diameter: Positive,
     spacing_diameters: Positive,

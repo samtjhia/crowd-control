@@ -332,6 +332,22 @@ impl World {
                                 &when["value"],
                             )
                     }
+                    "density" => {
+                        event.is_none() && {
+                            let density = self.condition_density(
+                                &when["inside"],
+                                &format!("rule:{}", id.0),
+                                &mut selector_work,
+                            )?;
+                            density.is_some_and(|density| {
+                                sel::compare(
+                                    &json!(density),
+                                    when["comparison"].as_str().unwrap(),
+                                    &when["value"],
+                                )
+                            })
+                        }
+                    }
                     "count" => {
                         event.is_none() && {
                             let n = sel::resolve(

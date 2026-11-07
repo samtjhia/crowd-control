@@ -56,7 +56,7 @@ npm run typecheck --workspace @crowd-control/contract
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits and the performance target
-remain implementation work. Parts one–six now provide Rust world initialization,
+remain implementation work. Parts one–seven now provide Rust world initialization,
 full runtime agents, both grid encodings, seeded streams, fixed-clock playback and
 snapshot export, basic reach navigation and recorded immediate portal.open changes.
 Actual Wasm tests include native parity and host pacing. Browser worker/PixiJS
@@ -151,5 +151,11 @@ time-zero/absolute/relative schedules and event/time/count conditions. Pending
 jobs/rules and entity/event origins use the existing snapshot DTOs; schema/ABI stay
 1 and engine version is operations-engine-v6. Native/actual Wasm tests cover atomic
 failure and frontend client compatibility. Future create_intervention works;
-past work/edit/delete/restore remain rejected. Density conditions and unavailable
-contact sensors reject registration. No automatic fall model is enabled.
+past work/edit/delete/restore remain rejected. Unavailable contact sensors reject registration; density conditions now run. No automatic fall model is enabled.
+
+Part seven adds optional CompiledScene.clearance (finite cohortIds and startedAt),
+shared ClearanceCohortSchema, and optional MetricsState.portalVisits for unfinished
+portal passages. Metrics/events/history/inventory/agents queries are read-only;
+read sampling uses a private stream. Schema/ABI remain 1; engine version is
+metrics-engine-v7. Density uses actual masks and map units; no contact diagnostics
+or automatic falls are inferred. Engine README documents cadence and retention.

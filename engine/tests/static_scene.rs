@@ -19,7 +19,7 @@ fn loads_metadata_before_positions_and_resets_stream() {
         out.iter()
             .map(|m| m["type"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["ack", "scene", "frame"]
+        ["ack", "scene", "frame", "metrics"]
     );
     assert_eq!(out[1]["scene"]["agents"][0]["radius"], 0.2);
     assert_eq!(out[2]["frame"]["agents"][0]["x"], 1.5);

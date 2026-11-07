@@ -1,6 +1,6 @@
 import { ABI_VERSION, type WasmEngineBindings } from '@crowd-control/contract'
 
-export const ENGINE_VERSION = 'operations-engine-v6'
+export const ENGINE_VERSION = 'metrics-engine-v7'
 type RawExports = WebAssembly.Exports & {
   memory: WebAssembly.Memory
   abi_version(): number

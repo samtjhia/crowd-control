@@ -131,6 +131,7 @@ pub fn advance(
     agents: &mut [AgentRuntime],
     dt: f64,
     tick: u64,
+    metrics: &mut crate::metrics::Metrics,
 ) -> Result<(), Failure> {
     let mut active: Vec<bool> = agents
         .iter_mut()
@@ -164,7 +165,7 @@ pub fn advance(
     }
     let mut work = 0usize;
     let mut nearby = vec![];
-    for _ in 0..steps {
+    for substep in 0..steps {
         let old: Vec<Motion> = agents
             .iter()
             .map(|a| Motion {
@@ -295,6 +296,19 @@ pub fn advance(
             }
             let a = &mut agents[i];
             a.position = me.p.add(accepted.mul(h)).point();
+            if grid.portal_ids.len() > 1 {
+                let from = navigation::index(grid, &me.p.point());
+                let to = navigation::index(grid, &a.position);
+                if from != to {
+                    metrics.transition(
+                        grid,
+                        &a.id,
+                        from,
+                        to,
+                        (tick as f64 + (substep + 1) as f64 / steps as f64) * dt,
+                    )?;
+                }
+            }
             a.velocity = accepted.point();
             a.zone_id = grid.zone_at(a.position.x.0, a.position.y.0);
             if accepted.len() <= grid.cell_size * 1e-10 {

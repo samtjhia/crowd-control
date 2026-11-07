@@ -237,10 +237,17 @@ pub fn condition(v: &Value) -> Result<(), Failure> {
             )?;
             sel::number(&v["value"])?;
         }
-        Some("density" | "entity_metric") => {
-            return Err(unsupported(
-                "Density conditions require part seven; contact sensors require part eight",
-            ));
+        Some("density") => {
+            sel::keys(
+                v,
+                &["kind", "inside", "comparison", "value"],
+                &["kind", "inside", "comparison", "value"],
+            )?;
+            sel::validate(&v["inside"], 0)?;
+            sel::number(&v["value"])?;
+        }
+        Some("entity_metric") => {
+            return Err(unsupported("Contact sensors require part eight"));
         }
         _ => return Err(invalid("Unknown rule condition")),
     }
@@ -549,6 +556,7 @@ impl World {
                 .ok_or_else(|| invalid("Topology version exhausted"))?;
             self.wander_cells.clear();
             self.navigator = Navigator::default();
+            self.refresh_metric_geometry();
         }
         Ok(())
     }

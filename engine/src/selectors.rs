@@ -251,15 +251,31 @@ pub fn resolve(
     key: &str,
     work: &mut usize,
 ) -> Result<Vec<Id>, Failure> {
+    let mut streams = std::mem::take(&mut world.random.rule_sampling);
+    let result = resolve_inner(world, v, key, work, &mut streams);
+    world.random.rule_sampling = streams;
+    result
+}
+pub fn read(world: &World, v: &Value) -> Result<Vec<Id>, Failure> {
+    let mut streams = BTreeMap::new();
+    resolve_inner(world, v, "read-query", &mut 0, &mut streams)
+}
+fn resolve_inner(
+    world: &World,
+    v: &Value,
+    key: &str,
+    work: &mut usize,
+    streams: &mut BTreeMap<Id, u32>,
+) -> Result<Vec<Id>, Failure> {
     validate(v, 0)?;
     let inside = if let Some(v) = v.get("inside") {
-        Some(resolve(world, v, key, work)?)
+        Some(resolve_inner(world, v, key, work, streams)?)
     } else {
         None
     };
     let near = if let Some(v) = v.get("near") {
         Some((
-            resolve(world, &v["targets"], key, work)?,
+            resolve_inner(world, &v["targets"], key, work, streams)?,
             number(&v["distance"])?,
         ))
     } else {
@@ -290,7 +306,7 @@ pub fn resolve(
             })
             .map(|a| a.id.clone())
             .collect();
-        return sample(world, v, key, ids);
+        return sample(world, v, key, ids, streams);
     }
     let records = records(world);
     let geometric_cost = near
@@ -350,9 +366,15 @@ pub fn resolve(
         }
         ids.push(id);
     }
-    sample(world, v, key, ids)
+    sample(world, v, key, ids, streams)
 }
-fn sample(world: &mut World, v: &Value, key: &str, mut ids: Vec<Id>) -> Result<Vec<Id>, Failure> {
+fn sample(
+    world: &World,
+    v: &Value,
+    key: &str,
+    mut ids: Vec<Id>,
+    streams: &mut BTreeMap<Id, u32>,
+) -> Result<Vec<Id>, Failure> {
     ids.sort();
     if let Some(s) = v.get("sample") {
         let n = if let Some(c) = s.get("count") {
@@ -361,21 +383,15 @@ fn sample(world: &mut World, v: &Value, key: &str, mut ids: Vec<Id>) -> Result<V
             (ids.len() as f64 * number(&s["fraction"])?).floor() as usize
         };
         let stream_id = Id(format!("sample-{}", crate::world::fingerprint(&key)));
-        if world.random.rule_sampling.len() >= 10000
-            && !world.random.rule_sampling.contains_key(&stream_id)
-        {
+        if streams.len() >= 10000 && !streams.contains_key(&stream_id) {
             return Err(("RESOURCE_LIMIT", "Selector stream budget exceeded".into()));
         }
-        let state = world
-            .random
-            .rule_sampling
-            .entry(stream_id)
-            .or_insert_with(|| {
-                random::stream_seed(
-                    world.initial.scene.seed.0 as u32,
-                    &format!("selection:{key}"),
-                )
-            });
+        let state = streams.entry(stream_id).or_insert_with(|| {
+            random::stream_seed(
+                world.initial.scene.seed.0 as u32,
+                &format!("selection:{key}"),
+            )
+        });
         for i in 0..n {
             let j = i
                 + (u64::from(random::next(state)) * (ids.len() - i) as u64
