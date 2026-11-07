@@ -1,5 +1,5 @@
 import { Application, BitmapText, Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
-import type { AgentState, Camera, DensityGrid, RenderAgentMetadata, RenderScene, Shape, Vec2 } from '@crowd-control/contract'
+import type { AgentState, Camera, Frame, RenderAgentMetadata, RenderScene, Shape, Vec2 } from '@crowd-control/contract'
 import type { SimulationClient } from '../worker/simulationClient.ts'
 import { HAIR_TONES, SKIN_TONES, figureLook, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, type AgentDrawMode } from './agentStyle.ts'
 import { FigureAtlas, type FigureLook, type FigurePose } from './figureAtlas.ts'
@@ -7,7 +7,7 @@ import { fitCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera
 import { pickAt, pickInBox, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
 import { displayPositions } from './interpolate.ts'
 import { COLORS, layoutMap, type MapLayout } from './mapLayout.ts'
-import { paintHeatmap, peakOf, smoothDensity, smoothingRadius, walkableMask, type HeatScale } from './heatmap.ts'
+import { blurOverFloor, gaussianKernel, heatGridFor, paintHeatmap, peakOf, smoothingSigma, splatPositions, type HeatGrid, type HeatScale } from './heatmap.ts'
 
 export type RendererOptions = {
   /** Largest automatic fit scale, so a tiny map is not blown up absurdly. */
@@ -122,18 +122,23 @@ export class CrowdRenderer {
   private marquee: { from: Vec2; to: Vec2 } | null = null
   private selection: Pick[] = []
   private readonly selectionMark = new Graphics()
-  /** Density heatmap: one pixel per density cell, drawn into a canvas and stretched over the floor. */
+  /**
+   * Density heatmap, built here from the same interpolated positions the people are drawn at,
+   * so it moves with them: one pixel per heat cell, drawn into a canvas and stretched over the
+   * floor with smooth (linear) filtering.
+   */
   private heat: {
     on: boolean
     sprite: Sprite | null
     canvas: HTMLCanvasElement | null
     texture: Texture | null
     image: ImageData | null
-    grid: DensityGrid | null
-    mask: { scene: RenderScene; width: number; height: number; value: Uint8Array | null } | null
+    /** The heat grid for the current scene, with its wall mask, Gaussian and scratch buffer. */
+    grid: (HeatGrid & { scene: RenderScene; kernel: Float32Array; people: Float32Array; metric: boolean }) | null
+    lastPaint: number
     /** Relative maps: a slowly decaying peak, so colours don't flicker as people move. */
     relativeMax: number
-  } = { on: true, sprite: null, canvas: null, texture: null, image: null, grid: null, mask: null, relativeMax: 0 }
+  } = { on: true, sprite: null, canvas: null, texture: null, image: null, grid: null, lastPaint: 0, relativeMax: 0 }
   /** The selected room's floor strips, cached until the scene or selection changes. */
   private selectedFloors: { scene: RenderScene | null; strips: Map<string, { x: number; y: number; width: number; height: number }[]> } = { scene: null, strips: new Map() }
 
@@ -271,7 +276,7 @@ export class CrowdRenderer {
   setHeatmap(on: boolean) {
     this.heat.on = on
     if (this.heat.sprite) this.heat.sprite.visible = on
-    if (on) this.heat.grid = null // repaint from the latest density
+    this.heat.lastPaint = 0 // repaint on the next frame
   }
 
   /** Current camera, for DOM overlays positioned in world coordinates. */
@@ -318,8 +323,9 @@ export class CrowdRenderer {
       // The camera has settled: redraw at the new scale so lines and labels are crisp again.
       this.redrawMap()
     }
-    if (this.heat.on && view.density !== this.heat.grid) this.updateHeatmap(view.density)
     if (view.current) this.drawAgents(view.previous, view.current)
+    // Up to ~30 times a second is plenty for a soft overlay, and keeps big crowds cheap.
+    if (this.heat.on && now - this.heat.lastPaint >= 33) this.paintHeatmap(view.current?.frame ?? null, now)
     this.drawSelection()
   }
 
@@ -329,7 +335,7 @@ export class CrowdRenderer {
     this.layout = scene ? layoutMap(scene.map) : null
     this.metadata.clear()
     this.heat.relativeMax = 0
-    this.heat.grid = null
+    this.heat.lastPaint = 0
     for (const agent of scene?.agents ?? []) this.metadata.set(agent.id, agent)
     if (this.layout && (!previous || previous.worldWidth !== this.layout.worldWidth || previous.worldHeight !== this.layout.worldHeight)) {
       this.refit(true)
@@ -387,24 +393,37 @@ export class CrowdRenderer {
   }
 
   /**
-   * Repaints the heatmap from a new density grid: smooth, colour, upload. Metre maps use the
+   * Repaints the heatmap from where people are drawn right now: share each person between the
+   * nearest cells, blur with a Gaussian over the floor, colour, upload. Metre maps use the
    * indicative people/m² bands; other maps colour relative to the busiest spot.
    */
-  private updateHeatmap(grid: DensityGrid | null) {
-    this.heat.grid = grid
-    if (!grid || !this.scene) {
+  private paintHeatmap(frame: Frame | null, now: number) {
+    this.heat.lastPaint = now
+    const scene = this.scene
+    const layout = this.layout
+    if (!scene || !layout || !frame) {
       if (this.heat.sprite) this.heat.sprite.visible = false
       return
     }
-    const scene = this.scene
-    let mask = this.heat.mask
-    if (!mask || mask.scene !== scene || mask.width !== grid.width || mask.height !== grid.height) {
-      mask = { scene, width: grid.width, height: grid.height, value: walkableMask(scene.map, grid.width, grid.height) }
-      this.heat.mask = mask
+    let grid = this.heat.grid
+    if (!grid || grid.scene !== scene) {
+      const metric = scene.map.units === 'm'
+      const sigma = smoothingSigma(scene.map.units)
+      const heatGrid = heatGridFor(scene.map, layout.columns, layout.rows, sigma)
+      grid = { ...heatGrid, scene, metric, kernel: gaussianKernel(sigma / heatGrid.cellSize), people: new Float32Array(heatGrid.width * heatGrid.height) }
+      this.heat.grid = grid
     }
-    const smoothed = smoothDensity(grid, mask.value, smoothingRadius(grid))
+    const present = function* (positions: Map<string, Vec2>) {
+      for (const agent of frame.agents) {
+        if (agent.state === 'departed') continue
+        const at = positions.get(agent.id)
+        if (at) yield at
+      }
+    }
+    splatPositions(present(this.positions), grid, grid.people)
+    const smoothed = blurOverFloor(grid.people, grid.mask, grid.width, grid.height, grid.kernel)
     let scale: HeatScale = { kind: 'metric' }
-    if (grid.units !== 'people/m2') {
+    if (!grid.metric) {
       this.heat.relativeMax = Math.max(peakOf(smoothed, grid).value, this.heat.relativeMax * 0.97)
       scale = { kind: 'relative', max: this.heat.relativeMax }
     }
@@ -417,6 +436,7 @@ export class CrowdRenderer {
       this.heat.canvas = canvas
       this.heat.image = new ImageData(grid.width, grid.height)
       this.heat.texture = Texture.from(canvas)
+      this.heat.texture.source.scaleMode = 'linear'
       if (!this.heat.sprite) {
         this.heat.sprite = new Sprite(this.heat.texture)
         this.layers.heatmap.addChild(this.heat.sprite)
@@ -427,7 +447,7 @@ export class CrowdRenderer {
     paintHeatmap(smoothed, scale, this.heat.image!.data)
     this.heat.canvas.getContext('2d')!.putImageData(this.heat.image!, 0, 0)
     this.heat.texture!.source.update()
-    this.heat.sprite!.visible = this.heat.on
+    this.heat.sprite!.visible = true
     this.placeHeatmap()
   }
 
@@ -436,7 +456,7 @@ export class CrowdRenderer {
     const { sprite, grid } = this.heat
     const drawn = this.mapDrawnFor?.camera
     if (!sprite || !grid || !drawn) return
-    const corner = worldToScreen(drawn, grid.origin)
+    const corner = worldToScreen(drawn, { x: 0, y: 0 })
     sprite.position.set(corner.x, corner.y)
     sprite.width = grid.width * grid.cellSize * drawn.pixelsPerUnit
     sprite.height = grid.height * grid.cellSize * drawn.pixelsPerUnit

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { METRIC_BANDS, RELATIVE_GRADIENT, peakOf, smoothDensity, smoothingRadius, walkableMask } from '../render/heatmap.ts'
+import { METRIC_BANDS, RELATIVE_GRADIENT, peakOf, smoothDensity, walkableMask } from '../render/heatmap.ts'
 import { zoneAt } from '../render/hitTest.ts'
 import type { SimulationView } from '../worker/simulationClient.ts'
 import { nameOf } from './mapActions.ts'
@@ -19,7 +19,7 @@ export function DensityPanel({ view, on, onToggle }: { view: SimulationView; on:
   const metric = density?.units === 'people/m2'
   const peak = useMemo(() => {
     if (!scene || !density) return null
-    const smoothed = smoothDensity(density, walkableMask(scene.map, density.width, density.height), smoothingRadius(density))
+    const smoothed = smoothDensity(density, walkableMask(scene.map, density.width, density.height))
     const top = peakOf(smoothed, density)
     if (top.value <= 0) return null
     const zone = zoneAt(scene, top)
@@ -57,7 +57,7 @@ export function DensityPanel({ view, on, onToggle }: { view: SimulationView; on:
               </li>
             ))}
           </ul>
-          <p className="sim-muted sim-density-note">People per m², averaged over about 1 m around each spot. Indicative bands from crowd-safety research, not a safety assessment.</p>
+          <p className="sim-muted sim-density-note">People per m², averaged over about a metre around each spot. Indicative bands from crowd-safety research, not a safety assessment.</p>
         </>
       ) : (
         <>
