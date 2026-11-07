@@ -176,8 +176,11 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
     }
   }, [])
 
+  /** The current walls (draft plus corrections), for later steps. */
+  const readBlocked = useCallback(() => mask.current?.blocked() ?? null, [])
+
   return {
-    mask, threshold, setThreshold, resetThreshold, ignoreSpecks, setIgnoreSpecks,
+    mask, readBlocked, threshold, setThreshold, resetThreshold, ignoreSpecks, setIgnoreSpecks,
     tool, setTool, brush, setBrush, undo, redo, ...history, stroke, onHover, drawOverlay,
   }
 }
