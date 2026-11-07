@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { WallMask, draftWalls, paintWalls, removeSpecks, suggestThreshold, type Pixels } from './walls.ts'
+import { FLOOR, OBJECT, WALL, WallMask, draftLayers, draftWalls, paintWalls, removeSpecks, suggestThreshold, type Pixels } from './walls.ts'
 
 /** A test plan: white paper, a dark wall line across row 10, and a small dark "letter" blob. */
 function plan(width = 100, height = 40): Pixels {
@@ -43,11 +43,11 @@ test('"ignore text and small marks" drops small blobs but keeps long walls', () 
 
 test('brushes paint walls and floor; corrections win over the draft', () => {
   const mask = new WallMask(100, 40, draftWalls(plan(), 128, false))
-  mask.beginStroke(true) // erase: cut a doorway in the wall
+  mask.beginStroke(FLOOR) // erase: cut a doorway in the wall
   mask.paint({ x: 50, y: 10 }, { x: 50, y: 10 }, 2)
   mask.endStroke()
   assert.equal(mask.isWall(10 * 100 + 50), false, 'the doorway is open')
-  mask.beginStroke(false) // draw a new wall
+  mask.beginStroke(WALL) // draw a new wall
   mask.paint({ x: 20, y: 30 }, { x: 30, y: 30 }, 1)
   mask.endStroke()
   assert.equal(mask.isWall(30 * 100 + 25), true, 'the segment between the points is painted')
@@ -58,10 +58,10 @@ test('brushes paint walls and floor; corrections win over the draft', () => {
 
 test('undo and redo replay strokes exactly', () => {
   const mask = new WallMask(100, 40, new Uint8Array(4000))
-  mask.beginStroke(false)
+  mask.beginStroke(WALL)
   mask.paint({ x: 10, y: 10 }, { x: 10, y: 10 }, 3)
   mask.endStroke()
-  mask.beginStroke(true)
+  mask.beginStroke(FLOOR)
   mask.paint({ x: 10, y: 10 }, { x: 10, y: 10 }, 1)
   mask.endStroke()
   const centre = 10 * 100 + 10, edge = 10 * 100 + 12
@@ -75,7 +75,7 @@ test('undo and redo replay strokes exactly', () => {
   mask.redo()
   assert.deepEqual([mask.isWall(centre), mask.isWall(edge)], [false, true])
   mask.undo()
-  mask.beginStroke(false)
+  mask.beginStroke(WALL)
   mask.paint({ x: 50, y: 30 }, { x: 50, y: 30 }, 1)
   mask.endStroke()
   assert.equal(mask.canRedo, false, 'a new stroke clears redo')
@@ -83,7 +83,7 @@ test('undo and redo replay strokes exactly', () => {
 
 test('an empty stroke (a click off the plan) is not recorded', () => {
   const mask = new WallMask(10, 10, new Uint8Array(100))
-  mask.beginStroke(false)
+  mask.beginStroke(WALL)
   assert.equal(mask.paint({ x: -50, y: -50 }, { x: -40, y: -50 }, 2), null)
   assert.equal(mask.endStroke(), false)
   assert.equal(mask.canUndo, false)
@@ -97,4 +97,67 @@ test('the overlay shows walls in red and everything else clear', () => {
   assert.equal(pixel(50, 10)[0], 220)
   assert.ok(pixel(50, 10)[3]! > 0)
   assert.equal(pixel(50, 20)[3], 0)
+})
+
+/**
+ * A 120 × 80 px plan like the one in the screenshot: a thick (6 px) wall box, a wall drawn as
+ * two thin lines with a gap (a hollow wall), a table drawn as a thin outline, and a row of
+ * thin seat marks.
+ */
+function furnishedPlan() {
+  const width = 120, height = 80
+  const data = new Uint8ClampedArray(width * height * 4).fill(255)
+  const ink = (x: number, y: number) => { const i = (y * width + x) * 4; data[i] = data[i + 1] = data[i + 2] = 40 }
+  const box = (x0: number, y0: number, x1: number, y1: number) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ink(x, y) }
+  box(0, 0, 120, 6); box(0, 74, 120, 80); box(0, 0, 6, 80); box(114, 0, 120, 80) // thick outer walls
+  box(60, 6, 61, 74); box(64, 6, 65, 74) // a hollow wall: two 1 px lines, 3 px apart
+  box(20, 20, 40, 21); box(20, 35, 40, 36); box(20, 20, 21, 36); box(39, 20, 40, 36) // a table outline
+  for (let x = 80; x < 104; x += 4) box(x, 50, x + 2, 52) // seat marks
+  const pixels: Pixels = { data, width, height }
+  return { pixels, at: (x: number, y: number) => y * width + x }
+}
+
+const settings = { threshold: 128, ignoreSpecks: false, wallThickness: 4, maxObjectArea: 600 }
+
+test('thick strokes are walls; thin outlines are furniture, not walls', () => {
+  const { pixels, at } = furnishedPlan()
+  const kinds = draftLayers(pixels, settings)
+  assert.equal(kinds[at(3, 40)], WALL, 'the 6 px outer wall')
+  assert.equal(kinds[at(30, 20)], OBJECT, 'the table’s 1 px outline')
+  assert.equal(kinds[at(81, 51)], OBJECT, 'a seat mark')
+  assert.equal(kinds[at(50, 60)], FLOOR, 'open floor')
+})
+
+test('a wall drawn as two thin lines with a narrow gap counts as one solid wall', () => {
+  const { pixels, at } = furnishedPlan()
+  const kinds = draftLayers(pixels, settings)
+  assert.equal(kinds[at(60, 40)], WALL)
+  assert.equal(kinds[at(62, 40)], WALL, 'the gap between the lines is filled')
+  assert.equal(kinds[at(64, 40)], WALL)
+})
+
+test('a small closed outline is filled in as furniture, so people go around the whole table', () => {
+  const { pixels, at } = furnishedPlan()
+  const kinds = draftLayers(pixels, settings)
+  assert.equal(kinds[at(30, 28)], OBJECT, 'the inside of the table')
+  assert.equal(draftLayers(pixels, { ...settings, maxObjectArea: 100 })[at(30, 28)], FLOOR, 'unless it is bigger than the furniture size limit')
+})
+
+test('at “any thickness”, everything dark is wall, as before', () => {
+  const { pixels, at } = furnishedPlan()
+  const kinds = draftLayers(pixels, { ...settings, wallThickness: 0 })
+  assert.equal(kinds[at(30, 20)], WALL)
+  assert.equal(kinds[at(30, 28)], FLOOR)
+})
+
+test('rooms see only walls; furniture is reported separately', () => {
+  const { pixels, at } = furnishedPlan()
+  const mask = new WallMask(120, 80, draftLayers(pixels, settings))
+  assert.equal(mask.blocked()[at(30, 20)], 0, 'furniture never cuts a room up')
+  assert.equal(mask.objects()[at(30, 20)], 1)
+  mask.beginStroke(OBJECT)
+  mask.paint({ x: 50, y: 60 }, { x: 50, y: 60 }, 1)
+  mask.endStroke()
+  assert.equal(mask.isObject(at(50, 60)), true, 'the Object brush marks furniture by hand')
+  assert.equal(mask.corrections().at(-1)?.walkable, false)
 })

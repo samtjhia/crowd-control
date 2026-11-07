@@ -20,8 +20,8 @@ import { WallsStep } from './WallsStep.tsx'
 /** The editor's steps (Technical PRD §7). Later steps unlock as earlier ones are done. */
 const STEPS = [
   { id: 'upload', label: 'Upload' },
-  { id: 'walls', label: 'Walls' },
   { id: 'scale', label: 'Scale' },
+  { id: 'walls', label: 'Walls' },
   { id: 'rooms', label: 'Rooms' },
   { id: 'doors', label: 'Doors' },
   { id: 'check', label: 'Check & save' },
@@ -42,25 +42,25 @@ export default function EditorApp() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const canvasRef = useRef<PlanCanvasHandle>(null)
-  const reached = plan ? 4 : 0 // Steps after Rooms arrive one at a time.
+  const reached = plan ? 3 : 0 // Up to Rooms (index 3); later steps arrive one at a time.
   const [fade, setFade] = useState(0.55)
   const redraw = useCallback(() => canvasRef.current?.redraw(), [])
-  const walls = useWallEditor(plan, redraw)
   const crop = useCropTool(plan, redraw)
   const cameraOf = useCallback(() => canvasRef.current?.camera() ?? null, [])
   const scale = useScaleTool(plan, redraw, cameraOf)
   const metresPerPixel = scale.calibration?.metresPerPixel ?? null
+  const walls = useWallEditor(plan, metresPerPixel, redraw)
   const measuring = step === 'scale'
   const rooms = useRoomEditor(plan, step === 'rooms', walls.readBlocked, metresPerPixel, redraw)
   const stepIndex = STEPS.findIndex((s) => s.id === step)
   const roomTool = step === 'rooms' && rooms.tool !== 'move'
-  const tracing = step !== 'upload'
+  const tracing = stepIndex >= 2 // walls onward: fade the plan under the tracing
   const cropping = step === 'upload' && crop.active
 
   /** Everything traced so far, over the plan: walls, then the measuring line and scale bar. */
   const traced = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera) => {
     if (stepIndex >= 3) rooms.drawOverlay(context, camera)
-    walls.drawOverlay(context, camera, { brush: step === 'walls' })
+    if (stepIndex >= 2) walls.drawOverlay(context, camera, { brush: step === 'walls' })
     scale.drawOverlay(context, camera, { measuring, metresPerPixel })
   }, [rooms, walls, scale, step, stepIndex, measuring, metresPerPixel])
 
@@ -88,6 +88,7 @@ export default function EditorApp() {
       else if (key === 'm') walls.setTool('move')
       else if (key === 'w') walls.setTool('wall')
       else if (key === 'e') walls.setTool('erase')
+      else if (key === 'o') walls.setTool('object')
       else if (key === '[') walls.setBrush(Math.max(1, walls.brush - 1))
       else if (key === ']') walls.setBrush(Math.min(40, walls.brush + 1))
       else return
@@ -137,7 +138,7 @@ export default function EditorApp() {
     <div className="sim editor">
       {plan && (
         <PlanCanvas ref={canvasRef} pixels={plan.pixels} insets={insets}
-          imageOpacity={tracing ? fade : 1} drawOverlay={cropping ? crop.drawOverlay : tracing ? traced : undefined}
+          imageOpacity={tracing ? fade : 1} drawOverlay={cropping ? crop.drawOverlay : stepIndex >= 1 ? traced : undefined}
           mode={cropping || measuring || roomTool || (step === 'walls' && walls.tool !== 'move') ? 'draw' : 'pan'}
           drawCursor={cropping || measuring || roomTool ? 'crosshair' : 'none'}
           stroke={cropping ? crop.stroke : measuring ? scale.stroke : step === 'rooms' ? rooms.stroke : walls.stroke}
@@ -169,10 +170,10 @@ export default function EditorApp() {
       ) : (
         <>
           <aside className="sim-float editor-panel" aria-label="Step">
-            {step === 'upload' && <UploadStep plan={plan} onReplace={open} loading={loading} error={error} crop={crop} onApplyCrop={applyCrop} onNext={() => { crop.cancel(); setStep('walls') }} />}
-            {step === 'walls' && <WallsStep walls={walls} fade={fade} onFade={setFade} onBack={() => setStep('upload')} onNext={() => setStep('scale')} />}
-            {step === 'scale' && <ScaleStep plan={plan} scale={scale} onBack={() => setStep('walls')} onNext={() => setStep('rooms')} />}
-            {step === 'rooms' && <RoomsStep rooms={rooms} onBack={() => setStep('scale')} />}
+            {step === 'upload' && <UploadStep plan={plan} onReplace={open} loading={loading} error={error} crop={crop} onApplyCrop={applyCrop} onNext={() => { crop.cancel(); setStep('scale') }} />}
+            {step === 'scale' && <ScaleStep plan={plan} scale={scale} onBack={() => setStep('upload')} onNext={() => setStep('walls')} />}
+            {step === 'walls' && <WallsStep walls={walls} fade={fade} onFade={setFade} onBack={() => setStep('scale')} onNext={() => setStep('rooms')} />}
+            {step === 'rooms' && <RoomsStep rooms={rooms} onBack={() => setStep('walls')} />}
           </aside>
           <div className="sim-float sim-zoom editor-zoom" role="group" aria-label="Zoom">
             <button type="button" className="sim-icon-btn" aria-label="Zoom in" onClick={() => canvasRef.current?.zoom(1.25)}><Plus size={15} /></button>
@@ -240,7 +241,7 @@ function UploadStep({ plan, onReplace, loading, error, crop, onApplyCrop, onNext
         </div>
       ) : (
         <>
-          <p className="sim-muted">Drag to move around the plan and scroll to zoom. Crop away anything that isn’t the building, then check the walls are clear and dark; next you’ll trace them.</p>
+          <p className="sim-muted">Drag to move around the plan and scroll to zoom. Crop away anything that isn’t the building, except a legend that names the rooms. Next you’ll set the scale.</p>
           <div className="sim-actions">
             <button type="button" className="sim-action editor-secondary" onClick={crop.start} disabled={loading}><Crop size={14} aria-hidden="true" /> Crop</button>
             {plan.crop && <button type="button" className="sim-action editor-secondary" onClick={() => onApplyCrop(null)} disabled={loading}>Use the whole image</button>}
@@ -251,7 +252,7 @@ function UploadStep({ plan, onReplace, loading, error, crop, onApplyCrop, onNext
 
       <div className="sim-actions editor-step-nav">
         <span />
-        <button type="button" className="sim-action" onClick={onNext} disabled={crop.active}>Next: walls</button>
+        <button type="button" className="sim-action" onClick={onNext} disabled={crop.active}>Next: scale</button>
       </div>
       <input ref={input} type="file" accept={ACCEPTED_TYPES.join(',')} hidden onChange={(event) => onReplace(event.target.files?.[0])} />
       {error && <p className="sim-error" role="alert">{error}</p>}

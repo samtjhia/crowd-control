@@ -2,19 +2,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LoadedPlan } from './loadPlan.ts'
 import { toScreen, type PlanCamera } from './planView.ts'
 import type { StrokeHandlers } from './PlanCanvas.tsx'
-import { WallMask, draftWalls, paintWalls, suggestThreshold, type Rect } from './walls.ts'
+import { FLOOR, OBJECT, WALL, WallMask, draftLayers, paintWalls, suggestThreshold, type DraftSettings, type Kind, type Rect } from './walls.ts'
 
-export type WallTool = 'move' | 'wall' | 'erase'
+export type WallTool = 'move' | 'wall' | 'object' | 'erase'
 type Point = { x: number; y: number }
 
+const BRUSH_KIND: Record<Exclude<WallTool, 'move'>, Kind> = { wall: WALL, object: OBJECT, erase: FLOOR }
+const BRUSH_COLOUR: Record<Exclude<WallTool, 'move'>, string> = { wall: '#B91C1C', object: '#B45309', erase: '#357650' }
+
+/** Default sizes: a 12 cm minimum wall, and furniture up to 3 m² filled in. */
+const WALL_METRES = 0.12
+const OBJECT_SQUARE_METRES = 3
+
 /**
- * Wall-tracing state for the loaded plan: the automatic draft (threshold and speck filter),
- * the person's brush corrections, undo/redo, and the red overlay drawn over the plan.
+ * Wall and furniture tracing for the loaded plan: the automatic draft (threshold, speck filter,
+ * minimum wall thickness, furniture size), the person's brush corrections, undo/redo, and the
+ * red/amber overlay drawn over the plan. Sizes are in metres once the plan has a scale.
  * Pointer movement updates refs and asks the canvas to redraw, so it never re-renders React.
  */
-export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
+export function useWallEditor(plan: LoadedPlan | null, metresPerPixel: number | null, redraw: () => void) {
   const [threshold, setThresholdState] = useState(128)
   const [ignoreSpecks, setIgnoreSpecksState] = useState(true)
+  /** Minimum wall thickness: metres on scaled plans, pixels otherwise. */
+  const [wallMetres, setWallMetresState] = useState(WALL_METRES)
+  const [wallPixels, setWallPixelsState] = useState(4)
+  const [furnitureBlocks, setFurnitureBlocks] = useState(true)
   const [tool, setTool] = useState<WallTool>('wall')
   const [brush, setBrush] = useState(4)
   const [history, setHistory] = useState({ canUndo: false, canRedo: false })
@@ -26,6 +38,14 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
   useEffect(() => { brushRef.current = brush }, [brush])
   useEffect(() => { toolRef.current = tool }, [tool])
 
+  /** The draft settings in pixels, from the controls and the plan's scale. */
+  const settingsFor = useCallback((values: { threshold: number; ignoreSpecks: boolean; wallMetres: number; wallPixels: number }): DraftSettings => ({
+    threshold: values.threshold,
+    ignoreSpecks: values.ignoreSpecks,
+    wallThickness: metresPerPixel ? values.wallMetres / metresPerPixel : values.wallPixels,
+    maxObjectArea: metresPerPixel ? OBJECT_SQUARE_METRES / (metresPerPixel * metresPerPixel) : (values.wallPixels * 12) ** 2,
+  }), [metresPerPixel])
+
   const repaint = useCallback((area?: Rect) => {
     const target = overlay.current, walls = mask.current
     if (!target || !walls) return
@@ -34,6 +54,20 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
     target.canvas.getContext('2d')!.putImageData(target.image, 0, 0, a.left, a.top, a.right - a.left + 1, a.bottom - a.top + 1)
     redraw()
   }, [redraw])
+
+  // Redrafting is ~1M pixels of work, so control changes are coalesced to one redraft per frame.
+  const current = useRef({ threshold, ignoreSpecks, wallMetres, wallPixels })
+  const frame = useRef(0)
+  const redraft = useCallback((next: Partial<typeof current.current>) => {
+    current.current = { ...current.current, ...next }
+    cancelAnimationFrame(frame.current)
+    frame.current = requestAnimationFrame(() => {
+      const walls = mask.current
+      if (!plan || !walls) return
+      walls.setDraft(draftLayers(plan.pixels, settingsFor(current.current)))
+      repaint()
+    })
+  }, [plan, repaint, settingsFor])
 
   // A new plan: suggest a threshold, draft the walls, size the brush to the image.
   useEffect(() => {
@@ -44,43 +78,34 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
     }
     const { pixels } = plan
     const suggested = suggestThreshold(pixels)
-    mask.current = new WallMask(pixels.width, pixels.height, draftWalls(pixels, suggested, true))
+    const wallPixelsDefault = Math.max(2, Math.round(Math.min(pixels.width, pixels.height) / 220))
+    current.current = { threshold: suggested, ignoreSpecks: true, wallMetres: WALL_METRES, wallPixels: wallPixelsDefault }
+    mask.current = new WallMask(pixels.width, pixels.height, draftLayers(pixels, settingsFor(current.current)))
     const canvas = document.createElement('canvas')
     canvas.width = pixels.width
     canvas.height = pixels.height
     overlay.current = { canvas, image: new ImageData(pixels.width, pixels.height) }
-    // Setting state once per new plan is the point here: the controls start from the suggestion.
+    // Setting state once per new plan is the point here: the controls start from the defaults.
     /* eslint-disable react-hooks/set-state-in-effect */
     setThresholdState(suggested)
     setIgnoreSpecksState(true)
+    setWallMetresState(WALL_METRES)
+    setWallPixelsState(wallPixelsDefault)
     setBrush(Math.max(2, Math.round(Math.min(pixels.width, pixels.height) / 160)))
     setHistory({ canUndo: false, canRedo: false })
     /* eslint-enable react-hooks/set-state-in-effect */
     repaint()
-  }, [plan, repaint])
+    // Only a new plan resets; a new scale redrafts below and keeps corrections.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan])
 
-  // Redrafting is ~1M pixels of work, so slider drags are coalesced to one redraft per frame.
-  const pending = useRef<{ threshold: number; ignoreSpecks: boolean } | null>(null)
-  const frame = useRef(0)
-  const redraft = useCallback((next: { threshold: number; ignoreSpecks: boolean }) => {
-    pending.current = next
-    cancelAnimationFrame(frame.current)
-    frame.current = requestAnimationFrame(() => {
-      const walls = mask.current, settings = pending.current
-      if (!plan || !walls || !settings) return
-      walls.setDraft(draftWalls(plan.pixels, settings.threshold, settings.ignoreSpecks))
-      repaint()
-    })
-  }, [plan, repaint])
+  // A new scale changes what "12 cm" is in pixels: redraft, keeping every correction.
+  useEffect(() => { if (mask.current) redraft({}) }, [metresPerPixel, redraft])
 
-  const setThreshold = (value: number) => {
-    setThresholdState(value)
-    redraft({ threshold: value, ignoreSpecks })
-  }
-  const setIgnoreSpecks = (value: boolean) => {
-    setIgnoreSpecksState(value)
-    redraft({ threshold, ignoreSpecks: value })
-  }
+  const setThreshold = (value: number) => { setThresholdState(value); redraft({ threshold: value }) }
+  const setIgnoreSpecks = (value: boolean) => { setIgnoreSpecksState(value); redraft({ ignoreSpecks: value }) }
+  const setWallMetres = (value: number) => { setWallMetresState(value); redraft({ wallMetres: value }) }
+  const setWallPixels = (value: number) => { setWallPixelsState(value); redraft({ wallPixels: value }) }
   const resetThreshold = () => plan && setThreshold(suggestThreshold(plan.pixels))
 
   const syncHistory = () => setHistory({ canUndo: mask.current?.canUndo ?? false, canRedo: mask.current?.canRedo ?? false })
@@ -100,7 +125,7 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
     start: (point, shift) => {
       const walls = mask.current
       if (!walls || toolRef.current === 'move') return
-      walls.beginStroke(toolRef.current === 'erase')
+      walls.beginStroke(BRUSH_KIND[toolRef.current])
       pointer.current = { ...pointer.current, last: point, anchor: point, line: shift ? point : null }
       if (!shift) {
         const area = walls.paint(point, point, brushRef.current)
@@ -138,15 +163,17 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
     if (toolRef.current !== 'move') redraw()
   }, [redraw])
 
-  /** The red wall overlay, the straight-line preview and the brush ring, over the plan. */
+  /** The wall/furniture overlay, the straight-line preview and the brush ring, over the plan. */
   const drawOverlay = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera, options: { brush: boolean } = { brush: true }) => {
     const target = overlay.current
     if (!target) return
     context.imageSmoothingEnabled = camera.scale < 2
     context.drawImage(target.canvas, camera.offsetX, camera.offsetY, target.canvas.width * camera.scale, target.canvas.height * camera.scale)
     const p = pointer.current
+    const active = toolRef.current
+    if (!options.brush || active === 'move') return
     const radius = brushRef.current * camera.scale
-    const colour = toolRef.current === 'erase' ? '#357650' : '#B91C1C'
+    const colour = BRUSH_COLOUR[active]
     if (p.anchor && p.line) {
       const a = toScreen(camera, p.anchor), b = toScreen(camera, p.line)
       context.save()
@@ -160,7 +187,7 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
       context.stroke()
       context.restore()
     }
-    if (options.brush && p.hover && toolRef.current !== 'move') {
+    if (p.hover) {
       const c = toScreen(camera, p.hover)
       context.save()
       context.lineWidth = 1.5
@@ -178,9 +205,12 @@ export function useWallEditor(plan: LoadedPlan | null, redraw: () => void) {
 
   /** The current walls (draft plus corrections), for later steps. */
   const readBlocked = useCallback(() => mask.current?.blocked() ?? null, [])
+  /** The current furniture, for saving (obstacles when furniture blocks people). */
+  const readObjects = useCallback(() => mask.current?.objects() ?? null, [])
 
   return {
-    mask, readBlocked, threshold, setThreshold, resetThreshold, ignoreSpecks, setIgnoreSpecks,
+    mask, readBlocked, readObjects, threshold, setThreshold, resetThreshold, ignoreSpecks, setIgnoreSpecks,
+    wallMetres, setWallMetres, wallPixels, setWallPixels, scaled: metresPerPixel !== null, furnitureBlocks, setFurnitureBlocks,
     tool, setTool, brush, setBrush, undo, redo, ...history, stroke, onHover, drawOverlay,
   }
 }

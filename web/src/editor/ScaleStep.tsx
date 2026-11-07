@@ -13,7 +13,7 @@ export function ScaleStep({ plan, scale, onBack, onNext }: { plan: LoadedPlan; s
   const warning = calibration ? scaleWarning(plan.pixels, calibration.metresPerPixel) : null
   return (
     <section className="sim-section">
-      <h3>3 · Scale</h3>
+      <h3>2 · Scale</h3>
       <p className="sim-muted">
         Drag a line between two points you know the real distance between: a whole wall, a doorway, or the plan’s printed scale bar. Longer is more accurate. Drag either end to adjust it.
       </p>
@@ -48,14 +48,14 @@ export function ScaleStep({ plan, scale, onBack, onNext }: { plan: LoadedPlan; s
         This plan isn’t to scale
       </label>
       {scale.unscaled && (
-        <p className="editor-hint">You can still trace it and run people on it, but crowding shows as relative only, with no people per m². You can come back and set the scale later.</p>
+        <p className="editor-hint">You can still trace it and run people on it, but crowding shows as relative only, with no people per m², and sizes in later steps are in pixels. You can come back and set the scale later.</p>
       )}
 
       <div className="sim-actions editor-step-nav">
         <button type="button" className="sim-action editor-secondary" onClick={onBack}>Back</button>
         <button type="button" className="sim-action" onClick={onNext} disabled={!onNext || (!calibration && !scale.unscaled)}
-          title={!onNext ? 'Naming rooms arrives in the next step' : !calibration && !scale.unscaled ? 'Set the scale, or say the plan isn’t to scale' : undefined}>
-          Next: rooms
+          title={!onNext ? 'Tracing walls arrives in the next step' : !calibration && !scale.unscaled ? 'Set the scale, or say the plan isn’t to scale' : undefined}>
+          Next: walls
         </button>
       </div>
     </section>

@@ -11,42 +11,11 @@
  *
  * Everything works in source pixels: index = y × width + x.
  */
+import { distanceTo } from './raster.ts'
 
-/** Approximate Euclidean distance (in pixels) from each pixel to the nearest wall (two-pass chamfer). */
+/** Distance (in pixels) from each pixel to the nearest wall. */
 export function distanceToWalls(blocked: Uint8Array, width: number, height: number): Float32Array {
-  const far = 1e9
-  const d = new Float32Array(width * height)
-  for (let i = 0; i < d.length; i++) d[i] = blocked[i] ? 0 : far
-  const straight = 1, diagonal = Math.SQRT2
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x
-      if (d[i] === 0) continue
-      let v = d[i]!
-      if (x > 0) v = Math.min(v, d[i - 1]! + straight)
-      if (y > 0) {
-        v = Math.min(v, d[i - width]! + straight)
-        if (x > 0) v = Math.min(v, d[i - width - 1]! + diagonal)
-        if (x < width - 1) v = Math.min(v, d[i - width + 1]! + diagonal)
-      }
-      d[i] = v
-    }
-  }
-  for (let y = height - 1; y >= 0; y--) {
-    for (let x = width - 1; x >= 0; x--) {
-      const i = y * width + x
-      if (d[i] === 0) continue
-      let v = d[i]!
-      if (x < width - 1) v = Math.min(v, d[i + 1]! + straight)
-      if (y < height - 1) {
-        v = Math.min(v, d[i + width]! + straight)
-        if (x < width - 1) v = Math.min(v, d[i + width + 1]! + diagonal)
-        if (x > 0) v = Math.min(v, d[i + width - 1]! + diagonal)
-      }
-      d[i] = v
-    }
-  }
-  return d
+  return distanceTo(blocked, width, height)
 }
 
 /**

@@ -1,10 +1,20 @@
+import { components, distanceTo } from './raster.ts'
+
 /**
- * Wall tracing (Technical PRD §7 steps 2 and 4). A draft is made automatically from the
- * image's brightness; the person corrects it with brushes. Corrections are stored apart from
- * the draft, so changing the threshold later never erases them.
+ * Walls and furniture (Technical PRD §7 steps 2–4). A draft is made automatically from the
+ * image; the person corrects it with brushes. Corrections are stored apart from the draft, so
+ * changing a setting later never erases them.
+ *
+ * The draft tells walls from furniture by thickness: walls are drawn as thick strokes (or as
+ * two thin lines with a narrow gap between them), furniture as thin outlines. Rooms are filled
+ * using walls only, so furniture never cuts a room up; furniture can still block people.
  *
  * Everything works in source pixels: index = y × width + x.
  */
+
+/** What a pixel is: open floor, wall, or furniture. */
+export const FLOOR = 0, WALL = 1, OBJECT = 2
+export type Kind = typeof FLOOR | typeof WALL | typeof OBJECT
 
 /** Pixels in RGBA order, as in ImageData. */
 export type Pixels = { data: ArrayLike<number>; width: number; height: number }
@@ -36,19 +46,6 @@ export function suggestThreshold(pixels: Pixels): number {
     if (spread > bestSpread) { bestSpread = spread; best = t + 1 }
   }
   return Math.min(220, Math.max(40, best))
-}
-
-/**
- * The automatic draft: 1 where a pixel is darker than `threshold`. With `ignoreSpecks`, dark
- * blobs smaller than about 2% of the image's shorter side (letters, numbers, dots) are dropped,
- * since text is the most common false wall; long wall lines are kept.
- */
-export function draftWalls(pixels: Pixels, threshold: number, ignoreSpecks: boolean): Uint8Array {
-  const { width, height } = pixels
-  const mask = new Uint8Array(width * height)
-  for (let i = 0; i < mask.length; i++) mask[i] = luminance(pixels.data, i) < threshold ? 1 : 0
-  if (ignoreSpecks) removeSpecks(mask, width, height, Math.max(3, Math.round(Math.min(width, height) * 0.02)))
-  return mask
 }
 
 /** Clears connected blobs (8-way) whose bounding box is smaller than `maxExtent` in both directions. */
@@ -85,14 +82,89 @@ export function removeSpecks(mask: Uint8Array, width: number, height: number, ma
   }
 }
 
+export type DraftSettings = {
+  /** Pixels darker than this are ink (0–255). */
+  threshold: number
+  /** Drop small dark marks (letters, numbers, dots) before anything else. */
+  ignoreSpecks: boolean
+  /** Ink at least this thick (px) is wall; thinner ink is furniture or detail. 0 makes all ink wall. */
+  wallThickness: number
+  /** Closed outlines enclosing up to this much area (px²) are filled in as furniture. */
+  maxObjectArea: number
+}
+
+/**
+ * The automatic draft: FLOOR, WALL or OBJECT per pixel.
+ * 1. Ink is anything darker than the threshold (minus small specks such as text).
+ * 2. Enclosed gaps thinner than about two wall thicknesses (the inside of a wall drawn as two
+ *    lines) are filled, so hollow walls count as solid.
+ * 3. Ink that a disc of the wall thickness fits inside is wall (a morphological opening).
+ * 4. The remaining ink, plus small closed outlines filled in (table tops, seat rows), is furniture.
+ */
+export function draftLayers(pixels: Pixels, settings: DraftSettings): Uint8Array {
+  const { width, height } = pixels
+  const size = width * height
+  const ink = new Uint8Array(size)
+  for (let i = 0; i < size; i++) ink[i] = luminance(pixels.data, i) < settings.threshold ? 1 : 0
+  if (settings.ignoreSpecks) removeSpecks(ink, width, height, Math.max(3, Math.round(Math.min(width, height) * 0.02)))
+  const out = new Uint8Array(size)
+  const radius = settings.wallThickness / 2
+  if (radius <= 0) {
+    for (let i = 0; i < size; i++) out[i] = ink[i] ? WALL : FLOOR
+    return out
+  }
+
+  // 2. Fill thin enclosed gaps: the cavity of a wall drawn as two parallel lines.
+  const toInk = distanceTo(ink, width, height)
+  const gaps = components((i) => !ink[i], width, height)
+  const widest = new Float32Array(gaps.area.length)
+  for (let i = 0; i < size; i++) {
+    const g = gaps.label[i]!
+    if (g >= 0 && toInk[i]! > widest[g]!) widest[g] = toInk[i]!
+  }
+  const solid = ink.slice()
+  for (let i = 0; i < size; i++) {
+    const g = gaps.label[i]!
+    if (g >= 0 && !gaps.edge[g] && widest[g]! <= settings.wallThickness) solid[i] = 1
+  }
+
+  // 3. Wall = ink where a disc of the wall thickness fits, grown back to its full extent.
+  const toPaper = distanceTo(solid.map((v) => (v ? 0 : 1)), width, height)
+  const core = new Uint8Array(size)
+  for (let i = 0; i < size; i++) core[i] = solid[i] && toPaper[i]! >= radius ? 1 : 0
+  const toCore = distanceTo(core, width, height)
+  for (let i = 0; i < size; i++) if (solid[i] && toCore[i]! <= radius + 0.5) out[i] = WALL
+
+  // 4. Everything else that is ink is furniture; so are small closed outlines' insides,
+  // unless they sit against a wall (a cupboard or alcove rather than a table).
+  for (let i = 0; i < size; i++) if (ink[i] && out[i] !== WALL) out[i] = OBJECT
+  const againstWall = new Uint8Array(gaps.area.length)
+  for (let i = 0; i < size; i++) {
+    const g = gaps.label[i]!
+    if (g < 0 || out[i] !== FLOOR) continue
+    const x = i % width
+    if ((x > 0 && out[i - 1] === WALL) || (x < width - 1 && out[i + 1] === WALL) || (i >= width && out[i - width] === WALL) || (i < size - width && out[i + width] === WALL)) againstWall[g] = 1
+  }
+  for (let i = 0; i < size; i++) {
+    const g = gaps.label[i]!
+    if (g >= 0 && out[i] === FLOOR && !gaps.edge[g] && !againstWall[g] && gaps.area[g]! <= settings.maxObjectArea) out[i] = OBJECT
+  }
+  return out
+}
+
+/** The old single-layer draft (dark = wall), kept for simple plans and tests. */
+export function draftWalls(pixels: Pixels, threshold: number, ignoreSpecks: boolean): Uint8Array {
+  return draftLayers(pixels, { threshold, ignoreSpecks, wallThickness: 0, maxObjectArea: 0 })
+}
+
 type Change = { index: number; before: number }
-export type Stroke = { id: string; walkable: boolean; changes: Change[] }
+export type Stroke = { id: string; kind: Kind; changes: Change[] }
 export type Rect = { left: number; top: number; right: number; bottom: number }
 
 /**
- * The draft plus the person's corrections. `correction` holds -1 (no correction), 0 (floor)
- * or 1 (wall) per pixel; a correction always wins over the draft. Each brush stroke records
- * what it changed, so it can be undone and redone exactly.
+ * The draft plus the person's corrections. `correction` holds -1 (no correction) or the Kind
+ * painted there; a correction always wins over the draft. Each brush stroke records what it
+ * changed, so it can be undone and redone exactly.
  */
 export class WallMask {
   readonly width: number
@@ -111,25 +183,28 @@ export class WallMask {
     this.correction = new Int8Array(width * height).fill(-1)
   }
 
-  isWall(i: number): boolean {
+  kind(i: number): Kind {
     const c = this.correction[i]!
-    return c === -1 ? this.draft[i] === 1 : c === 1
+    return (c === -1 ? this.draft[i]! : c) as Kind
   }
 
-  /** Replaces the automatic draft (a new threshold); corrections are untouched. */
+  isWall(i: number): boolean { return this.kind(i) === WALL }
+  isObject(i: number): boolean { return this.kind(i) === OBJECT }
+
+  /** Replaces the automatic draft (new settings); corrections are untouched. */
   setDraft(draft: Uint8Array) {
     this.draft = draft
   }
 
-  beginStroke(walkable: boolean) {
-    this.current = { stroke: { id: `stroke-${this.nextId++}`, walkable, changes: [] }, touched: new Set() }
+  /** Starts a stroke painting `kind` (FLOOR erases walls and furniture). */
+  beginStroke(kind: Kind) {
+    this.current = { stroke: { id: `stroke-${this.nextId++}`, kind, changes: [] }, touched: new Set() }
   }
 
   /** Paints a round brush of `radius` px along a segment; returns the area changed, or null. */
   paint(from: { x: number; y: number }, to: { x: number; y: number }, radius: number): Rect | null {
     const active = this.current
     if (!active) return null
-    const value = active.stroke.walkable ? 0 : 1
     const r = Math.max(0.5, radius)
     const left = Math.max(0, Math.floor(Math.min(from.x, to.x) - r)), right = Math.min(this.width - 1, Math.ceil(Math.max(from.x, to.x) + r))
     const top = Math.max(0, Math.floor(Math.min(from.y, to.y) - r)), bottom = Math.min(this.height - 1, Math.ceil(Math.max(from.y, to.y) + r))
@@ -146,7 +221,7 @@ export class WallMask {
         if (active.touched.has(i)) continue
         active.touched.add(i)
         active.stroke.changes.push({ index: i, before: this.correction[i]! })
-        this.correction[i] = value
+        this.correction[i] = active.stroke.kind
       }
     }
     return { left, top, right, bottom }
@@ -177,21 +252,27 @@ export class WallMask {
   redo(): Rect | null {
     const stroke = this.undone.pop()
     if (!stroke) return null
-    const value = stroke.walkable ? 0 : 1
-    for (const change of stroke.changes) this.correction[change.index] = value
+    for (const change of stroke.changes) this.correction[change.index] = stroke.kind
     this.done.push(stroke)
     return this.bounds(stroke)
   }
 
   /** The corrections in the contract's form (EditorDraft.corrections): one entry per stroke still applied. */
   corrections(): { id: string; cells: number[]; walkable: boolean }[] {
-    return this.done.map((stroke) => ({ id: stroke.id, cells: stroke.changes.map((change) => change.index), walkable: stroke.walkable }))
+    return this.done.map((stroke) => ({ id: stroke.id, cells: stroke.changes.map((change) => change.index), walkable: stroke.kind === FLOOR }))
   }
 
-  /** The current wall mask (draft with corrections applied), as 0/1 per pixel. */
+  /** Walls only (0/1 per pixel): what rooms are filled against. */
   blocked(): Uint8Array {
     const out = new Uint8Array(this.width * this.height)
     for (let i = 0; i < out.length; i++) out[i] = this.isWall(i) ? 1 : 0
+    return out
+  }
+
+  /** Furniture only (0/1 per pixel): obstacles inside rooms when furniture blocks people. */
+  objects(): Uint8Array {
+    const out = new Uint8Array(this.width * this.height)
+    for (let i = 0; i < out.length; i++) out[i] = this.isObject(i) ? 1 : 0
     return out
   }
 
@@ -205,13 +286,16 @@ export class WallMask {
   }
 }
 
-/** Walls in red over the plan, for an area of the overlay (all of it by default). */
-export function paintWalls(mask: WallMask, out: Uint8ClampedArray, area: Rect = { left: 0, top: 0, right: mask.width - 1, bottom: mask.height - 1 }) {
+/** Walls in red and furniture in amber over the plan, for an area of the overlay (all of it by default). */
+export function paintWalls(mask: WallMask, out: Uint8ClampedArray, area: Rect = { left: 0, top: 0, right: mask.width - 1, bottom: mask.height - 1 }, showObjects = true) {
   for (let y = area.top; y <= area.bottom; y++) {
     for (let x = area.left; x <= area.right; x++) {
       const i = y * mask.width + x, o = i * 4
-      if (mask.isWall(i)) {
+      const kind = mask.kind(i)
+      if (kind === WALL) {
         out[o] = 220; out[o + 1] = 38; out[o + 2] = 38; out[o + 3] = 150
+      } else if (kind === OBJECT && showObjects) {
+        out[o] = 217; out[o + 1] = 119; out[o + 2] = 6; out[o + 3] = 130
       } else {
         out[o + 3] = 0
       }

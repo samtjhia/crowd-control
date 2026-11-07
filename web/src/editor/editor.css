@@ -219,3 +219,8 @@
 }
 
 .editor .editor-tags button[aria-pressed='true'] { border-color: var(--green); background: #eaf3e4; color: #265e3d; font-weight: 600; }
+
+/* Small colour keys used in step text. */
+.editor-key { display: inline-block; width: 10px; height: 10px; margin: 0 2px -1px 0; border-radius: 3px; }
+.editor-key-wall { background: rgb(220 38 38 / 0.7); }
+.editor-key-object { background: rgb(217 119 6 / 0.65); }
