@@ -3,7 +3,7 @@ import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
-  Pause, Play, Plus, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
+  Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
 } from 'lucide-react'
 import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
@@ -21,7 +21,9 @@ import type { Pick, PickKind } from '../render/hitTest.ts'
 import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
 import { DensityPanel } from './DensityPanel.tsx'
 import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
-import { describeScenario, movementPreset, scenarios, startScenario } from './scenario.ts'
+import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startScenario, type Scenario } from './scenario.ts'
+import { AssistantPanel } from './AssistantPanel.tsx'
+import { loadSavedVenues, presetFor } from './savedVenues.ts'
 
 /** What each tool can click: Select anything, Trip people, Doors doors. */
 const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], box: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
@@ -54,6 +56,22 @@ function insetsFor(panels: Panels) {
 const REAL_ENGINE = new URLSearchParams(window.location.search).get('engine') === 'real'
 const SCENARIOS = scenarios(workedPlan as ScenarioPlan, REAL_ENGINE ? movementPreset(examplePreset.resolvedModel as ModelPreset) : examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
+const ASSISTANT_PREFIX = 'assistant-'
+
+/**
+ * The model preset for a plan the assistant wrote: the worked example's body-width preset for
+ * generated buildings, the pedestrian preset for metre venues, and whichever fits a saved floor plan.
+ */
+function presetForPlan(plan: ScenarioPlan): ModelPreset {
+  const bodies = SCENARIOS[0]!.model
+  if (plan.layout.mode === 'generate') return bodies
+  if (plan.layout.mode === 'upload') {
+    const { assetId } = plan.layout
+    const venue = loadSavedVenues().find((saved) => saved.map.id === assetId)
+    return venue ? presetFor(venue, PEDESTRIAN_PRESET, bodies) : PEDESTRIAN_PRESET
+  }
+  return PEDESTRIAN_PRESET
+}
 const UPLOAD_OPTION = '__upload'
 
 /** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
@@ -64,12 +82,13 @@ function initialScenarioId(): string {
 
 /** Keeps the choice in the URL so a reload or a shared link opens the same venue. */
 function rememberScenario(id: string) {
+  // Scenarios the assistant wrote live only in this page, so a reload can't find them.
+  if (id.startsWith(ASSISTANT_PREFIX)) return
   const url = new URL(window.location.href)
   if (id === SCENARIOS[0]!.id) url.searchParams.delete(SCENARIO_PARAM)
   else url.searchParams.set(SCENARIO_PARAM, id)
   window.history.replaceState(window.history.state, '', url)
 }
-const SUGGESTIONS = ['Close the hall door for 30 seconds', 'Someone trips in the foyer', 'Why did people queue at the exit?']
 
 type Panels = { left: boolean; right: boolean }
 
@@ -140,7 +159,9 @@ export default function SimulatorApp() {
   })
 
   const [scenarioId, setScenarioId] = useState(initialScenarioId)
-  const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId)!
+  /** Scenarios the assistant wrote in this visit; they join the picker. */
+  const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>([])
+  const scenario = [...SCENARIOS, ...assistantScenarios].find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0]!
   /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
   const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
   const generated = scenario.plan.layout.mode === 'generate'
@@ -157,6 +178,25 @@ export default function SimulatorApp() {
     setSelection([])
     rememberScenario(id)
   }
+  /**
+   * Runs a scenario the assistant wrote: compile it first, so a plan that can't be built is
+   * reported in the chat instead of loaded; then add it to the picker and switch to it.
+   */
+  const runAssistantPlan = (plan: ScenarioPlan, title: string): string | null => {
+    const model = presetForPlan(plan)
+    const check = startScenario(plan, model)
+    if (!check.ok) return `The simulator couldn’t build that plan: ${check.error.message} Try rephrasing it, or ask for something simpler.`
+    const id = `${ASSISTANT_PREFIX}${assistantScenarios.length + 1}`
+    setAssistantScenarios((all) => [...all, { id, title: `Assistant: ${title}`, plan, model }])
+    chooseScenario(id)
+    return null
+  }
+  /** The venue the assistant should keep using for new scenarios, when this is a real venue. */
+  const venue = scenario.plan.layout.mode === 'generate' ? null : {
+    layout: scenario.plan.layout,
+    name: scenario.plan.layout.mode === 'lookup' ? scenario.plan.layout.venue : scenario.title.replace(/ (uploaded)$/, ''),
+  }
+
   /** Same description, a different building: the plan's seed first, then the next seeds in turn. */
   const nextLayout = () => {
     setLayoutSeed((seed) => (seed === null ? scenario.plan.seed : (seed + 1) >>> 0))
@@ -322,6 +362,11 @@ export default function SimulatorApp() {
               else chooseScenario(event.target.value)
             }}>
               {SCENARIOS.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              {assistantScenarios.length > 0 && (
+                <optgroup label="From the assistant">
+                  {assistantScenarios.map((option) => <option key={option.id} value={option.id}>{option.title.replace(/^Assistant: /, '')}</option>)}
+                </optgroup>
+              )}
               <option value={UPLOAD_OPTION}>Upload a floor plan…</option>
             </select>
             <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
@@ -370,7 +415,7 @@ export default function SimulatorApp() {
       <PlaybackBar client={client} view={view} ready={ready} now={now} incidents={incidents} />
 
       <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
-        <ChatPlaceholder />
+        <AssistantPanel client={client} view={view} venue={venue} onRunPlan={runAssistantPlan} />
       </SidePanel>
 
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
@@ -429,27 +474,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h3>{title}</h3>
       {children}
     </section>
-  )
-}
-
-function ChatPlaceholder() {
-  return (
-    <div className="sim-chat">
-      <div className="sim-chat-empty">
-        <p className="sim-chat-title">Talk to the simulation</p>
-        <p className="sim-muted">Describe a change or ask why something happened. Every change appears as a preview you can apply or edit.</p>
-        <ul className="sim-suggestions" aria-label="Example requests">
-          {SUGGESTIONS.map((text) => (
-            <li key={text}><span className="sim-prompt-avatar" aria-hidden="true">You</span>{text}</li>
-          ))}
-        </ul>
-      </div>
-      <form className="sim-composer" onSubmit={(event) => event.preventDefault()}>
-        <label className="visually-hidden" htmlFor="sim-chat-input">Message</label>
-        <input id="sim-chat-input" disabled placeholder="Planner not connected yet" />
-        <button type="submit" className="sim-send" disabled aria-label="Send"><SendHorizontal size={15} /></button>
-      </form>
-    </div>
   )
 }
 

@@ -609,6 +609,88 @@
 
 .sim .sim-send:disabled { opacity: 0.3; }
 
+/* ---- Assistant conversation ---- */
+
+.sim .sim-suggestions button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sim .sim-suggestions li:has(button:hover) { background: var(--well-strong); }
+
+.sim-messages { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding: 8px 16px 12px; }
+
+.sim-message {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sim-message-you { align-self: flex-end; border-bottom-right-radius: 4px; background: var(--green); color: #ffffff; }
+.sim-message-assistant { align-self: flex-start; border-bottom-left-radius: 4px; background: var(--well); }
+.sim-message.is-error { background: #f8e8ec; color: #96364e; }
+
+.sim-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.sim-thinking svg { animation: sim-spin 900ms linear infinite; }
+@keyframes sim-spin { to { transform: rotate(360deg); } }
+
+.sim-proposal { display: grid; gap: 6px; width: 100%; max-width: 100%; border: 1px solid var(--hair); background: var(--card); }
+.sim-proposal-title { font-weight: 600; }
+.sim-proposal ul { display: grid; gap: 3px; padding-left: 16px; list-style: disc; }
+.sim-proposal-note { color: #96364e; font-size: 12px; }
+.sim-proposal-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.sim-proposal-state { display: flex; align-items: center; gap: 6px; color: var(--green); font-weight: 500; }
+.sim-proposal-state.is-muted { color: var(--muted); }
+
+.sim-chat-form { display: grid; gap: 8px; padding: 0 12px 12px; }
+.sim-chat-form .sim-composer { margin: 0; align-items: flex-end; }
+
+.sim-composer textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+  resize: none;
+  field-sizing: content;
+}
+
+.sim-composer textarea:focus { outline: none; }
+.sim-composer textarea::placeholder { color: var(--faint); }
+
+.sim-ask-kind { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--well); }
+
+.sim .sim-ask-kind button {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sim .sim-ask-kind button[aria-checked='true'] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+.sim-keep-venue { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.sim-keep-venue input { accent-color: var(--green); }
+
 /* ---- Overview and events ---- */
 
 .sim-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
