@@ -1,10 +1,13 @@
-import type { AgentBlueprint, AgentTemplate, CompiledGoal, EntitySelector, Goal, PortalRecord, Result, RoomRecord, Selector } from '@crowd-control/contract'
+import type { AgentBlueprint, AgentTemplate, EntityBlueprint, CompiledGoal, EntitySelector, Goal, PortalRecord, Result, RoomRecord, Selector } from '@crowd-control/contract'
 import { fail, ok } from '../result.ts'
 
-/** What exists before the simulation starts: the map's rooms and doors plus the starting crowd. */
-export type StaticWorld = { rooms: RoomRecord[]; portals: PortalRecord[]; agents: AgentBlueprint[] }
+/**
+ * What exists before the simulation starts: the map's rooms, doors and objects (tables, desks)
+ * plus the starting crowd. `objects` is optional so older callers still compile.
+ */
+export type StaticWorld = { rooms: RoomRecord[]; portals: PortalRecord[]; objects?: EntityBlueprint[]; agents: AgentBlueprint[] }
 
-type Known = { id: string; kind: 'zone' | 'portal' | 'agent'; tags: string[]; label?: string }
+type Known = { id: string; kind: EntityBlueprint['kind'] | 'agent'; tags: string[]; label?: string }
 
 /** Selector filters the compiler can resolve today; `inside`, `near`, `where` and `sample` come later. */
 const STATIC_FIELDS = new Set(['ids', 'kind', 'tags', 'label'])
@@ -42,12 +45,13 @@ function resolve(selector: Selector, world: StaticWorld, path: string): Result<K
   const all: Known[] = [
     ...world.rooms.map((room) => known(room.id, 'zone', room.tags, room.label)),
     ...world.portals.map((portal) => known(portal.id, 'portal', portal.tags, portal.label)),
+    ...(world.objects ?? []).map((object) => known(object.id, object.kind, object.tags, object.label)),
     ...world.agents.map((agent) => known(agent.id, 'agent', agent.tags, agent.label)),
   ]
   const missing = selector.ids?.filter((id) => !all.some((entity) => entity.id === id)) ?? []
   if (missing.length > 0) return fail('NOT_FOUND', `Goal target ${missing.map((id) => `"${id}"`).join(', ')} does not exist`, { path, affectedIds: missing })
   const found = all.filter((entity) => matches(entity, selector))
-  if (found.length === 0) return fail('NOT_FOUND', 'No room, door or person matches this goal target', { path })
+  if (found.length === 0) return fail('NOT_FOUND', 'No room, door, object or person matches this goal target', { path })
   return ok(found)
 }
 
@@ -62,7 +66,7 @@ function oneZone(selector: Selector, world: StaticWorld, path: string): Result<s
 function oneEntity(selector: Selector, world: StaticWorld, path: string): Result<string> {
   const found = resolve(selector, world, path)
   if (!found.ok) return found
-  if (found.value.length > 1) return fail('AMBIGUOUS_SELECTOR', `This goal needs one target but ${found.value.length} match`, { path, affectedIds: found.value.map((entity) => entity.id) })
+  if (found.value.length > 1) return fail('AMBIGUOUS_SELECTOR', `This goal needs one target but ${found.value.length} match. Name one ID; to send each person to the nearest of several, use a reach goal with all their IDs and "selection": "nearest"`, { path, affectedIds: found.value.map((entity) => entity.id) })
   return ok(found.value[0]!.id)
 }
 

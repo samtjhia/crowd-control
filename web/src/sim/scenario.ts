@@ -1,7 +1,8 @@
-import { compile, preparedVenues, type CompileOptions } from '@crowd-control/compiler'
+import { compile, preparedVenues, spawnCapacities, type CompileOptions } from '@crowd-control/compiler'
 import { DISC_IMPULSE_VERSION, ModelPresetSchema } from '@crowd-control/contract'
+import { placesOf, type Place } from './places.ts'
 import { loadSavedVenues, presetFor, savedScenarioId, starterPlan, type SavedVenue } from './savedVenues.ts'
-import type { Capabilities, CompileOutput, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
+import type { Capabilities, CompileOutput, InventoryItem, LayoutSource, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
 
 /**
  * What the simulator can run today. The planner is told the same list, so it never asks for
@@ -47,6 +48,43 @@ export function venueAssets(): PreparedMap[] {
     venues = built.value
   }
   return venues
+}
+
+/** A venue the assistant can set a new scenario in: its layout source and its rooms and doors. */
+export type VenueOption = {
+  id: string; name: string; layout: LayoutSource; inventory: InventoryItem[]
+  /** People each room holds at the starting spacing, so the planner writes crowds that fit. */
+  capacities: Record<string, number>
+  /** The tables, counters and check-in desks people can use, with what each does. */
+  places: Place[]
+}
+
+/**
+ * Rooms, doors and objects (tables, counters) of a prepared map, as the planner's inventory:
+ * real IDs, labels and tags, and which components each has (`interaction` means people can use it).
+ */
+export function mapInventory(map: PreparedMap): InventoryItem[] {
+  return map.entities.flatMap((entity): InventoryItem[] => entity.kind === 'zone' || entity.kind === 'portal' || entity.kind === 'object'
+    ? [{ id: entity.id, kind: entity.kind, ...(entity.label !== undefined && { label: entity.label }), tags: [...(entity.tags ?? [])], componentNames: Object.keys(entity.components ?? {}) }]
+    : [])
+}
+
+/**
+ * Every venue a new scenario can use: the prepared venues, then floor plans saved in this browser.
+ * `bodies` is the body-width preset for plans saved without a scale.
+ */
+export function venueOptions(bodies?: ModelPreset): VenueOption[] {
+  const prepared = venueAssets().flatMap((map): VenueOption[] => map.source.mode === 'lookup'
+    ? [{ id: map.id, name: map.source.venue, layout: { mode: 'lookup', venue: map.source.venue, floor: map.source.floor }, inventory: mapInventory(map), capacities: spawnCapacities(map, PEDESTRIAN_PRESET), places: placesOf(map.entities) }]
+    : [])
+  const saved = loadSavedVenues().map((venue): VenueOption => ({
+    id: venue.map.id, name: venue.name,
+    layout: { mode: 'upload', assetId: venue.map.id, page: venue.map.source.mode === 'upload' ? venue.map.source.page : 1 },
+    inventory: mapInventory(venue.map),
+    capacities: venue.map.grid.units === 'm' ? spawnCapacities(venue.map, PEDESTRIAN_PRESET) : bodies ? spawnCapacities(venue.map, bodies) : {},
+    places: placesOf(venue.map.entities),
+  }))
+  return [...prepared, ...saved]
 }
 
 /** The prepared venues plus every floor plan saved in this browser, read fresh each time. */
@@ -103,11 +141,11 @@ export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: M
 const inside = (id: string) => ({ ids: [id] })
 const spawn = (count: number, zone: string, tags: string[], fill: string, symbol: 'circle' | 'square' | 'triangle' = 'circle'): Operation =>
   ({ op: 'spawn', template: { kind: 'agent', tags, appearance: { fill, symbol } }, count, placement: { inside: inside(zone) } })
-const assign = (tag: string, goal: Extract<Operation, { op: 'assign_goal' }>['goal']): Operation => ({ op: 'assign_goal', targets: { tags: [tag] }, goal })
+const assign = (tag: string, goal: Extract<Operation, { op: 'assign_goal' }>['goal']): Operation => ({ op: 'assign_goal', targets: { kind: 'agent', tags: [tag] }, goal })
 const alarmAt = (at: number) => [{ op: 'schedule' as const, id: 'alarm', at, operations: [{ op: 'emit' as const, event: { name: 'alarm' } }] }]
-const evacuate = (tag: string, target: { tags: string[] }) => [{
+const evacuate = (tag: string, target: { ids: string[] }) => [{
   op: 'define_rule' as const, id: 'evacuate', when: { kind: 'event' as const, name: 'alarm' }, once: true,
-  operations: [{ op: 'assign_goal' as const, targets: { tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const } }],
+  operations: [{ op: 'assign_goal' as const, targets: { kind: 'agent' as const, tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const } }],
 }]
 const lookup = (venue: string, floor: string) => ({ mode: 'lookup' as const, venue, floor })
 const header = (simulationId: string) => ({ schemaVersion: 1 as const, simulationId, seed: 42 })
@@ -140,7 +178,7 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
           ...[101, 102, 103, 104, 105, 106, 107, 108].map((room) => spawn(24, `room_${room}`, ['student'], '#2563EB')),
           assign('student', { kind: 'wait', duration: 600 }),
         ],
-        timeline: alarmAt(15), rules: evacuate('student', { tags: ['assembly'] }),
+        timeline: alarmAt(15), rules: evacuate('student', { ids: ['west_yard', 'east_yard'] }),
       },
     },
     {
@@ -151,9 +189,10 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
           spawn(400, 'floor', ['audience'], '#7C3AED'),
           spawn(30, 'bar', ['audience', 'at-bar'], '#DB2777', 'square'),
           assign('audience', { kind: 'wander', inside: inside('floor') }),
-          assign('at-bar', { kind: 'wander', inside: inside('bar') }),
+          // The bar crowd takes turns at the counter (four served at once), then mills about.
+          assign('at-bar', { kind: 'sequence', repeat: 5, goals: [{ kind: 'interact', target: inside('bar_counter') }, { kind: 'wander', inside: inside('bar'), duration: 20 }] }),
         ],
-        timeline: alarmAt(45), rules: evacuate('audience', { tags: ['outside'] }),
+        timeline: alarmAt(45), rules: evacuate('audience', { ids: ['street'] }),
       },
     },
     {
@@ -161,10 +200,22 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
       plan: {
         ...header('hackathon-hall-demo'), layout: lookup('Hackathon Hall', 'Main hall'),
         initialOperations: [
-          spawn(60, 'hall', ['hacker'], '#059669'),
+          spawn(45, 'hall', ['hacker', 'seated'], '#059669'),
+          spawn(15, 'hall', ['hacker', 'hungry'], '#0D9488', 'square'),
           spawn(40, 'street', ['arrival'], '#2563EB', 'triangle'),
-          assign('hacker', { kind: 'wander', inside: inside('hall') }),
-          assign('arrival', { kind: 'sequence', goals: [{ kind: 'reach', target: inside('hall') }, { kind: 'wander', inside: inside('hall') }] }),
+          // Most hackers sit at the nearest table and work.
+          assign('seated', { kind: 'sequence', goals: [{ kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' }, { kind: 'wait', duration: 300 }] }),
+          // Some take turns at the snack table (three served at once), then roam.
+          assign('hungry', { kind: 'sequence', repeat: 3, goals: [{ kind: 'interact', target: inside('snacks') }, { kind: 'wander', inside: inside('hall'), duration: 40 }] }),
+          // Arrivals enter through the check-in desks (4 s each), find the nearest table and settle in, then roam.
+          assign('arrival', {
+            kind: 'sequence', goals: [
+              { kind: 'reach', target: inside('hall') },
+              { kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' },
+              { kind: 'wait', duration: 60 },
+              { kind: 'wander', inside: inside('hall') },
+            ],
+          }),
         ],
         timeline: [], rules: [],
       },

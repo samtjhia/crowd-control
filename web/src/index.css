@@ -14,7 +14,12 @@ body { margin: 0; min-width: 320px; }
 
 button, textarea { font: inherit; }
 
-button {
+/*
+ * Element styles for the landing and planner pages. Scoped so they never reach the simulator or
+ * the floor-plan editor (whose root is .sim) and their own button styles. :where() keeps the
+ * specificity of a plain element selector, so these pages look exactly as before.
+ */
+:where(#root > :not(.sim)) button {
   border: 0;
   border-radius: 0.6rem;
   background: #155eef;
@@ -24,9 +29,9 @@ button {
   padding: 0.75rem 1rem;
 }
 
-button:hover { background: #104dcc; }
-button:disabled { background: #98a2b3; cursor: not-allowed; }
-button:focus-visible, textarea:focus-visible { outline: 3px solid #84adff; outline-offset: 2px; }
+:where(#root > :not(.sim)) button:hover { background: #104dcc; }
+:where(#root > :not(.sim)) button:disabled { background: #98a2b3; cursor: not-allowed; }
+:where(#root > :not(.sim)) :is(button, textarea):focus-visible { outline: 3px solid #84adff; outline-offset: 2px; }
 .button-row { display: flex; flex-wrap: wrap; gap: 0.65rem; }
 .secondary-button { background: #eef2f6; color: #344054; }
 .secondary-button:hover { background: #e4e7ec; }
@@ -66,9 +71,9 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid #84adff; outli
 }
 
 form { display: grid; gap: 0.7rem; }
-label { font-size: 0.9rem; font-weight: 650; }
-textarea { border: 1px solid #d0d5dd; border-radius: 0.6rem; color: inherit; line-height: 1.5; padding: 0.8rem; resize: vertical; }
-form button { justify-self: start; }
+:where(#root > :not(.sim)) label { font-size: 0.9rem; font-weight: 650; }
+:where(#root > :not(.sim)) textarea { border: 1px solid #d0d5dd; border-radius: 0.6rem; color: inherit; line-height: 1.5; padding: 0.8rem; resize: vertical; }
+:where(#root > :not(.sim)) form button { justify-self: start; }
 
 .preview-card { background: #f8faff; border: 1px solid #c7d7fe; border-radius: 0.75rem; margin-top: 1.5rem; padding: 1.25rem; }
 .preview-card h3 { margin: 0; }

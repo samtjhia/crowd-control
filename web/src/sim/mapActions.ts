@@ -1,4 +1,4 @@
-import type { Frame, Operation, RenderScene } from '@crowd-control/contract'
+import type { Frame, Operation, RenderScene, Vec2 } from '@crowd-control/contract'
 import type { Pick } from '../render/hitTest.ts'
 
 /**
@@ -96,6 +96,36 @@ export function actionFor(tool: 'trip' | 'doors', scene: RenderScene, frame: Fra
   if (tool === 'trip' && kind === 'agent') return isDown(scene, frame, id) ? recover([id], name) : fall([id], name)
   if (tool === 'doors' && kind === 'portal') return setDoors([id], name, !isOpen(scene, id))
   return null
+}
+
+/**
+ * How big a danger is and how people react, by map units: its radius, how far away people
+ * notice it, and how far they keep from it. Body-width maps use about half the metre numbers.
+ */
+export const DANGER = { m: { radius: 1.5, notice: 12, keep: 6 }, model: { radius: 0.75, notice: 6, keep: 3 } } as const
+
+/**
+ * Drops a danger (a fire, a spill, a threat) at a point: a red circle on the map tagged
+ * `hazard`, and everyone who notices it (within `notice`) moves until they are `keep` away
+ * and stays clear. People further off carry on. One change, so it can be seen in Changes.
+ */
+export function placeDanger(scene: RenderScene, frame: Frame | null, at: Vec2): MapAction {
+  const size = DANGER[scene.map.units === 'm' ? 'm' : 'model']
+  const taken = new Set([...scene.map.rooms, ...scene.map.portals, ...(scene.map.entities ?? []), ...scene.entities, ...scene.agents].map((thing) => thing.id))
+  let n = 1
+  while (taken.has(`danger_${n}`)) n++
+  const id = `danger_${n}`
+  const near = (frame?.agents ?? []).filter((agent) => agent.state !== 'departed' && Math.hypot(agent.x - at.x, agent.y - at.y) <= size.notice).map((agent) => agent.id)
+  const operations: Operation[] = [{
+    op: 'add',
+    entity: {
+      id, kind: 'object', label: `Danger ${n}`, tags: ['hazard'],
+      shape: { kind: 'circle', center: { x: at.x, y: at.y }, radius: size.radius },
+      appearance: { fill: '#DC2626', opacity: 0.35, stroke: '#B91C1C', strokeWidthPx: 2 },
+    },
+  }]
+  if (near.length > 0) operations.push({ op: 'assign_goal', targets: { ids: near }, goal: { kind: 'avoid', target: { ids: [id] }, distance: size.keep, urgency: 1 } })
+  return { label: `Danger ${n} placed${near.length > 0 ? `, ${count(near.length, 'person keeps', 'people keep')} away` : ''}`, operations }
 }
 
 /** Adds a pick to the selection, or removes it if it is already there (Shift-click). */

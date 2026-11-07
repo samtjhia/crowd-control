@@ -42,7 +42,7 @@ import {
   type WorkerCommand,
   type WorkerMessage,
 } from '@crowd-control/contract'
-import { buildCenters, buildZones, inZone, randomPointInZone, streamSeed, type ZoneGeometry } from './geometry.ts'
+import { buildCenters, buildZones, inZone, nextRandom, randomPointInZone, shapeBounds, streamSeed, type ZoneGeometry } from './geometry.ts'
 
 const EPS = 1e-9
 const METRICS_INTERVAL = 0.5
@@ -62,6 +62,14 @@ type Leaf =
   | { kind: 'wander'; zoneId: string; duration: number | null; changeTargetEvery: number | null }
   | { kind: 'wait'; duration: number; zoneId: string | null }
   | { kind: 'hold'; point: Vec2 | null; state: 'queueing' | 'interacting' | 'waiting' }
+  /**
+   * Use something (a table, a counter, a check-in desk): walk up beside it, wait for a free
+   * slot, stay `duration` seconds. Several candidates means the nearest one. Reaching an
+   * object is a use that takes no time and has room for everyone.
+   */
+  | { kind: 'service'; targetIds: string[]; duration: number; slots: number; serving: 'queueing' | 'interacting' }
+  /** Keep at least `distance` from every target, stepping away when closer; never completes. */
+  | { kind: 'avoid'; ids: string[]; distance: number }
   | { kind: 'fail'; message: string }
 
 type MockAgent = {
@@ -90,6 +98,8 @@ type MockAgent = {
   waitingAtDoor: boolean
   random: number
   departedAt: number | null
+  /** The object or desk this person is using (or walking to use), once chosen. */
+  serviceTarget?: string | null
 }
 
 type Job = { id: string; dueTick: number; order: number; operations: CompiledOperation[] }
@@ -440,6 +450,24 @@ export class MockSimulation {
         case 'hold':
           if (leaf.point) this.travel(agent, leaf.point, step)
           break
+        case 'service': {
+          if (!agent.target) agent.target = this.approach(leaf.targetIds, agent)
+          if (agent.waitRemaining === null) {
+            if (!this.travel(agent, agent.target, step)) break
+            const serving = world.state.agents.filter((other) => {
+              const current = other.leaves[other.cursor]
+              return other !== agent && other.waitRemaining !== null && current?.kind === 'service' && other.serviceTarget === agent.serviceTarget
+            }).length
+            if (serving >= leaf.slots) break // waits beside it for a turn
+            agent.waitRemaining = leaf.duration
+          }
+          agent.waitRemaining -= this.dt
+          if (agent.waitRemaining <= EPS) this.completeLeaf(agent, time)
+          break
+        }
+        case 'avoid':
+          agent.target = this.stepAway(agent, leaf, step)
+          break
         case 'fail':
           break
       }
@@ -589,8 +617,74 @@ export class MockSimulation {
     return false
   }
 
+  /**
+   * Where to stand to use one of `ids`: beside the nearest one. For an object, a free spot
+   * just outside its edge (people spread around a table rather than stacking on one point);
+   * for a room or door, its centre.
+   */
+  private approach(ids: string[], agent: MockAgent): Vec2 {
+    const world = this.world!
+    let best: { id: string; at: Vec2 } | null = null
+    for (const id of ids) {
+      const at = world.centers.get(id)
+      if (at && (!best || distance(agent.position, at) < distance(agent.position, best.at))) best = { id, at }
+    }
+    if (!best) return agent.position
+    const chosen = best
+    agent.serviceTarget = chosen.id
+    const shape = world.state.map.entities?.find((entity) => entity.id === chosen.id && entity.kind === 'object')?.shape
+    if (!shape) return chosen.at
+    const b = shapeBounds(shape)
+    const gap = agent.radius + 0.15
+    const spots: Vec2[] = []
+    for (let k = 0; k < 8; k++) {
+      const t = (k + 0.5) / 8
+      spots.push({ x: b.x + t * b.width, y: b.y - gap }, { x: b.x + t * b.width, y: b.y + b.height + gap }, { x: b.x - gap, y: b.y + t * b.height }, { x: b.x + b.width + gap, y: b.y + t * b.height })
+    }
+    const free = spots.filter((p) => this.zoneOf(p) !== null)
+    if (free.length === 0) return chosen.at
+    agent.random = nextRandom(agent.random)
+    return free[agent.random % free.length]!
+  }
+
+  /** Distance from a point to an entity: to the edge of its shape, else to its centre or position. */
+  private distanceTo(id: string, p: Vec2): number | null {
+    const world = this.world!
+    const shape = world.state.map.entities?.find((entity) => entity.id === id)?.shape
+    if (shape?.kind === 'circle') return Math.max(0, distance(p, shape.center) - shape.radius)
+    if (shape) {
+      const b = shapeBounds(shape)
+      return Math.hypot(Math.max(b.x - p.x, 0, p.x - b.x - b.width), Math.max(b.y - p.y, 0, p.y - b.y - b.height))
+    }
+    const at = world.centers.get(id) ?? world.state.agents.find((a) => a.id === id)?.position
+    return at ? distance(p, at) : null
+  }
+
+  /** One step directly away from the nearest thing to avoid, turning to stay on the floor; null when safe or cornered. */
+  private stepAway(agent: MockAgent, leaf: Extract<Leaf, { kind: 'avoid' }>, step: number): Vec2 | null {
+    const world = this.world!
+    let nearest: { d: number; from: Vec2 } | null = null
+    for (const id of leaf.ids) {
+      const d = this.distanceTo(id, agent.position)
+      const from = world.centers.get(id) ?? world.state.agents.find((a) => a.id === id)?.position
+      if (d !== null && from && (!nearest || d < nearest.d)) nearest = { d, from }
+    }
+    if (!nearest || nearest.d >= leaf.distance - EPS) return null
+    const dx = agent.position.x - nearest.from.x, dy = agent.position.y - nearest.from.y
+    const base = Math.hypot(dx, dy) < EPS ? 0 : Math.atan2(dy, dx)
+    for (const turn of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
+      const next = { x: agent.position.x + Math.cos(base + turn) * step, y: agent.position.y + Math.sin(base + turn) * step }
+      if (this.zoneOf(next) !== null) {
+        agent.position = next
+        return next
+      }
+    }
+    return null
+  }
+
   private completeLeaf(agent: MockAgent, time: number) {
     const leaf = agent.leaves[agent.cursor]
+    agent.serviceTarget = null
     agent.cursor++
     agent.leafStartedAt = null
     agent.target = null
@@ -638,6 +732,12 @@ export class MockSimulation {
         for (let r = 0; r < (goal.repeat ?? 1); r++) for (const child of goal.goals) this.compileLeaves(child, out, depth + 1)
         return out
       case 'reach': {
+        // Objects (tables, counters): walk up beside the nearest one.
+        const candidates = 'targetZone' in goal ? [goal.targetZone] : 'targetEntityId' in goal ? [goal.targetEntityId] : goal.targetIds
+        if (candidates.every((candidate) => world.entityKinds.get(candidate) === 'object')) {
+          out.push({ kind: 'service', targetIds: candidates, duration: 0, slots: Infinity, serving: 'interacting' })
+          return out
+        }
         // A fixed candidate set is not route-ranked in the mock; it takes the first candidate.
         const id = 'targetZone' in goal ? goal.targetZone : 'targetEntityId' in goal ? goal.targetEntityId : goal.targetIds[0]
         const point = id === undefined ? null : centerOf(id)
@@ -652,16 +752,31 @@ export class MockSimulation {
       case 'wait':
         out.push({ kind: 'wait', duration: goal.duration, zoneId: goal.insideZone ?? null })
         return out
-      case 'avoid':
-        // No separation steering in the mock: the agent simply stays put.
-        out.push({ kind: 'hold', point: null, state: 'waiting' })
+      case 'avoid': {
+        const ids = 'targetZone' in goal ? [goal.targetZone] : 'targetEntityId' in goal ? [goal.targetEntityId] : goal.targetIds
+        out.push({ kind: 'avoid', ids, distance: goal.distance })
         return out
-      case 'follow':
+      }
       case 'queue':
       case 'interact': {
+        const id = goal.targetEntityId
+        const entity = world.state.map.entities?.find((candidate) => candidate.id === id)
+        const portal = world.state.map.portals.find((candidate) => candidate.id === id)
+        const interaction = entity?.components?.interaction
+        const capacity = entity?.components?.capacity
+        if (!world.centers.has(id)) out.push({ kind: 'fail', message: `Unknown target ${id}` })
+        else if (goal.kind === 'interact' && !interaction) out.push({ kind: 'fail', message: 'Interact target needs interaction components' })
+        else if (goal.kind === 'queue' && !portal && !capacity && !interaction) out.push({ kind: 'fail', message: 'Queue target needs capacity or portal components' })
+        else {
+          const duration = interaction?.duration ?? portal?.traversalTime ?? (capacity?.serviceRate ? 1 / capacity.serviceRate : 2)
+          const slots = interaction?.slots ?? capacity?.maximumOccupants ?? 1
+          out.push({ kind: 'service', targetIds: [id], duration, slots, serving: goal.kind === 'queue' ? 'queueing' : 'interacting' })
+        }
+        return out
+      }
+      case 'follow': {
         const point = centerOf(goal.targetEntityId)
-        const state = goal.kind === 'queue' ? 'queueing' : goal.kind === 'interact' ? 'interacting' : 'waiting'
-        out.push(point ? { kind: 'hold', point: { ...point }, state } : { kind: 'fail', message: `Unknown target ${goal.targetEntityId}` })
+        out.push(point ? { kind: 'hold', point: { ...point }, state: 'waiting' } : { kind: 'fail', message: `Unknown target ${goal.targetEntityId}` })
         return out
       }
     }
@@ -730,6 +845,10 @@ export class MockSimulation {
       case 'fail': return 'failed'
       case 'hold': return leaf.point && distance(agent.position, leaf.point) > EPS ? 'moving' : leaf.state
       case 'wait': return agent.waitRemaining === null ? 'moving' : 'waiting'
+      case 'service':
+        if (agent.waitRemaining !== null) return leaf.duration === 0 ? 'moving' : leaf.serving
+        return agent.target && distance(agent.position, agent.target) > EPS ? 'moving' : 'queueing'
+      case 'avoid': return agent.target ? 'moving' : 'waiting'
       default: return 'moving'
     }
   }
@@ -902,8 +1021,36 @@ export class MockSimulation {
         return null
       }
       case 'add':
-        return unsupported('adding map entities')
+        return this.addEntity(op)
     }
+  }
+
+  /**
+   * Adds a map object mid-run (a danger, a new stand). Without a shape it gets a body-sized
+   * square at the centre of the first room its placement names. Rooms and doors are not added.
+   */
+  private addEntity(op: Extract<CompiledOperation, { op: 'add' }>): ContractError | null {
+    const world = this.world!
+    const entity = structuredClone(op.entity)
+    if (entity.kind === 'zone' || entity.kind === 'portal') return unsupported('adding rooms or doors')
+    if (world.entityKinds.has(entity.id) || world.state.agents.some((agent) => agent.id === entity.id)) return fail('INVALID_SCHEMA', `Entity ID ${entity.id} already exists`)
+    if (!entity.shape) {
+      const placement = op.placement
+      const region = placement && 'inside' in placement ? this.resolveEntities(placement.inside) : []
+      if (isFail(region)) return region.error
+      const zone = region.map((id) => world.zones.get(id)).find((candidate) => candidate !== undefined)
+      if (!zone) return fail('NO_WALKABLE_SPACE', 'Add needs a shape, or a placement inside a room')
+      const size = world.compiled.resolvedModel.layout.bodyDiameter
+      entity.shape = { kind: 'rectangle', x: zone.center.x - size / 2, y: zone.center.y - size / 2, width: size, height: size }
+    }
+    const bounds = shapeBounds(entity.shape)
+    world.state.map.entities = [...(world.state.map.entities ?? []), entity]
+    world.entityKinds.set(entity.id, entity.kind)
+    world.entityTags.set(entity.id, entity.tags ?? [])
+    if (entity.label !== undefined) world.entityLabels.set(entity.id, entity.label)
+    world.centers.set(entity.id, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
+    this.markSceneDirty()
+    return null
   }
 
   private agentTargets(selector: Selector): MockAgent[] | Fail {

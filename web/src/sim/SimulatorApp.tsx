@@ -3,9 +3,9 @@ import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
-  Pause, Play, Plus, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
+  Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
 } from 'lucide-react'
-import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
+import type { Camera, ModelPreset, ScenarioPlan, Vec2 } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
 import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
@@ -20,13 +20,16 @@ import { formatClock, toIncidents, type Incident } from './incidents.ts'
 import type { Pick, PickKind } from '../render/hitTest.ts'
 import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
 import { DensityPanel } from './DensityPanel.tsx'
-import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
-import { describeScenario, movementPreset, scenarios, startScenario } from './scenario.ts'
+import { actionFor, placeDanger, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
+import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startScenario, venueOptions, type Scenario } from './scenario.ts'
+import { loadAssistant, saveScenarios } from './assistantStore.ts'
+import { AssistantPanel } from './AssistantPanel.tsx'
+import { loadSavedVenues, presetFor } from './savedVenues.ts'
 
-/** What each tool can click: Select anything, Trip people, Doors doors. */
-const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], box: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
+/** What each tool can click: Select anything, Trip people, Doors doors, Danger the floor. */
+const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'object', 'portal', 'zone'], box: ['agent', 'object', 'portal', 'zone'], trip: ['agent'], doors: ['portal'], danger: ['zone'] }
 /** Box always drags a selection box; Select does with Shift held; the others always pan. */
-const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', trip: 'off', doors: 'off' }
+const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', trip: 'off', doors: 'off', danger: 'off' }
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -54,12 +57,29 @@ function insetsFor(panels: Panels) {
 const REAL_ENGINE = new URLSearchParams(window.location.search).get('engine') === 'real'
 const SCENARIOS = scenarios(workedPlan as ScenarioPlan, REAL_ENGINE ? movementPreset(examplePreset.resolvedModel as ModelPreset) : examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
+const ASSISTANT_PREFIX = 'assistant-'
+
+/**
+ * The model preset for a plan the assistant wrote: the worked example's body-width preset for
+ * generated buildings, the pedestrian preset for metre venues, and whichever fits a saved floor plan.
+ */
+function presetForPlan(plan: ScenarioPlan): ModelPreset {
+  const bodies = SCENARIOS[0]!.model
+  if (plan.layout.mode === 'generate') return bodies
+  if (plan.layout.mode === 'upload') {
+    const { assetId } = plan.layout
+    const venue = loadSavedVenues().find((saved) => saved.map.id === assetId)
+    return venue ? presetFor(venue, PEDESTRIAN_PRESET, bodies) : PEDESTRIAN_PRESET
+  }
+  return PEDESTRIAN_PRESET
+}
 const UPLOAD_OPTION = '__upload'
 
 /** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
 function initialScenarioId(): string {
   const requested = new URLSearchParams(window.location.search).get(SCENARIO_PARAM)
-  return SCENARIOS.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
+  const known = [...SCENARIOS, ...loadAssistant().scenarios]
+  return known.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
 }
 
 /** Keeps the choice in the URL so a reload or a shared link opens the same venue. */
@@ -69,7 +89,6 @@ function rememberScenario(id: string) {
   else url.searchParams.set(SCENARIO_PARAM, id)
   window.history.replaceState(window.history.state, '', url)
 }
-const SUGGESTIONS = ['Close the hall door for 30 seconds', 'Someone trips in the foyer', 'Why did people queue at the exit?']
 
 type Panels = { left: boolean; right: boolean }
 
@@ -140,7 +159,10 @@ export default function SimulatorApp() {
   })
 
   const [scenarioId, setScenarioId] = useState(initialScenarioId)
-  const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId)!
+  /** Scenarios the assistant wrote in this visit; they join the picker. */
+  const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>(() => loadAssistant().scenarios)
+  useEffect(() => { saveScenarios(assistantScenarios) }, [assistantScenarios])
+  const scenario = [...SCENARIOS, ...assistantScenarios].find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0]!
   /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
   const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
   const generated = scenario.plan.layout.mode === 'generate'
@@ -157,6 +179,31 @@ export default function SimulatorApp() {
     setSelection([])
     rememberScenario(id)
   }
+  /**
+   * Runs a scenario the assistant wrote: compile it first, so a plan that can't be built is
+   * reported in the chat instead of loaded; then add it to the picker and switch to it.
+   */
+  const runAssistantPlan = (plan: ScenarioPlan, title: string): string | null => {
+    const model = presetForPlan(plan)
+    const check = startScenario(plan, model)
+    if (!check.ok) return `This can’t be built: ${check.error.message}`
+    const id = `${ASSISTANT_PREFIX}${assistantScenarios.length + 1}`
+    setAssistantScenarios((all) => [...all, { id, title: `Assistant: ${title}`, plan, model }])
+    chooseScenario(id)
+    return null
+  }
+  /** Test-builds a plan the assistant wrote, without loading it; returns why it can't be built. */
+  const checkAssistantPlan = (plan: ScenarioPlan): string | null => {
+    const check = startScenario(plan, presetForPlan(plan))
+    return check.ok ? null : check.error.message
+  }
+  /** Venues a new scenario can use, and which one is loaded now (null for a made-up building). */
+  const venues = useMemo(() => venueOptions(SCENARIOS[0]!.model), [])
+  const layout = scenario.plan.layout
+  const currentVenueId = layout.mode === 'lookup'
+    ? venues.find((v) => v.layout.mode === 'lookup' && v.layout.venue === layout.venue && v.layout.floor === layout.floor)?.id ?? null
+    : layout.mode === 'upload' ? layout.assetId : null
+
   /** Same description, a different building: the plan's seed first, then the next seeds in turn. */
   const nextLayout = () => {
     setLayoutSeed((seed) => (seed === null ? scenario.plan.seed : (seed + 1) >>> 0))
@@ -170,20 +217,30 @@ export default function SimulatorApp() {
   /** Applies a map action as a follow-up request; failures show in the event log. */
   const applyAction = (action: MapAction) => void client.apply(action.label, action.operations)
   /** What a click on the map does with the current tool. Read through a ref by the renderer. */
-  const onPickRef = useRef<(pick: Pick | null, additive: boolean) => void>(() => {})
+  const onPickRef = useRef<(pick: Pick | null, additive: boolean, at: Vec2) => void>(() => {})
   const onBoxRef = useRef<(picks: Pick[], additive: boolean) => void>(() => {})
   useEffect(() => {
-    onPickRef.current = (pick, additive) => {
+    onPickRef.current = (pick, additive, at) => {
       if (toolRef.current === 'select' || toolRef.current === 'box') {
         // Shift-click adds or removes one item; a plain click replaces the selection.
         if (additive) { if (pick) setSelection((current) => toggleIn(current, pick)) }
         else setSelection(pick ? [pick] : [])
         return
       }
-      setSelection(pick ? [pick] : [])
       const current = client.getView()
+      if (toolRef.current === 'danger') {
+        // A danger goes wherever the floor was clicked; then it is selected, so its details show.
+        if (pick?.kind !== 'zone' || !current.scene) return
+        const action = placeDanger(current.scene, current.current?.frame ?? null, at)
+        const added = action.operations[0]
+        void client.apply(action.label, action.operations).then((result) => {
+          if (result.ok && added?.op === 'add') setSelection([{ kind: 'object', id: added.entity.id }])
+        })
+        return
+      }
+      setSelection(pick ? [pick] : [])
       if (!pick || !current.scene) return
-      const action = actionFor(toolRef.current, current.scene, current.current?.frame ?? null, pick.kind, pick.id)
+      const action = actionFor(toolRef.current as 'trip' | 'doors', current.scene, current.current?.frame ?? null, pick.kind, pick.id)
       if (action) void client.apply(action.label, action.operations)
     }
     // A box replaces the selection; with Shift held it adds to it.
@@ -224,7 +281,7 @@ export default function SimulatorApp() {
       renderer = created
       rendererRef.current = created
       stopCamera = created.onCameraChange(setCamera)
-      stopPick = created.onPick((pick, additive) => onPickRef.current(pick, additive))
+      stopPick = created.onPick((pick, additive, at) => onPickRef.current(pick, additive, at))
       stopBox = created.onBoxSelect((picks, additive) => onBoxRef.current(picks, additive))
       created.setPickable(PICKABLE[toolRef.current])
       created.setBoxSelect(BOX_MODE[toolRef.current])
@@ -281,6 +338,7 @@ export default function SimulatorApp() {
           case 'b': case 'B': setTool('box'); return true
           case 'f': case 'F': setTool('trip'); return true
           case 'd': case 'D': setTool('doors'); return true
+          case 'x': case 'X': setTool('danger'); return true
           case 'h': case 'H': setHeatmap((on) => !on); return true
           case 'Escape':
             if (window.innerWidth >= WIDE) { setSelection([]); return true }
@@ -322,6 +380,11 @@ export default function SimulatorApp() {
               else chooseScenario(event.target.value)
             }}>
               {SCENARIOS.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              {assistantScenarios.length > 0 && (
+                <optgroup label="From the assistant">
+                  {assistantScenarios.map((option) => <option key={option.id} value={option.id}>{option.title.replace(/^Assistant: /, '')}</option>)}
+                </optgroup>
+              )}
               <option value={UPLOAD_OPTION}>Upload a floor plan…</option>
             </select>
             <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
@@ -370,13 +433,13 @@ export default function SimulatorApp() {
       <PlaybackBar client={client} view={view} ready={ready} now={now} incidents={incidents} />
 
       <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
-        <ChatPlaceholder />
+        <AssistantPanel client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
       </SidePanel>
 
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
         <Overview view={view} />
         <Section title="Selected">
-          <SelectionDetails selection={selection} view={view} onAction={applyAction} onClear={() => setSelection([])} />
+          <SelectionDetails selection={selection} view={view} plan={compiled.ok ? scenario.plan : null} onAction={applyAction} onClear={() => setSelection([])} />
         </Section>
         <Section title="Density">
           <DensityPanel view={view} on={heatmap} onToggle={() => setHeatmap((on) => !on)} />
@@ -429,27 +492,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h3>{title}</h3>
       {children}
     </section>
-  )
-}
-
-function ChatPlaceholder() {
-  return (
-    <div className="sim-chat">
-      <div className="sim-chat-empty">
-        <p className="sim-chat-title">Talk to the simulation</p>
-        <p className="sim-muted">Describe a change or ask why something happened. Every change appears as a preview you can apply or edit.</p>
-        <ul className="sim-suggestions" aria-label="Example requests">
-          {SUGGESTIONS.map((text) => (
-            <li key={text}><span className="sim-prompt-avatar" aria-hidden="true">You</span>{text}</li>
-          ))}
-        </ul>
-      </div>
-      <form className="sim-composer" onSubmit={(event) => event.preventDefault()}>
-        <label className="visually-hidden" htmlFor="sim-chat-input">Message</label>
-        <input id="sim-chat-input" disabled placeholder="Planner not connected yet" />
-        <button type="submit" className="sim-send" disabled aria-label="Send"><SendHorizontal size={15} /></button>
-      </form>
-    </div>
   )
 }
 
@@ -514,6 +556,8 @@ function Legend() {
         <li><MapSwatch kind="down" /> Down (lying figure or capsule)</li>
         <li><MapSwatch kind="open" /> Open door</li>
         <li><MapSwatch kind="closed" /> Closed door</li>
+        <li><MapSwatch kind="service" /> Something people use (table, counter, desk): click for details</li>
+        <li><MapSwatch kind="danger" /> Danger: people nearby keep away</li>
         <li><StatusIcon kind="exit" size={18} /> Exit or safe</li>
         <li><StatusIcon kind="warning" size={18} /> Fall or hazard</li>
         <li><StatusIcon kind="closed" size={18} /> Closure or alarm</li>
@@ -527,13 +571,14 @@ function Legend() {
         <div><dt><kbd>\</kbd></dt><dd>Hide or show both panels</dd></div>
         <div><dt><kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd></dt><dd>Zoom in, out, fit</dd></div>
         <div><dt>Arrows, drag</dt><dd>Pan the map</dd></div>
+        <div><dt><kbd>V</kbd> <kbd>B</kbd> <kbd>F</kbd> <kbd>D</kbd> <kbd>X</kbd></dt><dd>Select, Box, Trip, Doors, Danger</dd></div>
       </dl>
     </details>
   )
 }
 
 /** Legend swatches for the map's own cues, drawn to match what the canvas paints. */
-function MapSwatch({ kind }: { kind: 'person' | 'left' | 'down' | 'open' | 'closed' }) {
+function MapSwatch({ kind }: { kind: 'person' | 'left' | 'down' | 'open' | 'closed' | 'service' | 'danger' }) {
   const box = { width: 18, height: 18, viewBox: '0 0 18 18', 'aria-hidden': true, focusable: false } as const
   switch (kind) {
     case 'person':
@@ -554,6 +599,10 @@ function MapSwatch({ kind }: { kind: 'person' | 'left' | 'down' | 'open' | 'clos
       return <svg {...box}><rect x="1" y="1" width="16" height="16" rx="3" fill="#B9D6AE" /></svg>
     case 'closed':
       return <svg {...box}><rect x="1" y="1" width="16" height="16" rx="3" fill="#BB6479" /><path d="M6 6l6 6M12 6l-6 6" stroke="#FFFFFF" strokeWidth="1.75" /></svg>
+    case 'service':
+      return <svg {...box}><circle cx="9" cy="9" r="7" fill="#2F6FEB" stroke="#FFFFFF" strokeWidth="1.5" /><path d="M9 8v4.5" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" /><circle cx="9" cy="5.6" r="1.1" fill="#FFFFFF" /></svg>
+    case 'danger':
+      return <svg {...box}><circle cx="9" cy="9" r="7.5" fill="#DC2626" fillOpacity="0.35" stroke="#B91C1C" strokeWidth="1.5" /><path d="M9 5v5" stroke="#B91C1C" strokeWidth="1.8" strokeLinecap="round" /><circle cx="9" cy="12.8" r="1.1" fill="#B91C1C" /></svg>
   }
 }
 

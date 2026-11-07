@@ -9,13 +9,14 @@ import { cellBounds } from '../venues/build.ts'
  * its cells and the metadata (label, tags, appearance, connections) from the map's entities.
  * Zones may be any shape; the grid decides membership and the box only bounds it.
  *
- * Other map entities (furniture, barriers) are not loaded by the engine yet, so they fail
+ * Objects (tables, desks, counters people can use) are passed through as map entities, which
+ * the engine loads so goals can target them. Barriers are not supported yet, so they fail
  * clearly instead of being dropped.
  */
 export function mapFromPrepared(asset: PreparedMap): Result<{ map: CompiledMap; areas: SpawnArea[] }> {
   const { grid } = asset
   const byId = new Map(asset.entities.map((entity) => [entity.id, entity]))
-  const other = asset.entities.find((entity) => entity.kind !== 'zone' && entity.kind !== 'portal')
+  const other = asset.entities.find((entity) => entity.kind !== 'zone' && entity.kind !== 'portal' && entity.kind !== 'object')
   if (other) {
     return fail('UNSUPPORTED_CAPABILITY', `Map objects such as "${other.id}" cannot be simulated yet`, { path: `assets.${asset.id}.entities`, affectedIds: [other.id] })
   }
@@ -64,5 +65,7 @@ export function mapFromPrepared(asset: PreparedMap): Result<{ map: CompiledMap; 
     grid: copy,
     source: { ...asset.source },
   }
+  const objects = asset.entities.filter((entity) => entity.kind === 'object')
+  if (objects.length > 0) map.entities = JSON.parse(JSON.stringify(objects)) as typeof objects
   return ok({ map, areas: rooms.map((room) => gridArea(copy, room.id, room)) })
 }

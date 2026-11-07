@@ -116,7 +116,7 @@ function populate(input: CompileInput, map: CompiledMap, areas: SpawnArea[]): Re
   if (!profiles.ok) return profiles
   const agents = placeInitialAgents(input.plan.initialOperations, areas, profiles.value, input.model)
   if (!agents.ok) return agents
-  const behaviour = compileBehaviour(input.plan, { rooms: map.rooms, portals: map.portals, agents: agents.value })
+  const behaviour = compileBehaviour(input.plan, { rooms: map.rooms, portals: map.portals, objects: map.entities ?? [], agents: agents.value })
   if (!behaviour.ok) return behaviour
   return finish(input, map, profiles.value, behaviour.value)
 }

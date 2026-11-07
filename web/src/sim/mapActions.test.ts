@@ -107,7 +107,7 @@ test('a selected room is tinted over its floor only, never over tables or walls'
   assert.ok(result.ok)
   const scene: RenderScene = { map: result.value.scene.map, entities: [], agents: [] }
   const area = zoneStrips(scene, 'hall').reduce((sum, strip) => sum + strip.width * strip.height, 0)
-  assert.equal(area, 40 * 30 - 24 * 6 * 0.75, 'the 40 × 30 m hall minus its 24 tables')
+  assert.equal(area, 40 * 30 - 24 * 6 * 0.75 - 4 * 1, 'the 40 × 30 m hall minus its 24 tables and the snack table')
   assert.deepEqual(zoneStrips(worked().scene, 'hall'), [{ x: 1, y: 1, width: 10, height: 4 }])
 })
 

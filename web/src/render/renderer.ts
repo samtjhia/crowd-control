@@ -4,9 +4,9 @@ import type { SimulationClient } from '../worker/simulationClient.ts'
 import { HAIR_TONES, SKIN_TONES, figureLook, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, type AgentDrawMode } from './agentStyle.ts'
 import { FigureAtlas, type FigureLook, type FigurePose } from './figureAtlas.ts'
 import { fitCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera.ts'
-import { pickAt, pickInBox, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
+import { objectRects, pickAt, pickInBox, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
 import { displayPositions } from './interpolate.ts'
-import { COLORS, layoutMap, type MapLayout } from './mapLayout.ts'
+import { BADGE_COLORS, COLORS, layoutMap, type MapLayout } from './mapLayout.ts'
 import { blurOverFloor, gaussianKernel, heatGridFor, paintHeatmap, peakOf, smoothingSigma, splatPositions, type HeatGrid, type HeatScale } from './heatmap.ts'
 
 export type RendererOptions = {
@@ -115,7 +115,7 @@ export class CrowdRenderer {
   /** World positions drawn on the last frame, so clicks hit what the user sees. */
   private positions = new Map<string, Vec2>()
   private pickable: readonly PickKind[] = []
-  private readonly pickListeners = new Set<(pick: Pick | null, additive: boolean) => void>()
+  private readonly pickListeners = new Set<(pick: Pick | null, additive: boolean, at: Vec2) => void>()
   private readonly boxListeners = new Set<(picks: Pick[], additive: boolean) => void>()
   private boxSelect: BoxSelectMode = 'off'
   /** The Shift-drag selection box, in screen pixels, while it is being drawn. */
@@ -235,9 +235,9 @@ export class CrowdRenderer {
 
   /**
    * Notified with what was clicked (null for empty floor or wall), and whether Shift was held
-   * to add to the selection. Dragging never counts as a click.
+   * to add to the selection, and the world point clicked. Dragging never counts as a click.
    */
-  onPick(listener: (pick: Pick | null, additive: boolean) => void): () => void {
+  onPick(listener: (pick: Pick | null, additive: boolean, at: Vec2) => void): () => void {
     this.pickListeners.add(listener)
     return () => {
       this.pickListeners.delete(listener)
@@ -549,6 +549,23 @@ export class CrowdRenderer {
         labels.addChild(text)
       }
     }
+    // Points of interest: a small round marker at the corner of each thing people use, or of a danger.
+    const radius = Math.max(4, Math.min(8, ppu * 0.32))
+    const badges = new Graphics()
+    for (const badge of layout.badges) {
+      const p = toScreen(badge.x, badge.y)
+      badges.circle(p.x, p.y, radius).fill({ color: BADGE_COLORS[badge.kind] }).stroke({ width: 1.5, color: '#FFFFFF' })
+    }
+    labels.addChild(badges)
+    if (radius >= 6) {
+      for (const badge of layout.badges) {
+        const p = toScreen(badge.x, badge.y)
+        const glyph = new Text({ text: badge.kind === 'hazard' ? '!' : 'i', style: { fontFamily: this.font, fontSize: radius * 1.5, fontWeight: '700', fill: '#FFFFFF' } })
+        glyph.anchor.set(0.5)
+        glyph.position.set(p.x, p.y + (badge.kind === 'hazard' ? 0 : 0.5))
+        labels.addChild(glyph)
+      }
+    }
     floor.addChild(floorGraphics)
     structures.addChild(structureGraphics)
   }
@@ -784,6 +801,7 @@ export class CrowdRenderer {
     }
 
     const doors = portalRects(scene)
+    const objects = objectRects(scene)
     for (const pick of this.selection) {
       if (pick.kind === 'agent') {
         const at = this.positions.get(pick.id)
@@ -793,8 +811,8 @@ export class CrowdRenderer {
         const radius = Math.max(view.radiusPx, view.topPx * 0.6) + 4
         mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
         mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.width, color: SELECTION.color })
-      } else if (pick.kind === 'portal') {
-        const rect = doors.find((candidate) => candidate.id === pick.id)
+      } else if (pick.kind === 'portal' || pick.kind === 'object') {
+        const rect = (pick.kind === 'portal' ? doors : objects).find((candidate) => candidate.id === pick.id)
         if (!rect) continue
         const corner = worldToScreen(this.camera, rect)
         const outline = () => mark.roundRect(corner.x - 3, corner.y - 3, rect.width * ppu + 6, rect.height * ppu + 6, 4)
@@ -868,7 +886,8 @@ export class CrowdRenderer {
         for (const listener of this.boxListeners) listener(picks, event.shiftKey)
       } else if (click && this.pickable.length > 0) {
         const pick = this.pickAtScreen(local(event))
-        for (const listener of this.pickListeners) listener(pick, event.shiftKey)
+        const at = screenToWorld(this.camera, local(event))
+        for (const listener of this.pickListeners) listener(pick, event.shiftKey, at)
       }
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
