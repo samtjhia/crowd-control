@@ -30,12 +30,12 @@ test('the capabilities and limits carried in the input are enforced', () => {
   assert.equal(tooMany.ok ? null : tooMany.error.code, 'RESOURCE_LIMIT')
 })
 
-test('each layout mode is routed; uploads fail clearly until the upload editor exists', () => {
+test('an upload plan whose floor plan was never saved says so', () => {
   const upload = workedExample()
   upload.plan.layout = { mode: 'upload', assetId: 'plan-1', page: 1 }
   const uploaded = compile(upload)
-  assert.equal(uploaded.ok ? null : uploaded.error.code, 'UNSUPPORTED_CAPABILITY')
-  assert.match(uploaded.ok ? '' : uploaded.error.message, /upload editor/)
+  assert.equal(uploaded.ok ? null : uploaded.error.code, 'MAP_NOT_FOUND')
+  assert.match(uploaded.ok ? '' : uploaded.error.message, /floor-plan editor/)
 })
 
 function compiled(input = workedExample()): CompileOutput {

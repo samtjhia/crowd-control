@@ -1,0 +1,278 @@
+/*
+ * Floor-plan editor. Shares the simulator's tokens and floating cards (.sim, .sim-float);
+ * only the editor's own pieces live here, under .editor / editor-*.
+ */
+
+.editor-canvas { position: absolute; inset: 0; }
+.editor-canvas canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+
+.editor .editor-topbar { right: var(--gap); }
+
+.editor-back {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.editor-back:hover { background: var(--well); color: var(--text); }
+
+/* The step bar: numbered steps; done steps show a check, the current one is green. */
+.editor-steps { display: flex; align-items: center; gap: 2px; margin-left: auto; overflow-x: auto; }
+
+.editor .editor-steps button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px 0 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.editor .editor-steps button:hover:not(:disabled) { background: var(--well); color: var(--text); }
+.editor .editor-steps button:disabled { color: #b9bcb6; cursor: default; }
+.editor .editor-steps button[aria-current='step'] { background: var(--well-strong); color: var(--text); font-weight: 600; }
+
+.editor-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--well-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.editor .editor-steps button[aria-current='step'] .editor-step-number { background: var(--green); color: #ffffff; }
+
+/* Step panel on the right; the plan is fitted into the space beside it. */
+.editor-panel {
+  top: calc(var(--gap) * 2 + var(--top-h));
+  right: var(--gap);
+  bottom: var(--gap);
+  width: var(--right-w);
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.editor-panel .sim-section { display: grid; gap: 12px; }
+.editor-file { font-weight: 600; overflow-wrap: anywhere; }
+
+.editor .sim-action:disabled { background: var(--well-strong); color: var(--faint); cursor: default; }
+.editor .editor-secondary { background: var(--well-strong); color: var(--text); }
+.editor .editor-secondary:hover:not(:disabled) { background: #e2e3de; }
+
+.editor .editor-zoom { right: calc(var(--gap) * 2 + var(--right-w)); bottom: var(--gap); }
+
+/* Empty state: one card in the middle of the workspace. */
+.editor-empty { position: absolute; inset: calc(var(--gap) * 2 + var(--top-h)) var(--gap) var(--gap); display: grid; place-items: center; }
+
+.editor-drop {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(460px, 100%);
+  padding: 36px 32px 28px;
+  border: 2px dashed #cfd5c8;
+  text-align: center;
+  transition: border-color 160ms ease-out, background-color 160ms ease-out;
+}
+
+.editor-drop svg { color: var(--green); }
+.editor-drop.is-over { border-color: var(--green); background: #f6faf3; }
+.editor-drop h1 { font-family: 'Manrope Variable', 'Manrope', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.editor-drop .sim-error { margin: 0; }
+.editor-drop-note { font-size: 11.5px; }
+
+@media (max-width: 999px) {
+  .editor-panel { top: auto; left: var(--gap); width: auto; max-height: 45vh; }
+  .editor .editor-zoom { right: var(--gap); bottom: calc(45vh + var(--gap) * 2); }
+  .editor .sim-brand { display: none; }
+}
+
+/* ---- Step controls ---- */
+
+.editor-field { display: grid; gap: 6px; }
+.editor-field label, .editor-label { display: flex; justify-content: space-between; font-weight: 500; }
+.editor-field output { color: var(--muted); font-weight: 400; }
+.editor-field input[type='range'] { width: 100%; accent-color: var(--green); }
+.editor-hint { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.editor-check { display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; }
+.editor-check input { accent-color: var(--green); width: 15px; height: 15px; }
+
+.editor-segmented { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--well); }
+
+.editor .editor-segmented button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.editor .editor-segmented button:hover { color: var(--text); }
+.editor .editor-segmented button[aria-checked='true'] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+
+.editor .sim-action { display: inline-flex; align-items: center; gap: 6px; }
+.editor-step-nav { justify-content: space-between; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--hair); }
+
+/* ---- Scale ---- */
+
+.editor-distance { display: flex; gap: 8px; }
+
+.editor-distance input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.editor-distance input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.editor-distance .editor-segmented { flex: none; }
+.editor .editor-distance .editor-segmented button { padding: 0 10px; }
+.editor-scale-result { padding: 10px 12px; border-radius: 12px; background: var(--well); }
+
+.editor-warning {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fbf1e1;
+  color: #87561c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.editor-warning svg { flex: none; margin-top: 1px; }
+
+/* ---- Rooms ---- */
+
+.editor-empty-list { padding: 14px; border: 1px dashed #d8dcd3; border-radius: 12px; color: var(--muted); text-align: center; }
+.editor-rooms { display: grid; gap: 6px; }
+
+.editor-room {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.editor-room.is-selected { border-color: #2f6feb; box-shadow: 0 0 0 1px #2f6feb inset; }
+.editor-room-swatch { width: 12px; height: 12px; border-radius: 4px; }
+
+.editor-room-name {
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+
+.editor-room-name:hover { border-color: var(--hair); }
+.editor-room-name:focus { border-color: var(--green); outline: none; background: var(--card); }
+.editor-room-area { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+.editor-tags { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: 4px; padding: 2px 0 2px 20px; }
+
+.editor .editor-tags button {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.editor .editor-tags button[aria-pressed='true'] { border-color: var(--green); background: #eaf3e4; color: #265e3d; font-weight: 600; }
+
+/* Small colour keys used in step text. */
+.editor-key { display: inline-block; width: 10px; height: 10px; margin: 0 2px -1px 0; border-radius: 3px; }
+.editor-key-wall { background: rgb(220 38 38 / 0.7); }
+.editor-key-object { background: rgb(217 119 6 / 0.65); }
+
+.editor-notice { padding: 8px 10px; border-radius: 10px; background: #eef4fd; color: #234a8a; font-size: 12px; line-height: 1.45; }
+
+/* ---- Doors ---- */
+
+.editor-door-name { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.editor .editor-tags button { display: inline-flex; align-items: center; gap: 4px; }
+.editor-key-door { background: #ea580c; }
+.editor-key-exit { background: #16a34a; }
+.editor-key-closed { background: #bb6479; }
+
+/* ---- Check & save ---- */
+
+.editor-ok { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: #eaf3e4; color: #265e3d; font-weight: 500; }
+.editor-error { background: #f8e8ec; color: #96364e; }
+.editor-problems { display: grid; gap: 4px; }
+
+.editor .editor-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor .editor-problem:disabled { cursor: default; }
+.editor .editor-problem svg { flex: none; margin-top: 2px; }
+.editor .editor-problem.is-error svg { color: #dc2626; }
+.editor .editor-problem.is-warning svg { color: #d97706; }
+.editor .editor-problem.is-focused { border-color: #2f6feb; box-shadow: 0 0 0 1px #2f6feb inset; }
+
+.editor-text {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.editor-text:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.editor-saved { display: grid; gap: 8px; }
+.editor-saved .sim-action { justify-self: start; text-decoration: none; }

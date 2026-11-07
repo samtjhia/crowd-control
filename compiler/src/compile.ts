@@ -36,7 +36,7 @@ export function compile(input: unknown, options: CompileOptions = {}): Result<Co
     case 'lookup':
       return compileLookup(valid)
     case 'upload':
-      return fail('UNSUPPORTED_CAPABILITY', 'Uploaded floor plans are not supported yet; they arrive with the upload editor', { path: 'plan.layout.mode' })
+      return compileUpload(valid)
   }
 }
 
@@ -81,6 +81,29 @@ function compileLookup(input: CompileInput): Result<CompileOutput> {
   }
   if (asset.grid.units !== input.model.units) {
     return fail('UNSUPPORTED_CAPABILITY', `${layout.venue} is measured in ${asset.grid.units === 'm' ? 'metres' : 'model units'}, but the model preset "${input.model.id}" uses ${input.model.units === 'm' ? 'metres' : 'model units'}`, { path: 'model.units' })
+  }
+  const prepared = mapFromPrepared(asset)
+  if (!prepared.ok) return prepared
+  return populate(input, prepared.value.map, prepared.value.areas)
+}
+
+/**
+ * Uploaded floor plans (Technical PRD §7): a reviewed map saved by the floor-plan editor,
+ * found among the assets by its asset ID and page. A plan traced without a scale is in body
+ * widths ('model' units) and cannot be run with a metre preset (SCALE_CALIBRATION_REQUIRED).
+ */
+function compileUpload(input: CompileInput): Result<CompileOutput> {
+  const { layout } = input.plan
+  if (layout.mode !== 'upload') throw new Error('compileUpload needs an upload layout')
+  const asset = input.assets.find(({ source }) => source.mode === 'upload' && source.assetId === layout.assetId && source.page === layout.page)
+  if (!asset || asset.source.mode !== 'upload') {
+    return fail('MAP_NOT_FOUND', `No reviewed floor plan ${layout.assetId} (page ${layout.page}). Open it in the floor-plan editor and save it first.`, { path: 'plan.layout' })
+  }
+  if (input.model.units === 'm' && (asset.grid.units !== 'm' || asset.source.calibration === null)) {
+    return fail('SCALE_CALIBRATION_REQUIRED', 'This floor plan has no scale, so it can only run in body widths. Set its scale in the editor for measurements in metres.', { path: 'model.units' })
+  }
+  if (asset.grid.units !== input.model.units) {
+    return fail('UNSUPPORTED_CAPABILITY', `This floor plan is in ${asset.grid.units === 'm' ? 'metres' : 'body widths'}, but the model preset "${input.model.id}" uses ${input.model.units === 'm' ? 'metres' : 'model units'}`, { path: 'model.units' })
   }
   const prepared = mapFromPrepared(asset)
   if (!prepared.ok) return prepared

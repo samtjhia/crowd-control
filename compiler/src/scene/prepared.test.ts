@@ -90,3 +90,33 @@ test('map objects the engine cannot load yet fail clearly', () => {
   const result = compile(input)
   assert.deepEqual(result.ok ? null : [result.error.code, result.error.affectedIds], ['UNSUPPORTED_CAPABILITY', ['desk_1']])
 })
+
+/** The test venue as if saved by the floor-plan editor: an upload source with or without a scale. */
+function uploadExample(scaled: boolean) {
+  const input = lookupExample()
+  const asset = input.assets[0]!
+  input.assets = [{
+    ...asset,
+    source: {
+      mode: 'upload', assetId: 'upload-abc123', revision: 'r1', page: 1,
+      calibration: scaled ? { pointsPx: [[0, 0], [100, 0]], distanceMetres: 4, metresPerPixel: 0.04 } : null,
+      sourceToWorld: [0.04, 0, 0, 0.04, 0, 0],
+    },
+  }]
+  input.plan.layout = { mode: 'upload', assetId: 'upload-abc123', page: 1 }
+  return input
+}
+
+test('a floor plan saved by the editor compiles like a prepared venue, and keeps its upload source', () => {
+  const output = value(compile(uploadExample(true)))
+  assert.equal(output.scene.map.source?.mode, 'upload')
+  assert.deepEqual(output.scene.map.rooms.map((room) => room.id), ['lobby', 'cafe'])
+  assert.equal(output.scene.agents.length, 10)
+})
+
+test('an unscaled floor plan cannot be run in metres', () => {
+  assert.equal(code(compile(uploadExample(false))), 'SCALE_CALIBRATION_REQUIRED')
+  const wrongPage = uploadExample(true)
+  wrongPage.plan.layout = { mode: 'upload', assetId: 'upload-abc123', page: 2 }
+  assert.equal(code(compile(wrongPage)), 'MAP_NOT_FOUND')
+})
