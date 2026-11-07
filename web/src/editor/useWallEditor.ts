@@ -205,11 +205,13 @@ export function useWallEditor(plan: LoadedPlan | null, metresPerPixel: number | 
 
   /** The current walls (draft plus corrections), for later steps. */
   const readBlocked = useCallback(() => mask.current?.blocked() ?? null, [])
+  /** Every pixel's kind (floor, wall, furniture), for saving. */
+  const readKinds = useCallback(() => mask.current?.kinds() ?? null, [])
   /** The current furniture, for saving (obstacles when furniture blocks people). */
   const readObjects = useCallback(() => mask.current?.objects() ?? null, [])
 
   return {
-    mask, readBlocked, readObjects, threshold, setThreshold, resetThreshold, ignoreSpecks, setIgnoreSpecks,
+    mask, readBlocked, readObjects, readKinds, threshold, setThreshold, resetThreshold, ignoreSpecks, setIgnoreSpecks,
     wallMetres, setWallMetres, wallPixels, setWallPixels, scaled: metresPerPixel !== null, furnitureBlocks, setFurnitureBlocks,
     tool, setTool, brush, setBrush, undo, redo, ...history, stroke, onHover, drawOverlay,
   }

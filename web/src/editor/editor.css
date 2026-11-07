@@ -234,3 +234,45 @@
 .editor-key-door { background: #ea580c; }
 .editor-key-exit { background: #16a34a; }
 .editor-key-closed { background: #bb6479; }
+
+/* ---- Check & save ---- */
+
+.editor-ok { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: #eaf3e4; color: #265e3d; font-weight: 500; }
+.editor-error { background: #f8e8ec; color: #96364e; }
+.editor-problems { display: grid; gap: 4px; }
+
+.editor .editor-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor .editor-problem:disabled { cursor: default; }
+.editor .editor-problem svg { flex: none; margin-top: 2px; }
+.editor .editor-problem.is-error svg { color: #dc2626; }
+.editor .editor-problem.is-warning svg { color: #d97706; }
+.editor .editor-problem.is-focused { border-color: #2f6feb; box-shadow: 0 0 0 1px #2f6feb inset; }
+
+.editor-text {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.editor-text:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.editor-saved { display: grid; gap: 8px; }
+.editor-saved .sim-action { justify-self: start; text-decoration: none; }

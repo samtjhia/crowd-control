@@ -1,15 +1,16 @@
 import { compile, preparedVenues, type CompileOptions } from '@crowd-control/compiler'
+import { loadSavedVenues, presetFor, savedScenarioId, starterPlan, type SavedVenue } from './savedVenues.ts'
 import type { Capabilities, CompileOutput, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
 
 /**
  * What the simulator can run today. The planner is told the same list, so it never asks for
- * something the compiler or worker would reject. Uploads are added with the upload editor.
+ * something the compiler or worker would reject. Uploads are floor plans saved by the editor.
  */
 export const CAPABILITIES: Capabilities = {
   operations: ['add', 'spawn', 'remove', 'set', 'assign_goal', 'clear_goal', 'schedule', 'define_rule', 'remove_rule', 'emit'],
   goals: ['reach', 'avoid', 'wait', 'wander', 'follow', 'queue', 'interact', 'sequence'],
   geometry: ['rectangle'],
-  layouts: ['generate', 'lookup'],
+  layouts: ['generate', 'lookup', 'upload'],
   entityMetrics: [],
   editableHistory: false,
 }
@@ -47,13 +48,18 @@ export function venueAssets(): PreparedMap[] {
   return venues
 }
 
+/** The prepared venues plus every floor plan saved in this browser, read fresh each time. */
+export function allAssets(): PreparedMap[] {
+  return [...venueAssets(), ...loadSavedVenues().map((venue) => venue.map)]
+}
+
 /**
  * Compiles a scenario plan (normally the planner's reply) into the scene the worker loads.
  * The plan is untrusted: the compiler validates it, so a bad plan comes back as an error to
  * show the user, never as a broken simulation. `varyLayout` lets the plan's seed reshape a
  * generated building (Technical PRD §10).
  */
-export function startScenario(plan: unknown, model: ModelPreset, options: CompileOptions = {}, assets: PreparedMap[] = venueAssets()): Result<CompileOutput> {
+export function startScenario(plan: unknown, model: ModelPreset, options: CompileOptions = {}, assets: PreparedMap[] = allAssets()): Result<CompileOutput> {
   return compile({ plan, assets, model, capabilities: CAPABILITIES, limits: LIMITS }, options)
 }
 
@@ -63,12 +69,30 @@ export function describeScenario({ scene }: CompileOutput): string {
   const people = scene.agents.length + scheduled
   const crowd = `${people} ${people === 1 ? 'person' : 'people'}`
   if (scene.map.source?.mode === 'lookup') return `${scene.map.source.venue}, ${scene.map.source.floor} · ${crowd}`
+  if (scene.map.source?.mode === 'upload') return `Your floor plan, ${scene.map.rooms.length} rooms · ${crowd}`
   const rooms = scene.map.rooms.map((room, index) => {
     const name = room.label ?? room.id
     return index === 0 ? name : name.toLowerCase()
   })
   const spaces = rooms.length > 1 ? `${rooms.slice(0, -1).join(', ')} and ${rooms.at(-1)}` : (rooms[0] ?? 'Empty map')
   return `${spaces} · ${crowd}`
+}
+
+/**
+ * A saved venue's starter plan with a crowd that really fits: the estimate from the room's area
+ * is halved until the compiler can place everyone (odd room shapes hold fewer than their area suggests).
+ */
+export function fittedStarterPlan(venue: SavedVenue, model: ModelPreset): ScenarioPlan {
+  let plan = starterPlan(venue)
+  for (let tries = 0; tries < 8; tries++) {
+    const result = startScenario(plan, model, {}, [venue.map])
+    if (result.ok || result.error.code !== 'NO_WALKABLE_SPACE') return plan
+    const spawn = plan.initialOperations[0]
+    const count = spawn?.op === 'spawn' ? spawn.count : 1
+    if (count <= 1) return plan
+    plan = starterPlan(venue, Math.max(1, Math.floor(count / 2)))
+  }
+  return plan
 }
 
 export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: ModelPreset }
@@ -143,5 +167,10 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
         timeline: [], rules: [],
       },
     },
+    // Floor plans saved in this browser by the editor, each with a starter crowd.
+    ...loadSavedVenues().map((venue) => {
+      const model = presetFor(venue, PEDESTRIAN_PRESET, workedModel)
+      return { id: savedScenarioId(venue), title: `${venue.name} (uploaded)`, plan: fittedStarterPlan(venue, model), model }
+    }),
   ]
 }

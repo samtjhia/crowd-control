@@ -63,8 +63,9 @@ export function useScaleTool(plan: LoadedPlan | null, redraw: () => void, camera
     },
   }), [clamp, cameraOf, redraw])
 
-  const result = calibrate(points.a, points.b, Number.parseFloat(distance), unit)
-  const calibration: Calibration | null = !unscaled && result.ok ? result.value : null
+  // Recomputed only when the line, distance or unit changes: later steps react to a new scale.
+  const result = useMemo(() => calibrate(points.a, points.b, Number.parseFloat(distance), unit), [points, distance, unit])
+  const calibration: Calibration | null = useMemo(() => (!unscaled && result.ok ? result.value : null), [unscaled, result])
 
   /** The measuring line with its ends and length, and (once scaled) a scale bar in the corner. */
   const drawOverlay = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera, options: { measuring: boolean; metresPerPixel: number | null }) => {

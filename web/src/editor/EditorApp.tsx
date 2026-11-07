@@ -14,6 +14,8 @@ import { useRoomEditor } from './useRoomEditor.ts'
 import { RoomsStep } from './RoomsStep.tsx'
 import { useDoorEditor } from './useDoorEditor.ts'
 import { DoorsStep } from './DoorsStep.tsx'
+import { CheckStep } from './CheckStep.tsx'
+import { useCheck } from './useCheck.ts'
 import { useWallEditor } from './useWallEditor.ts'
 import { ScaleStep } from './ScaleStep.tsx'
 import type { PlanCamera } from './planView.ts'
@@ -44,7 +46,7 @@ export default function EditorApp() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const canvasRef = useRef<PlanCanvasHandle>(null)
-  const reached = plan ? 4 : 0 // Up to Doors (index 4); Check & save arrives next.
+  const reached = plan ? 5 : 0 // Every step, once a plan is loaded.
   const [fade, setFade] = useState(0.55)
   const redraw = useCallback(() => canvasRef.current?.redraw(), [])
   const crop = useCropTool(plan, redraw)
@@ -58,16 +60,25 @@ export default function EditorApp() {
   const roomTool = step === 'rooms' && rooms.tool !== 'move'
   const doors = useDoorEditor(plan, step === 'doors', rooms.layer, metresPerPixel, redraw, cameraOf)
   const doorTool = step === 'doors' && doors.tool !== 'move'
+  const check = useCheck({
+    plan, active: step === 'check', readKinds: walls.readKinds, furnitureBlocks: walls.furnitureBlocks,
+    rooms: rooms.layer, doors: doors.doors, calibration: scale.calibration, redraw,
+  })
+  const previewing = step === 'check' && check.preview
   const tracing = stepIndex >= 2 // walls onward: fade the plan under the tracing
   const cropping = step === 'upload' && crop.active
 
   /** Everything traced so far, over the plan: walls, then the measuring line and scale bar. */
   const traced = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera) => {
-    if (stepIndex >= 3) rooms.drawOverlay(context, camera)
-    if (stepIndex >= 2) walls.drawOverlay(context, camera, { brush: step === 'walls' })
-    if (stepIndex >= 4) doors.drawOverlay(context, camera)
+    // Checking shows the simulation grid itself instead of the tracing layers.
+    if (!previewing) {
+      if (stepIndex >= 3) rooms.drawOverlay(context, camera)
+      if (stepIndex >= 2) walls.drawOverlay(context, camera, { brush: step === 'walls' })
+      if (stepIndex >= 4) doors.drawOverlay(context, camera)
+    }
+    if (step === 'check') check.drawOverlay(context, camera)
     scale.drawOverlay(context, camera, { measuring, metresPerPixel })
-  }, [rooms, walls, doors, scale, step, stepIndex, measuring, metresPerPixel])
+  }, [rooms, walls, doors, check, scale, step, stepIndex, measuring, metresPerPixel, previewing])
 
   /** Applies the crop box (or goes back to the whole image). Wall tracing starts again on the new image. */
   const applyCrop = async (box: Parameters<typeof cropPlan>[1]) => {
@@ -200,7 +211,8 @@ export default function EditorApp() {
             {step === 'scale' && <ScaleStep plan={plan} scale={scale} onBack={() => setStep('upload')} onNext={() => setStep('walls')} />}
             {step === 'walls' && <WallsStep walls={walls} fade={fade} onFade={setFade} onBack={() => setStep('scale')} onNext={() => setStep('rooms')} />}
             {step === 'rooms' && <RoomsStep rooms={rooms} onBack={() => setStep('walls')} onNext={() => setStep('doors')} />}
-            {step === 'doors' && <DoorsStep doors={doors} onBack={() => setStep('rooms')} />}
+            {step === 'doors' && <DoorsStep doors={doors} onBack={() => setStep('rooms')} onNext={() => setStep('check')} />}
+            {step === 'check' && <CheckStep check={check} onBack={() => setStep('doors')} />}
           </aside>
           <div className="sim-float sim-zoom editor-zoom" role="group" aria-label="Zoom">
             <button type="button" className="sim-icon-btn" aria-label="Zoom in" onClick={() => canvasRef.current?.zoom(1.25)}><Plus size={15} /></button>

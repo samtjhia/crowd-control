@@ -262,6 +262,13 @@ export class WallMask {
     return this.done.map((stroke) => ({ id: stroke.id, cells: stroke.changes.map((change) => change.index), walkable: stroke.kind === FLOOR }))
   }
 
+  /** FLOOR, WALL or OBJECT for every pixel, corrections applied. */
+  kinds(): Uint8Array {
+    const out = new Uint8Array(this.width * this.height)
+    for (let i = 0; i < out.length; i++) out[i] = this.kind(i)
+    return out
+  }
+
   /** Walls only (0/1 per pixel): what rooms are filled against. */
   blocked(): Uint8Array {
     const out = new Uint8Array(this.width * this.height)
