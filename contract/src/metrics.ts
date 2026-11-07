@@ -29,6 +29,14 @@ export const RunAnalyticsSchema = z.strictObject({
     })),
   })),
 });
+export const RunSummarySchema = z.strictObject({
+  runId: z.uuid(),
+  simulationId: IdSchema,
+  startedAt: z.iso.datetime(),
+  sampleCount: CounterSchema,
+  interventionCount: CounterSchema,
+});
+export const RunSummariesSchema = z.array(RunSummarySchema);
 export const DensityGridSchema = z.strictObject({ width: PositiveIntegerSchema, height: PositiveIntegerSchema, cellSize: PositiveSchema, origin: Vec2Schema, units: z.enum(['people/m2', 'people/model-unit2']), values: z.array(NonnegativeSchema) }).refine((v) => v.values.length === v.width * v.height, 'Density buffer length must equal width × height');
 export const DepartureRecordSchema = z.strictObject({ agentId: IdSchema, at: SimTimeSchema, travelTime: SimTimeSchema });
 export const ClearanceCohortSchema = z.strictObject({ cohortIds: z.array(IdSchema).min(1).max(20_000), startedAt: SimTimeSchema }).refine((v) => new Set(v.cohortIds).size === v.cohortIds.length, 'Duplicate clearance cohort ID');
@@ -46,6 +54,7 @@ export type PortalMetrics = z.infer<typeof PortalMetricsSchema>;
 export type QueueMetrics = z.infer<typeof QueueMetricsSchema>;
 export type MetricSample = z.infer<typeof MetricSampleSchema>;
 export type RunAnalytics = z.infer<typeof RunAnalyticsSchema>;
+export type RunSummary = z.infer<typeof RunSummarySchema>;
 export type DensityGrid = z.infer<typeof DensityGridSchema>;
 export type DepartureRecord = z.infer<typeof DepartureRecordSchema>;
 export type MetricsState = z.infer<typeof MetricsStateSchema>;

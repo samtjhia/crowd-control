@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useAuth0 } from '@auth0/auth0-react'
 import {
   CompileOutputSchema,
   CreateInterventionRequestSchema,
@@ -119,6 +120,13 @@ function describeOperation(operation: Operation, inventory: InventoryItem[]): st
 }
 
 function App() {
+  const { getAccessTokenSilently } = useAuth0()
+  const authFetch = useCallback(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const token = await getAccessTokenSilently()
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return fetch(input, { ...init, headers })
+  }, [getAccessTokenSilently])
   const [prompt, setPrompt] = useState('')
   const [followupPrompt, setFollowupPrompt] = useState('')
   const [whyPrompt, setWhyPrompt] = useState('')
@@ -169,7 +177,6 @@ function App() {
     recordedAt: string
   }>>([])
   const telemetryFlushPending = useRef(false)
-  const analyticsRefreshPending = useRef(false)
   const telemetryHasSaved = useRef(false)
   const loadCommandId = useRef<string | null>(null)
   const advanceCommandId = useRef<string | null>(null)
@@ -177,13 +184,12 @@ function App() {
   const initialInventoryQuery = useRef(false)
   const endpoint = useRef<MockEndpoint | null>(null)
 
-  async function refreshAnalytics() {
+  const refreshAnalytics = useCallback(async () => {
     const runId = activeRunId.current
-    if (!runId || analyticsRefreshPending.current) return
-    analyticsRefreshPending.current = true
+    if (!runId) return
     setAnalyticsLoading(true)
     try {
-      const response = await fetch(`/api/runs/${runId}/analytics`)
+      const response = await authFetch(`/api/runs/${runId}/analytics`)
       const payload: unknown = await response.json()
       if (!response.ok) {
         const detail = typeof payload === 'object' && payload !== null && 'error' in payload
@@ -204,10 +210,9 @@ function App() {
         ? requestError.message
         : 'The analytics request failed.')
     } finally {
-      analyticsRefreshPending.current = false
       setAnalyticsLoading(false)
     }
-  }
+  }, [authFetch])
 
   useEffect(() => {
     const worker = createMockEndpoint()
@@ -222,7 +227,7 @@ function App() {
       if (runCreationPending.current) return false
       runCreationPending.current = true
       try {
-        const response = await fetch('/api/runs', {
+        const response = await authFetch('/api/runs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ runId, simulationId, startedAt }),
@@ -247,7 +252,7 @@ function App() {
         if (!await ensureRunStored()) return
         const metrics = pendingMetricSamples.current.slice(0, 20)
         if (metrics.length) {
-          const response = await fetch(`/api/runs/${runId}/metrics`, {
+          const response = await authFetch(`/api/runs/${runId}/metrics`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ simulationId, samples: metrics }),
@@ -261,7 +266,7 @@ function App() {
         }
         const intervention = pendingDatabaseInterventions.current[0]
         if (intervention) {
-          const response = await fetch(`/api/runs/${runId}/interventions`, {
+          const response = await authFetch(`/api/runs/${runId}/interventions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(intervention),
@@ -391,7 +396,7 @@ function App() {
       endpoint.current = null
       pending.clear()
     }
-  }, [])
+  }, [authFetch, refreshAnalytics])
 
   async function preview(event: FormEvent<HTMLFormElement>, promptText: string, isFollowup: boolean) {
     event.preventDefault()
@@ -429,7 +434,7 @@ function App() {
     if (isFollowup) setFollowupStatus('Asking the server-side Gemini planner…')
     else setScenarioStatus('Asking the server-side Gemini planner…')
     try {
-      const response = await fetch('/api/plan', {
+      const response = await authFetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request.value),
@@ -536,7 +541,7 @@ function App() {
     setRequesting(true)
     try {
       setWhyStatus('Asking Gemini to explain the observed evidence…')
-      const response = await fetch('/api/plan', {
+      const response = await authFetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request.value),
@@ -953,18 +958,20 @@ function App() {
                 <p className="muted">No follow-up interventions have been applied yet.</p>
               )}
             </section>
+          </>
+        )}
 
             <section className="analytics-panel" aria-labelledby="analytics-heading">
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">Saved run data · Tiger Data</p>
-                  <h3 id="analytics-heading">Historical analytics</h3>
+                  <h3 id="analytics-heading">Simulation analytics</h3>
                 </div>
                 <button
                   type="button"
                   className="secondary-button"
                   onClick={() => void refreshAnalytics()}
-                  disabled={analyticsLoading}
+                  disabled={analyticsLoading || !loaded}
                 >
                   {analyticsLoading ? 'Refreshing…' : 'Refresh'}
                 </button>
@@ -1020,8 +1027,6 @@ function App() {
                 </>
               )}
             </section>
-          </>
-        )}
       </section>
 
       <footer>Schema version {SCHEMA_VERSION} · Generated plans are previews until compiler integration is complete.</footer>

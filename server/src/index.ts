@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
-import { getRunAnalytics, initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
+import { createAuth0TokenVerifier } from './auth.ts';
+import { getOwnedRuns, getRunAnalytics, initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
 
 const port = Number(process.env.PORT ?? 3001);
@@ -10,6 +11,10 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const MAX_PLANNER_BODY_BYTES = 64 * 1024;
+const verifyAccessToken = createAuth0TokenVerifier(
+  process.env.AUTH0_DOMAIN,
+  process.env.AUTH0_AUDIENCE,
+);
 const plan = createGeminiPlanner({
   apiKey: process.env.GEMINI_API_KEY,
   model: process.env.GEMINI_MODEL,
@@ -52,9 +57,41 @@ async function readJsonBody(request: import('node:http').IncomingMessage): Promi
 }
 
 const server = createServer((request, response) => {
+  void handleRequest(request, response).catch((error: unknown) => {
+    console.error('API request failed unexpectedly:', error);
+    if (!response.headersSent) {
+      sendJson(response, 500, { ok: false, error: 'The API request failed unexpectedly.' });
+    } else {
+      response.destroy();
+    }
+  });
+});
+
+async function handleRequest(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) {
   if (request.method === 'GET' && request.url === '/health') {
     sendJson(response, 200, { status: 'ok', schemaVersion: SCHEMA_VERSION });
     return;
+  }
+
+  let ownerSub = '';
+  if (request.url?.split('?')[0]?.startsWith('/api/')) {
+    if (!verifyAccessToken) {
+      sendJson(response, 503, { ok: false, error: 'API authentication is not configured.' });
+      return;
+    }
+    try {
+      const verifiedSub = await verifyAccessToken(request.headers.authorization);
+      if (!verifiedSub) {
+        sendJson(response, 401, { ok: false, error: 'A valid Auth0 access token is required.' });
+        return;
+      }
+      ownerSub = verifiedSub;
+    } catch (error) {
+      const errorName = error instanceof Error ? error.name : 'UNKNOWN';
+      console.error(`Auth0 token verification failed (${errorName}).`);
+      sendJson(response, 503, { ok: false, error: 'Auth0 token verification is temporarily unavailable.' });
+      return;
+    }
   }
 
   if (request.method === 'GET' && request.url === '/health/database') {
@@ -94,7 +131,7 @@ const server = createServer((request, response) => {
         sendJson(response, 400, { ok: false, error: body.error.message });
         return;
       }
-      if (!await saveRun(database, body.value)) {
+      if (!await saveRun(database, ownerSub, body.value)) {
         sendJson(response, 400, { ok: false, error: 'Invalid run record.' });
         return;
       }
@@ -110,6 +147,24 @@ const server = createServer((request, response) => {
   }
 
   const telemetryPath = request.url?.split('?')[0] ?? '';
+  if (request.method === 'GET' && telemetryPath === '/api/runs') {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const runs = await getOwnedRuns(database, ownerSub);
+      sendJson(response, 200, { ok: true, runs });
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : 'UNKNOWN';
+      console.error(`Tiger Data run history query failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not load past simulations from Tiger Data.' });
+    });
+    return;
+  }
+
   const analyticsRoute = /^\/api\/runs\/([^/]+)\/analytics$/.exec(telemetryPath);
   if (request.method === 'GET' && analyticsRoute) {
     void (async () => {
@@ -117,7 +172,7 @@ const server = createServer((request, response) => {
         sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
         return;
       }
-      const analytics = await getRunAnalytics(database, analyticsRoute[1]!);
+      const analytics = await getRunAnalytics(database, ownerSub, analyticsRoute[1]!);
       if (analytics === 'invalid') {
         sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' });
       } else if (analytics === null) {
@@ -153,8 +208,8 @@ const server = createServer((request, response) => {
         return;
       }
       const result = metricsRoute
-        ? await saveMetricBatch(database, metricsRoute[1]!, body.value)
-        : await saveIntervention(database, interventionRoute![1]!, body.value);
+        ? await saveMetricBatch(database, ownerSub, metricsRoute[1]!, body.value)
+        : await saveIntervention(database, ownerSub, interventionRoute![1]!, body.value);
       if (result === 'invalid') {
         sendJson(response, 400, { ok: false, error: 'Invalid telemetry payload.' });
       } else if (result === 'missing-run') {
@@ -192,7 +247,7 @@ const server = createServer((request, response) => {
   }
 
   sendJson(response, 404, { error: 'Not found' });
-});
+}
 
 server.listen(port, '127.0.0.1', () => {
   console.log('Crowd Control API: http://127.0.0.1:' + port);

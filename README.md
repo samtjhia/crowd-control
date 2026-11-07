@@ -43,20 +43,34 @@ acknowledged interventions at `POST /api/runs/:runId/interventions`.
 density before and after each acknowledged intervention. It compares recorded
 samples in the 10 simulated seconds before and after the intervention; missing
 sides remain unavailable rather than being inferred. Vite proxies `/api`
-requests to the local Node server.
+requests to the local Node server. Authenticated `GET /api/runs` lists up to 50
+recent runs owned by the signed-in user, with metric and intervention counts;
+the `/history` page displays that list and selected-run analytics without
+replaying simulations.
 To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
 `GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
 in chat. Set `DATABASE_URL` in the same root `.env` to enable Tiger Data.
+Sign-in is required before using the app or its API. Create an Auth0
+single-page application and an API, then set `AUTH0_DOMAIN`,
+`AUTH0_AUDIENCE`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and
+`VITE_AUTH0_AUDIENCE` in the root `.env` (the two audience values must match).
+Allow the local app origin, such as `http://localhost:5173`, in the Auth0
+application's callback, logout, and web origins. The API accepts only verified
+Auth0 RS256 access tokens for the configured issuer and audience; `/health`
+and `/health/database` remain public. Missing server Auth0 configuration fails
+closed for every `/api/*` route.
 On startup, the server creates the run, intervention, and metric tables and
 turns the metric table into a Timescale hypertable. The offline mock writes
 run metadata, batches metric samples, and records worker-acknowledged
-interventions in the background. On `/planner`, the Historical analytics panel
-queries the saved run from Tiger Data. Ask why sends recent in-memory
+interventions in the background. On `/history`, users can view their saved runs
+and analytics. Ask why on `/planner` sends recent in-memory
 metrics, events, and applied interventions to Gemini; answers are instructed to
 stay within that evidence and cite only supplied event IDs. This is a
 current-session mock feature. Generated
 scenario plans are previews only: the compiler handoff is not connected yet.
-Auth0 is not implemented.
+New saved runs are owned by the authenticated Auth0 subject. Existing anonymous
+runs remain unowned and unavailable to signed-in users; they are not assigned
+to the first person who logs in. Chat history remains in browser localStorage.
 
 ## Checks
 

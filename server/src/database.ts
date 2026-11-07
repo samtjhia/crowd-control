@@ -5,8 +5,9 @@ import {
   IdSchema,
   MetricSampleSchema,
   RunAnalyticsSchema,
+  RunSummariesSchema,
 } from '@crowd-control/contract'
-import type { RunAnalytics } from '@crowd-control/contract'
+import type { RunAnalytics, RunSummary } from '@crowd-control/contract'
 import type { Pool } from 'pg'
 
 const RunSchema = z.strictObject({
@@ -40,12 +41,48 @@ export const persistenceSchemas = {
   intervention: InterventionSchema,
 }
 
-export async function getRunAnalytics(pool: Pool, runId: string): Promise<'invalid' | null | RunAnalytics> {
+export async function getOwnedRuns(pool: Pool, ownerSub: string): Promise<RunSummary[]> {
+  const result = await pool.query<{
+    runId: string
+    simulationId: string
+    startedAt: Date | string
+    sampleCount: number
+    interventionCount: number
+  }>(
+    `SELECT run.run_id AS "runId",
+            run.simulation_id AS "simulationId",
+            run.started_at AS "startedAt",
+            COALESCE(metrics.sample_count, 0)::integer AS "sampleCount",
+            COALESCE(interventions.intervention_count, 0)::integer AS "interventionCount"
+     FROM crowd_runs AS run
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::integer AS sample_count
+       FROM crowd_metric_samples
+       WHERE run_id = run.run_id
+     ) AS metrics ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::integer AS intervention_count
+       FROM crowd_interventions
+       WHERE run_id = run.run_id
+     ) AS interventions ON TRUE
+     WHERE run.owner_sub = $1
+     ORDER BY run.started_at DESC
+     LIMIT 50`,
+    [ownerSub],
+  )
+
+  return RunSummariesSchema.parse(result.rows.map((row) => ({
+    ...row,
+    startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : row.startedAt,
+  })))
+}
+
+export async function getRunAnalytics(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | null | RunAnalytics> {
   if (!z.uuid().safeParse(runId).success) return 'invalid'
 
   const run = await pool.query(
-    'SELECT 1 FROM crowd_runs WHERE run_id = $1',
-    [runId],
+    'SELECT 1 FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2',
+    [runId, ownerSub],
   )
   if (run.rowCount === 0) return null
 
@@ -129,8 +166,14 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS crowd_runs (
       run_id UUID PRIMARY KEY,
       simulation_id TEXT NOT NULL,
-      started_at TIMESTAMPTZ NOT NULL
+      started_at TIMESTAMPTZ NOT NULL,
+      owner_sub TEXT
     )
+  `)
+  await pool.query('ALTER TABLE crowd_runs ADD COLUMN IF NOT EXISTS owner_sub TEXT')
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS crowd_runs_owner_started_at_idx
+    ON crowd_runs (owner_sub, started_at DESC)
   `)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS crowd_metric_samples (
@@ -170,27 +213,31 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
   `)
 }
 
-export async function saveRun(pool: Pool, input: unknown): Promise<boolean> {
+export async function saveRun(pool: Pool, ownerSub: string, input: unknown): Promise<boolean> {
   const parsed = RunSchema.safeParse(input)
   if (!parsed.success) return false
   const run = parsed.data
-  await pool.query(
-    `INSERT INTO crowd_runs (run_id, simulation_id, started_at)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (run_id) DO NOTHING`,
-    [run.runId, run.simulationId, run.startedAt],
+  const result = await pool.query(
+    `INSERT INTO crowd_runs (run_id, simulation_id, started_at, owner_sub)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (run_id) DO UPDATE
+       SET run_id = EXCLUDED.run_id
+       WHERE crowd_runs.owner_sub = EXCLUDED.owner_sub
+         AND crowd_runs.simulation_id = EXCLUDED.simulation_id
+     RETURNING run_id`,
+    [run.runId, run.simulationId, run.startedAt, ownerSub],
   )
-  return true
+  return result.rowCount !== null && result.rowCount > 0
 }
 
-export async function saveMetricBatch(pool: Pool, runId: string, input: unknown): Promise<'invalid' | 'missing-run' | 'saved'> {
+export async function saveMetricBatch(pool: Pool, ownerSub: string, runId: string, input: unknown): Promise<'invalid' | 'missing-run' | 'saved'> {
   if (!z.uuid().safeParse(runId).success) return 'invalid'
   const parsed = MetricsBatchSchema.safeParse(input)
   if (!parsed.success) return 'invalid'
   const { simulationId, samples } = parsed.data
   const run = await pool.query(
-    'SELECT started_at FROM crowd_runs WHERE run_id = $1 AND simulation_id = $2',
-    [runId, simulationId],
+    'SELECT started_at FROM crowd_runs WHERE run_id = $1 AND simulation_id = $2 AND owner_sub = $3',
+    [runId, simulationId, ownerSub],
   )
   if (run.rowCount === 0) return 'missing-run'
 
@@ -217,21 +264,21 @@ export async function saveMetricBatch(pool: Pool, runId: string, input: unknown)
        queues JSONB,
        clearance JSONB
      )
-     WHERE run.run_id = $1
+     WHERE run.run_id = $1 AND run.simulation_id = $3 AND run.owner_sub = $4
      ON CONFLICT (run_id, sampled_at) DO NOTHING`,
-    [runId, JSON.stringify(samples)],
+    [runId, JSON.stringify(samples), simulationId, ownerSub],
   )
   return 'saved'
 }
 
-export async function saveIntervention(pool: Pool, runId: string, input: unknown): Promise<'invalid' | 'missing-run' | 'saved'> {
+export async function saveIntervention(pool: Pool, ownerSub: string, runId: string, input: unknown): Promise<'invalid' | 'missing-run' | 'saved'> {
   if (!z.uuid().safeParse(runId).success) return 'invalid'
   const parsed = InterventionSchema.safeParse(input)
   if (!parsed.success) return 'invalid'
   const intervention = parsed.data
   const run = await pool.query(
-    'SELECT 1 FROM crowd_runs WHERE run_id = $1 AND simulation_id = $2',
-    [runId, intervention.simulationId],
+    'SELECT 1 FROM crowd_runs WHERE run_id = $1 AND simulation_id = $2 AND owner_sub = $3',
+    [runId, intervention.simulationId, ownerSub],
   )
   if (run.rowCount === 0) return 'missing-run'
 
