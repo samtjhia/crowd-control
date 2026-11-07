@@ -17,6 +17,7 @@
   "dependencies": {
     "@crowd-control/compiler": "*",
     "@crowd-control/contract": "*",
+    "@crowd-control/history": "*",
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@fontsource-variable/manrope": "^5.3.0",
     "lucide-react": "^0.577.0",

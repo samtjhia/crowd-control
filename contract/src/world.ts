@@ -1,20 +1,26 @@
 import { z } from 'zod';
+import { DISC_IMPULSE_VERSION, DiscImpulseParametersSchema } from './contact.js';
+import { ClearanceCohortSchema } from './metrics.js';
 import { FiniteSchema, HeaderSchema, IdSchema, LimitsSchema, NonnegativeSchema, PositiveIntegerSchema, PositiveSchema, RandomStateSchema, SelectionSchema, SimTimeSchema, TickSchema, UnitsSchema, VersionsSchema, uniqueIds } from './common.js';
 import { AgentOverridesSchema, AppearanceSchema, BehaviorSchema, EntityBlueprintSchema, MapAppearanceSchema, MobilitySchema, PortalSchema, RectSchema, ResolvedAgentComponentsSchema } from './entities.js';
 import { DefineRuleOperationSchema, EntitySelectorSchema, OperationSchema } from './operations.js';
 import { CapabilitiesSchema, InventoryItemSchema, ScenarioPlanSchema } from './planner.js';
 import { GridDataSchema, MapSourceSchema, PreparedMapSchema } from './editor.js';
 
-export const ContactModelSchema = z.strictObject({ solverVersion: IdSchema, referenceLoad: PositiveSchema, forceUnits: z.enum(['model-force', 'N']), parameters: z.record(IdSchema, FiniteSchema) });
+export const ContactModelSchema = z.strictObject({ solverVersion: IdSchema, referenceLoad: PositiveSchema, forceUnits: z.enum(['model-force', 'N']), parameters: z.record(IdSchema, FiniteSchema) }).superRefine((v, ctx) => {
+  if (v.solverVersion === DISC_IMPULSE_VERSION && (!DiscImpulseParametersSchema.safeParse(v.parameters).success || v.referenceLoad < 1e-12)) ctx.addIssue({ code: 'custom', message: 'Invalid disc-impulse-v1 parameters/referenceLoad' });
+});
 export const ContactDiagnosticsSchema = z.strictObject({ solverVersion: IdSchema, tick: TickSchema, dt: PositiveSchema, measure: z.enum(['force', 'impulse']), forceUnits: z.enum(['model-force', 'N']), agents: z.array(z.strictObject({ agentId: IdSchema, normalMagnitudes: z.array(NonnegativeSchema) })) }).refine((v) => new Set(v.agents.map((a) => a.agentId)).size === v.agents.length, 'Duplicate contact diagnostic agent');
-export const ModelPresetSchema = z.strictObject({ id: IdSchema, version: IdSchema, units: UnitsSchema, dt: PositiveSchema, defaultAgent: ResolvedAgentComponentsSchema, layout: z.strictObject({ bodyDiameter: PositiveSchema, spacingDiameters: PositiveSchema, preferredAspect: PositiveSchema, doorBodyWidths: PositiveSchema }), contact: ContactModelSchema.optional() });
+export const ModelPresetSchema = z.strictObject({ id: IdSchema, version: IdSchema, units: UnitsSchema, dt: PositiveSchema, defaultAgent: ResolvedAgentComponentsSchema, layout: z.strictObject({ bodyDiameter: PositiveSchema, spacingDiameters: PositiveSchema, preferredAspect: PositiveSchema, doorBodyWidths: PositiveSchema }), contact: ContactModelSchema.optional() }).superRefine((v, ctx) => {
+  if (v.contact?.solverVersion === DISC_IMPULSE_VERSION && (v.dt < 1e-6 || v.dt > 1 || (v.contact.forceUnits === 'N' && v.units !== 'm'))) ctx.addIssue({ code: 'custom', message: 'Invalid contact timestep or force units' });
+});
 export const CompileInputSchema = z.strictObject({ plan: ScenarioPlanSchema, assets: z.array(PreparedMapSchema), model: ModelPresetSchema, capabilities: CapabilitiesSchema, limits: LimitsSchema });
 export const AgentProfileSchema = z.strictObject({ radius: PositiveSchema, preferredSpeed: NonnegativeSchema, maximumSpeed: NonnegativeSchema.optional(), acceleration: NonnegativeSchema.optional(), personalSpace: NonnegativeSchema.optional(), blocksMovement: z.boolean().optional(), movable: z.boolean().optional(), behavior: BehaviorSchema.partial().optional(), mobility: MobilitySchema.partial().optional(), appearance: AppearanceSchema.optional() }).refine((v) => v.maximumSpeed === undefined || v.maximumSpeed >= v.preferredSpeed, 'Invalid profile speed range');
 const TargetZoneSchema = z.strictObject({ targetZone: IdSchema });
 const TargetEntitySchema = z.strictObject({ targetEntityId: IdSchema });
 const TargetIdsSchema = z.strictObject({ targetIds: z.array(IdSchema).min(1) });
 export const CompiledDestinationSchema = z.union([TargetZoneSchema, TargetEntitySchema, TargetIdsSchema]);
-const reach = { kind: z.literal('reach'), selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() };
+const reach = { kind: z.literal('reach'), departOnArrival: z.boolean().optional(), selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() };
 const avoid = { kind: z.literal('avoid'), distance: NonnegativeSchema, urgency: NonnegativeSchema.optional() };
 const CompiledGoalLeafSchema = z.union([
   TargetZoneSchema.extend(reach), TargetEntitySchema.extend(reach), TargetIdsSchema.extend(reach),
@@ -53,7 +59,7 @@ export const CompactSpawnSchema = z.strictObject({ op: z.literal('spawn'), count
 export const CompiledOperationSchema = z.union([OperationSchema, CompactSpawnSchema, z.strictObject({ op: z.literal('emit'), event: IdSchema })]);
 export const CompiledJobSchema = z.strictObject({ id: IdSchema, at: SimTimeSchema, operations: z.array(CompiledOperationSchema).min(1) });
 export const EventControllerRuleSchema = z.strictObject({ id: IdSchema, event: IdSchema, match: EntitySelectorSchema, controller: IdSchema, mode: z.enum(['replace', 'enqueue']), once: z.boolean().optional(), cooldown: PositiveSchema.optional() }).refine((v) => v.once !== false || v.cooldown !== undefined, 'Repeating rule requires a positive cooldown');
-export const CompiledSceneSchema = HeaderSchema.extend({ seed: RandomStateSchema, versions: VersionsSchema, model: z.strictObject({ units: UnitsSchema, dt: PositiveSchema }), map: CompiledMapSchema, profiles: z.record(IdSchema, AgentProfileSchema), controllers: z.record(IdSchema, CompiledGoalSchema), agents: z.array(AgentBlueprintSchema), jobs: z.array(CompiledJobSchema), rules: z.array(z.union([DefineRuleOperationSchema, EventControllerRuleSchema])) }).superRefine((v, ctx) => {
+export const CompiledSceneSchema = HeaderSchema.extend({ seed: RandomStateSchema, clearance: ClearanceCohortSchema.optional(), versions: VersionsSchema, model: z.strictObject({ units: UnitsSchema, dt: PositiveSchema }), map: CompiledMapSchema, profiles: z.record(IdSchema, AgentProfileSchema), controllers: z.record(IdSchema, CompiledGoalSchema), agents: z.array(AgentBlueprintSchema), jobs: z.array(CompiledJobSchema), rules: z.array(z.union([DefineRuleOperationSchema, EventControllerRuleSchema])) }).superRefine((v, ctx) => {
   if (v.model.units !== v.map.units) ctx.addIssue({ code: 'custom', message: 'Scene and map units disagree' });
   if (!uniqueIds(v.agents) || !uniqueIds(v.jobs) || !uniqueIds(v.rules)) ctx.addIssue({ code: 'custom', message: 'Duplicate agent, job or rule IDs' });
   if (v.agents.some((a) => !Object.hasOwn(v.profiles, a.profile) || (a.controller !== undefined && !Object.hasOwn(v.controllers, a.controller)))) ctx.addIssue({ code: 'custom', message: 'Agent references unknown profile or controller' });

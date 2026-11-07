@@ -1,4 +1,5 @@
 import { compile, preparedVenues, type CompileOptions } from '@crowd-control/compiler'
+import { DISC_IMPULSE_VERSION, ModelPresetSchema } from '@crowd-control/contract'
 import { loadSavedVenues, presetFor, savedScenarioId, starterPlan, type SavedVenue } from './savedVenues.ts'
 import type { Capabilities, CompileOutput, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
 
@@ -60,7 +61,8 @@ export function allAssets(): PreparedMap[] {
  * generated building (Technical PRD §10).
  */
 export function startScenario(plan: unknown, model: ModelPreset, options: CompileOptions = {}, assets: PreparedMap[] = allAssets()): Result<CompileOutput> {
-  return compile({ plan, assets, model, capabilities: CAPABILITIES, limits: LIMITS }, options)
+  const capabilities: Capabilities = { ...CAPABILITIES, entityMetrics: model.contact?.solverVersion === DISC_IMPULSE_VERSION && ModelPresetSchema.safeParse(model).success ? ['contactLoadRatio'] : [] }
+  return compile({ plan, assets, model, capabilities, limits: LIMITS }, options)
 }
 
 /** A one-line summary for the header, e.g. "Hall, foyer and outside · 10 people". */
@@ -173,4 +175,11 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
       return { id: savedScenarioId(venue), title: `${venue.name} (uploaded)`, plan: fittedStarterPlan(venue, model), model }
     }),
   ]
+}
+
+/** Explicit movement-only variant; contact remains opt-in through a registered preset. */
+export function movementPreset(preset: ModelPreset): ModelPreset {
+  const model = { ...preset, id: `${preset.id}-movement`, version: `${preset.version}-movement` }
+  delete model.contact
+  return model
 }

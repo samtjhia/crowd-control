@@ -4,6 +4,7 @@ node_modules/
 dist/
 target/
 engine/pkg/
+web/public/engine/*.wasm
 *.tsbuildinfo
 *.log
 .DS_Store

@@ -11,6 +11,7 @@ import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
 import { CrowdRenderer, type BoxSelectMode } from '../render/renderer.ts'
 import { createMockEndpoint } from '../worker/mockEndpoint.ts'
+import { createRealEndpoint } from '../worker/realEndpoint.ts'
 import { SimulationClient, type SimulationView } from '../worker/simulationClient.ts'
 import { PlanSigns } from './PlanSigns.tsx'
 import { StatusIcon } from './StatusIcon.tsx'
@@ -20,7 +21,7 @@ import type { Pick, PickKind } from '../render/hitTest.ts'
 import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
 import { DensityPanel } from './DensityPanel.tsx'
 import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
-import { describeScenario, scenarios, startScenario } from './scenario.ts'
+import { describeScenario, movementPreset, scenarios, startScenario } from './scenario.ts'
 
 /** What each tool can click: Select anything, Trip people, Doors doors. */
 const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'portal', 'zone'], box: ['agent', 'portal', 'zone'], trip: ['agent'], doors: ['portal'] }
@@ -50,7 +51,8 @@ function insetsFor(panels: Panels) {
  * Demo plans compiled in the browser, until the planner supplies them: the Technical PRD §8
  * worked example (model units) and one per prepared venue (metres).
  */
-const SCENARIOS = scenarios(workedPlan as ScenarioPlan, examplePreset.resolvedModel as ModelPreset)
+const REAL_ENGINE = new URLSearchParams(window.location.search).get('engine') === 'real'
+const SCENARIOS = scenarios(workedPlan as ScenarioPlan, REAL_ENGINE ? movementPreset(examplePreset.resolvedModel as ModelPreset) : examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
 const UPLOAD_OPTION = '__upload'
 
@@ -110,8 +112,8 @@ function saveHeatmap(on: boolean) {
 }
 
 export default function SimulatorApp() {
-  // One endpoint and client per page. The mock is swapped for the real Wasm adapter here later.
-  const [client] = useState(() => new SimulationClient(createMockEndpoint()))
+  // Keep mock demos available; /sim?engine=real uses the same client with Rust/Wasm.
+  const [client] = useState(() => new SimulationClient(REAL_ENGINE ? createRealEndpoint() : createMockEndpoint()))
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<CrowdRenderer | null>(null)
   const [camera, setCamera] = useState<Camera | null>(null)
@@ -337,7 +339,7 @@ export default function SimulatorApp() {
             <Siren size={13} strokeWidth={2.25} aria-hidden="true" /> Alarm at {formatClock(alarm.time, false)}
           </p>
         )}
-        {view.endpointKind === 'mock' && <p className="sim-tag" title="Driven by the development mock worker, not the simulation engine">Mock data</p>}
+        {view.endpointKind === 'mock' ? <p className="sim-tag" title="Driven by the development mock worker, not the simulation engine">Mock data</p> : <p className="sim-tag">Rust engine · movement only</p>}
       </header>
 
       <MapToolbar tool={tool} onTool={setTool} />

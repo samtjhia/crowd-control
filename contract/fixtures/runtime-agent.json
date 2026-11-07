@@ -50,7 +50,15 @@
     "status": "active",
     "cursor": [],
     "startedAt": 0,
-    "failure": null
+    "failure": null,
+    "execution": {
+      "phase": "travel",
+      "elapsed": 0,
+      "targetPoint": {
+        "x": 4.5,
+        "y": 2.5
+      }
+    }
   },
   "goalQueue": [],
   "navigation": {

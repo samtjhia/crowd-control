@@ -30,6 +30,14 @@ test('PRD and worker fixtures pass strict contracts without normalization', () =
     'followup-create': c.FollowupRequestSchema, 'followup-edit_intervention': c.FollowupRequestSchema, 'followup-delete_intervention': c.FollowupRequestSchema,
     'compile-output': c.CompileOutputSchema, 'snapshot': c.EngineSnapshotSchema,
     'worker-apply': c.WorkerCommandSchema, 'worker-ack': c.WorkerMessageSchema, 'worker-frame': c.WorkerMessageSchema,
+    'engine-load': c.WorkerCommandSchema,
+    'engine-static-load': c.WorkerCommandSchema,
+    'engine-grid-load': c.WorkerCommandSchema,
+    'engine-navigation-load': c.WorkerCommandSchema,
+    'engine-movement-load': c.WorkerCommandSchema,
+    'engine-crossing-load': c.WorkerCommandSchema,
+    'engine-services-load': c.WorkerCommandSchema,
+    'engine-contact-load': c.WorkerCommandSchema,
   };
   for (const [name, schema] of Object.entries(fixtures)) {
     const original = fixture(name);
@@ -199,6 +207,35 @@ test('uncalibrated upload can be previewed but cannot claim metre units', () => 
   check(c.PreparedMapSchema, map);
 });
 
+test('terrain speed is a separate optional copied Float32 grid buffer', () => {
+  const grid = fixture('engine-grid-load').compiled.scene.map.grid;
+  const speed = Array(grid.width * grid.height).fill(0.5);
+  const input = { ...grid, terrainSpeedMultiplier: speed };
+  check(c.GridDataSchema, input);
+  const packed = c.gridToBuffers(input);
+  assert.equal(packed.ok, true);
+  assert.ok(packed.value.terrainSpeedMultiplier instanceof Float32Array);
+  speed[0] = 1;
+  assert.equal(packed.value.terrainSpeedMultiplier[0], 0.5);
+  assert.deepEqual(c.gridFromBuffers(packed.value).value.terrainSpeedMultiplier, Array(speed.length).fill(0.5));
+  for (const bad of [[], [0], [-1], [2], [Infinity], [1e-100]]) {
+    const values = bad.length ? Array(speed.length).fill(bad[0]) : bad;
+    assert.equal(c.gridToBuffers({ ...grid, terrainSpeedMultiplier: values }).ok, false);
+  }
+  assert.equal(c.gridFromBuffers(c.gridToBuffers(grid).value).value.terrainSpeedMultiplier, undefined);
+});
+
+test('explicit departures and leaf execution are typed separately from writable goals', () => {
+  check(c.GoalSchema, { kind: 'reach', target: { ids: ['outside'] }, departOnArrival: true });
+  check(c.CompiledGoalSchema, { kind: 'reach', targetZone: 'outside', departOnArrival: true });
+  rejects(c.GoalSchema, { kind: 'wait', duration: 1, departOnArrival: true });
+  const runtime = fixture('runtime-agent');
+  runtime.currentGoal.execution = { phase: 'travel', elapsed: 0.2, targetPoint: null };
+  check(c.AgentRuntimeSchema, runtime);
+  rejects(c.AgentRuntimeSchema, { ...runtime, currentGoal: { ...runtime.currentGoal, execution: { phase: 'flying', elapsed: 0, targetPoint: null } } });
+  rejects(c.GoalSchema, { kind: 'wait', duration: 1, execution: runtime.currentGoal.execution });
+});
+
 test('saved runs and storage updates validate their complete envelopes', () => {
   const plan = fixture('scenario-plan');
   const saved = { plan, compiled: fixture('compile-output'), history: { historyRevision: 1, records: [{ id: 'base', revision: 1, origin: 'base', label: 'Initial', at: 0, order: 0, operations: plan.initialOperations, deleted: false }], outcomes: [] }, snapshots: [fixture('snapshot')] };
@@ -217,4 +254,28 @@ test('dictionary IDs cannot bypass checks or change goal-depth interpretation', 
   scene.agents.forEach((a) => { a.controller = 'goals'; }); scene.rules = []; scene.jobs = [];
   check(c.CompiledSceneSchema, scene, { limits: { ...limits, maxGoalDepth: 1 } });
   check(c.JsonValueSchema, { op: 'set', targets: { binding: 'subject' }, values: { arbitrary: true } });
+});
+
+test('compiled clearance is explicit, finite and unique, including declared future members', () => {
+  const scene = fixture('compiled-scene');
+  scene.clearance = { cohortIds: ['a1', 'a2', 'future-agent'], startedAt: 30 };
+  check(c.CompiledSceneSchema, scene);
+  rejects(c.ClearanceCohortSchema, { cohortIds: [], startedAt: 0 });
+  rejects(c.ClearanceCohortSchema, { cohortIds: ['a1', 'a1'], startedAt: 0 });
+  rejects(c.ClearanceCohortSchema, { cohortIds: ['a1'], startedAt: -1 });
+});
+
+test('registered disc contact validates parameters, state and captured subject jobs', () => {
+  const input = fixture('engine-contact-load'); check(c.WorkerCommandSchema, input);
+  const contact = input.compiled.resolvedModel.contact;
+  rejects(c.ContactModelSchema, { ...contact, parameters: { ...contact.parameters, iterations: 0 } });
+  rejects(c.ContactModelSchema, { ...contact, parameters: { ...contact.parameters, extra: 1 } });
+  check(c.DiscImpulseStateSchema, { sampleTick: 1, dt: 0.05, impulses: { a1: [0.1, 0.2] } });
+  rejects(c.DiscImpulseStateSchema, { sampleTick: 1, dt: 0, impulses: {} });
+  const snapshot = fixture('snapshot');
+  snapshot.model.contact = contact;
+  snapshot.contactState = { solverVersion: 'disc-impulse-v1', data: { sampleTick: snapshot.tick, dt: snapshot.model.dt, impulses: {} } };
+  for (const agent of snapshot.agents) agent.sensors = null;
+  check(c.EngineSnapshotSchema, snapshot);
+  snapshot.contactState.data = { warmStart: [] }; rejects(c.EngineSnapshotSchema, snapshot);
 });

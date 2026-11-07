@@ -115,3 +115,24 @@ test('reset after changes shows the fresh run instead of waiting forever', async
   await flush()
   assert.equal(client.getView().current?.frame.tick, 2, 'and it keeps playing')
 })
+test('metrics retain throttled density and reject stale streams, revisions, scenes and ticks', () => {
+  const { endpoint, emit } = scriptedEndpoint(), client = new SimulationClient(endpoint)
+  void client.load(compiled)
+  emit(sceneMessage('live')); emit(frameMessage('live', 10))
+  const sample = { time: 1, present: 1, departed: 0, blocked: 0, immobile: 0, removed: 0, zones: [], portals: [], queues: [], clearance: { t50: null, t90: null, t100: null } }
+  const density = { width: 1, height: 1, cellSize: 1, origin: { x: 0, y: 0 }, units: 'people/model-unit2' as const, values: [1] }
+  const first = { ...header, type: 'metrics' as const, stamp: stamp('live', 10), sample, density }
+  emit(first); assert.deepEqual(client.getView().density, density)
+  emit(frameMessage('live', 11))
+  emit({ ...first, stamp: stamp('live', 11), sample: { ...sample, time: 1.1 }, density: undefined })
+  assert.deepEqual(client.getView().density, density)
+  const before = client.getView()
+  for (const stale of [stamp('old', 12), stamp('live', 12, 0), stamp('live', 12, 1, 99), stamp('live', 9)]) {
+    emit({ ...first, stamp: stale, sample: { ...sample, present: 99 } })
+  }
+  assert.equal(client.getView(), before)
+  emit(sceneMessage('live', 0)); assert.equal(client.getView(), before)
+  emit(sceneMessage('live', 2)); assert.equal(client.getView().density, null)
+  emit({ ...first, stamp: stamp('live', 12) }); assert.equal(client.getView().metrics, null)
+  client.dispose()
+})

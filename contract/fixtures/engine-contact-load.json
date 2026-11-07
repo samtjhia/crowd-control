@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "engine-demo",
+  "commandId": "load-demo",
+  "type": "load",
+  "compiled": {
+    "scene": {
+      "schemaVersion": 1,
+      "simulationId": "engine-demo",
+      "seed": 42,
+      "versions": {
+        "compiler": "engine-input-example-v1",
+        "model": "movement-example-v1",
+        "random": "lcg32-v1"
+      },
+      "model": {
+        "units": "model",
+        "dt": 0.05
+      },
+      "map": {
+        "width": 10,
+        "height": 5,
+        "cellSize": 1,
+        "units": "model",
+        "rooms": [
+          {
+            "id": "hall",
+            "x": 1,
+            "y": 1,
+            "width": 8,
+            "height": 3
+          }
+        ],
+        "portals": [],
+        "rows": [
+          "##########",
+          "#HHHHHHHH#",
+          "#HHHHHHHH#",
+          "#HHHHHHHH#",
+          "##########"
+        ],
+        "legend": {
+          "H": "hall"
+        },
+        "entities": [
+          {
+            "id": "left",
+            "kind": "object",
+            "shape": {
+              "kind": "circle",
+              "center": {
+                "x": 1.5,
+                "y": 2.5
+              },
+              "radius": 0.1
+            }
+          },
+          {
+            "id": "right",
+            "kind": "object",
+            "shape": {
+              "kind": "circle",
+              "center": {
+                "x": 8.5,
+                "y": 2.5
+              },
+              "radius": 0.1
+            }
+          }
+        ]
+      },
+      "profiles": {
+        "person": {
+          "radius": 0.5,
+          "preferredSpeed": 1,
+          "maximumSpeed": 1.5,
+          "acceleration": 2,
+          "personalSpace": 0,
+          "behavior": {
+            "avoidanceStrength": 0
+          }
+        }
+      },
+      "controllers": {
+        "right": {
+          "kind": "reach",
+          "targetEntityId": "right"
+        },
+        "left": {
+          "kind": "reach",
+          "targetEntityId": "left"
+        },
+        "wait": {
+          "kind": "wait",
+          "duration": 600
+        }
+      },
+      "agents": [
+        {
+          "id": "a1",
+          "tags": [
+            "push"
+          ],
+          "profile": "person",
+          "x": 3.5,
+          "y": 2.5,
+          "controller": "right"
+        },
+        {
+          "id": "a2",
+          "tags": [
+            "subject"
+          ],
+          "profile": "person",
+          "x": 4.5,
+          "y": 2.5,
+          "controller": "wait"
+        },
+        {
+          "id": "a3",
+          "tags": [
+            "push"
+          ],
+          "profile": "person",
+          "x": 5.5,
+          "y": 2.5,
+          "controller": "left"
+        }
+      ],
+      "jobs": [],
+      "rules": [
+        {
+          "op": "define_rule",
+          "id": "compression",
+          "when": {
+            "kind": "entity_metric",
+            "targets": {
+              "kind": "agent"
+            },
+            "metric": "contactLoadRatio",
+            "comparison": "gte",
+            "value": 1.5,
+            "for": 0.1
+          },
+          "once": true,
+          "operations": [
+            {
+              "op": "set",
+              "targets": {
+                "binding": "subject"
+              },
+              "values": {
+                "components": {
+                  "mobility": {
+                    "speedMultiplier": 0
+                  }
+                },
+                "appearance": {
+                  "pose": "fallen"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "resolvedModel": {
+      "id": "movement-example",
+      "version": "movement-example-v1",
+      "units": "model",
+      "dt": 0.05,
+      "defaultAgent": {
+        "physical": {
+          "radius": 0.2,
+          "blocksMovement": true,
+          "movable": true
+        },
+        "navigation": {
+          "preferredSpeed": 1,
+          "maximumSpeed": 1.5,
+          "acceleration": 2,
+          "personalSpace": 0.1
+        },
+        "behavior": {
+          "reactionDelay": 0,
+          "routeCompliance": 1,
+          "avoidanceStrength": 1,
+          "groupCohesion": 0,
+          "goalPersistence": 1
+        },
+        "mobility": {
+          "speedMultiplier": 1
+        }
+      },
+      "layout": {
+        "bodyDiameter": 0.4,
+        "spacingDiameters": 2,
+        "preferredAspect": 2,
+        "doorBodyWidths": 2
+      },
+      "contact": {
+        "solverVersion": "disc-impulse-v1",
+        "referenceLoad": 2,
+        "forceUnits": "model-force",
+        "parameters": {
+          "mass": 1,
+          "iterations": 96,
+          "tolerance": 1e-08,
+          "maximumSpeed": 2
+        }
+      }
+    },
+    "inventory": []
+  },
+  "history": {
+    "historyRevision": 0,
+    "records": [],
+    "outcomes": []
+  }
+}

@@ -1,19 +1,8 @@
 import type { WorkerCommand, WorkerEndpoint, WorkerMessage } from '@crowd-control/contract'
 import { MockSimulation } from './mock/simulation.ts'
-
-/** Wall-clock source and timer, injectable so tests can drive time by hand. */
-export type MockClock = {
-  now(): number
-  every(intervalMs: number, callback: () => void): () => void
-}
-
-export const systemClock: MockClock = {
-  now: () => performance.now(),
-  every(intervalMs, callback) {
-    const handle = setInterval(callback, intervalMs)
-    return () => clearInterval(handle)
-  },
-}
+import { systemClock, type WorkerClock as MockClock } from './clock.ts'
+export { systemClock } from './clock.ts'
+export type { WorkerClock as MockClock } from './clock.ts'
 
 export type MockEndpointOptions = {
   clock?: MockClock
