@@ -176,7 +176,9 @@ export class SimulationClient {
     if (this.retired.has(streamId)) return
     if (streamId !== this.view.streamId) {
       if (this.view.streamId) this.retired.add(this.view.streamId)
-      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [] })
+      // A new stream (load or reset) has its own history: a reset goes back to the initial
+      // revision, so the old stream's higher revision must not make its frames look stale.
+      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [], historyRevision })
     } else if (sceneVersion < this.view.sceneVersion) {
       return
     }

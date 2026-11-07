@@ -642,6 +642,23 @@
 }
 
 .sim .sim-action:hover { background: var(--green-hover); }
+
+.sim-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-selected-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+.sim .sim-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.sim .sim-link:hover { color: var(--text); }
 .sim .sim-action:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 .sim-changes li {

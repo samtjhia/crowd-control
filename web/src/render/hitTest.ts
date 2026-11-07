@@ -87,3 +87,19 @@ export function zoneStrips(scene: RenderScene, zoneId: string): Rect[] {
   }
   return strips
 }
+
+/**
+ * Everything inside a box between two world points (a Shift-drag): people whose position is in
+ * it and doors whose centre is in it, people first. Departed people are skipped.
+ */
+export function pickInBox(scene: RenderScene, frame: Frame | null, positions: Map<string, Vec2>, a: Vec2, b: Vec2): Pick[] {
+  const box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) }
+  const picks: Pick[] = []
+  for (const agent of frame?.agents ?? []) {
+    if (agent.state !== 'departed' && within(positions.get(agent.id) ?? agent, box, 0)) picks.push({ kind: 'agent', id: agent.id })
+  }
+  for (const door of portalRects(scene)) {
+    if (within({ x: door.x + door.width / 2, y: door.y + door.height / 2 }, box, 0)) picks.push({ kind: 'portal', id: door.id })
+  }
+  return picks
+}

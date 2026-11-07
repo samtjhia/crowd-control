@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import type { CompileOutput, Frame, RenderScene, ScenarioPlan, Vec2 } from '@crowd-control/contract'
-import { pickAt, zoneAt, zoneStrips } from '../render/hitTest.ts'
+import { figureLook } from '../render/agentStyle.ts'
+import { pickAt, pickInBox, zoneAt, zoneStrips } from '../render/hitTest.ts'
 import { createMockEndpoint } from '../worker/mockEndpoint.ts'
 import { SimulationClient } from '../worker/simulationClient.ts'
-import { actionFor, isDown, isOpen } from './mapActions.ts'
+import { actionFor, isDown, isOpen, selectionActions, toggle, union } from './mapActions.ts'
 import { scenarios, startScenario } from './scenario.ts'
 
 const fixture = <T>(name: string) => JSON.parse(readFileSync(new URL(`../../../contract/fixtures/${name}.json`, import.meta.url), 'utf8')) as T
@@ -108,4 +109,60 @@ test('a selected room is tinted over its floor only, never over tables or walls'
   const area = zoneStrips(scene, 'hall').reduce((sum, strip) => sum + strip.width * strip.height, 0)
   assert.equal(area, 40 * 30 - 24 * 6 * 0.75, 'the 40 × 30 m hall minus its 24 tables')
   assert.deepEqual(zoneStrips(worked().scene, 'hall'), [{ x: 1, y: 1, width: 10, height: 4 }])
+})
+
+test('Shift-drag selects the people and doors inside the box', () => {
+  const { scene, frame, positions } = worked()
+  const top = pickInBox(scene, frame, positions, { x: 1, y: 1 }, { x: 6, y: 2 })
+  assert.deepEqual(top.map((pick) => pick.id), ['a1', 'a2', 'a3'])
+  const wide = pickInBox(scene, frame, positions, { x: 12, y: 4 }, { x: 0, y: 0 })
+  assert.deepEqual(wide.map((pick) => pick.id), ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'hall_door'], 'boxes work dragged in any direction')
+})
+
+test('Shift-click toggles one item; a box adds without duplicates', () => {
+  const a1 = { kind: 'agent' as const, id: 'a1' }, a2 = { kind: 'agent' as const, id: 'a2' }
+  assert.deepEqual(toggle([a1], a2), [a1, a2])
+  assert.deepEqual(toggle([a1, a2], a1), [a2])
+  assert.deepEqual(union([a1], [a1, a2]), [a1, a2])
+})
+
+test('a group only offers actions its members share, and each says how many it affects', () => {
+  const { scene, frame } = worked()
+  const people = ['a1', 'a2', 'a3'].map((id) => ({ kind: 'agent' as const, id }))
+  assert.deepEqual(selectionActions(scene, frame, people).map((a) => a.button), ['Make 3 fall'])
+  assert.deepEqual(selectionActions(scene, frame, [people[0]!]).map((a) => a.button), ['Make them fall'])
+
+  const someDown: RenderScene = { ...scene, agents: scene.agents.map((a) => (a.id === 'a2' ? { ...a, appearance: { ...a.appearance, pose: 'fallen' } } : a)) }
+  const mixed = [...people, { kind: 'portal' as const, id: 'hall_door' }, { kind: 'zone' as const, id: 'foyer' }]
+  const actions = selectionActions(someDown, frame, mixed)
+  assert.deepEqual(actions.map((a) => a.button), ['Make 2 fall', 'Help 1 up', 'Close 1 door'])
+  assert.deepEqual(actions.map((a) => a.action.label), ['2 people fall', 'a2 gets up', 'Close hall door'])
+  assert.deepEqual(actions[0]!.action.operations[0], {
+    op: 'set', targets: { ids: ['a1', 'a3'] }, values: { components: { mobility: { speedMultiplier: 0 } }, appearance: { pose: 'fallen' } },
+  }, 'one operation for the whole group, only the people it fits')
+  assert.deepEqual(selectionActions(scene, frame, [{ kind: 'zone', id: 'hall' }]), [], 'rooms have nothing to do yet')
+})
+
+test('a group action is one change in the list', async () => {
+  const client = new SimulationClient(createMockEndpoint({ clock: idleClock }))
+  await client.load(compiled)
+  await flush()
+  const view = client.getView()
+  const picks = ['a1', 'a2', 'a3', 'a4'].map((id) => ({ kind: 'agent' as const, id }))
+  const [makeFall] = selectionActions(view.scene!, view.current!.frame, picks)
+  assert.equal((await client.apply(makeFall!.action.label, makeFall!.action.operations)).ok, true)
+  await client.step(1)
+  await flush()
+  const after = client.getView()
+  assert.deepEqual(after.changes.map((change) => change.label), ['4 people fall'])
+  assert.ok(['a1', 'a2', 'a3', 'a4'].every((id) => isDown(after.scene!, after.current!.frame, id)))
+  assert.equal(isDown(after.scene!, after.current!.frame, 'a5'), false)
+})
+
+test('people get a stable mix of hairstyles and outfits', () => {
+  const looks = Array.from({ length: 300 }, (_, i) => figureLook(`a${i + 1}`))
+  assert.deepEqual(new Set(looks.map((look) => look.hair)), new Set(['short', 'long', 'bun', 'ponytail']))
+  const skirts = looks.filter((look) => look.outfit === 'skirt').length
+  assert.ok(skirts > 60 && skirts < 140, `about a third wear skirts or dresses (${skirts}/300)`)
+  assert.deepEqual(figureLook('a42'), figureLook('a42'), 'the same person always looks the same')
 })

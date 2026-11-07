@@ -2,13 +2,13 @@ import { DoorOpen, MousePointer2, PersonStanding } from 'lucide-react'
 import type { Pick } from '../render/hitTest.ts'
 import type { AppliedChange, SimulationView } from '../worker/simulationClient.ts'
 import { formatClock } from './incidents.ts'
-import { fall, isDown, isOpen, nameOf, recover, setDoor, type MapAction } from './mapActions.ts'
+import { isDown, isOpen, nameOf, presentPeople, selectionActions, type MapAction } from './mapActions.ts'
 
 /** What a click on the map does: inspect, trip/help up a person, or close/open a door. */
 export type MapTool = 'select' | 'trip' | 'doors'
 
 const TOOLS: { id: MapTool; label: string; hint: string; key: string; Icon: typeof MousePointer2 }[] = [
-  { id: 'select', label: 'Select', hint: 'Click a person, door or room to see details', key: 'V', Icon: MousePointer2 },
+  { id: 'select', label: 'Select', hint: 'Click a person, door or room to see details. Shift-click or Shift-drag to select several', key: 'V', Icon: MousePointer2 },
   { id: 'trip', label: 'Trip', hint: 'Click a person to make them fall, or to help them up', key: 'F', Icon: PersonStanding },
   { id: 'doors', label: 'Doors', hint: 'Click a door to close it, or to open it again', key: 'D', Icon: DoorOpen },
 ]
@@ -32,62 +32,103 @@ const STATE_TEXT: Record<string, string> = {
   interacting: 'Being served', blocked: 'Blocked: no open route', immobile: 'Down', departed: 'Has left', failed: 'Goal failed',
 }
 
-/** Details of the selected person, door or room, with the action a tool click would take. */
-export function SelectionDetails({ selection, view, onAction }: {
-  selection: Pick | null; view: SimulationView; onAction: (action: MapAction) => void
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * Details of what is selected, with the actions that apply to it. One item shows its own
+ * facts; several show totals, and each action says how many it affects.
+ */
+export function SelectionDetails({ selection, view, onAction, onClear }: {
+  selection: readonly Pick[]; view: SimulationView; onAction: (action: MapAction) => void; onClear: () => void
 }) {
   const { scene } = view
   const frame = view.current?.frame ?? null
-  if (!selection || !scene) {
-    return <p className="sim-muted">Click a person, door or room on the map. Use Trip (F) or Doors (D) to change things with one click.</p>
-  }
-  const name = nameOf(scene, selection.id)
-  if (selection.kind === 'agent') {
-    const agent = frame?.agents.find((a) => a.id === selection.id)
-    if (!agent) return <p className="sim-muted">{name} is no longer in the simulation.</p>
-    const down = isDown(scene, frame, selection.id)
+  if (selection.length === 0 || !scene) {
     return (
-      <div className="sim-selected">
-        <p className="sim-selected-name">{name === selection.id ? `Person ${name}` : name}</p>
-        <dl className="sim-facts">
-          <div><dt>Status</dt><dd>{down ? 'Down' : STATE_TEXT[agent.state] ?? agent.state}</dd></div>
-          {agent.controller && <div><dt>Doing</dt><dd>{agent.controller.replaceAll('-', ' ')}</dd></div>}
-        </dl>
-        {agent.state !== 'departed' && (
-          <button type="button" className="sim-action" onClick={() => onAction(down ? recover(selection.id, name) : fall(selection.id, name))}>
-            {down ? 'Help them up' : 'Make them fall'}
-          </button>
-        )}
-      </div>
+      <p className="sim-muted">
+        Click a person, door or room on the map. Shift-click or Shift-drag to select several. Use Trip (F) or Doors (D) to change things with one click.
+      </p>
     )
   }
-  if (selection.kind === 'portal') {
-    const open = isOpen(scene, selection.id)
-    const record = scene.map.portals.find((p) => p.id === selection.id)
+  const actions = selectionActions(scene, frame, selection)
+  const buttons = actions.length > 0 && (
+    <div className="sim-actions">
+      {actions.map(({ button, action }) => (
+        <button key={button} type="button" className="sim-action" onClick={() => onAction(action)}>{button}</button>
+      ))}
+    </div>
+  )
+
+  if (selection.length === 1) {
+    const [only] = selection
+    return <div className="sim-selected">{single(only!, view)}{buttons}</div>
+  }
+
+  const people = presentPeople(frame, selection)
+  const down = people.filter((id) => isDown(scene, frame, id)).length
+  const doors = selection.filter((pick) => pick.kind === 'portal')
+  const closed = doors.filter((pick) => !isOpen(scene, pick.id)).length
+  const rooms = selection.filter((pick) => pick.kind === 'zone')
+  const inRooms = rooms.reduce((sum, pick) => sum + (view.metrics?.zones.find((z) => z.zoneId === pick.id)?.occupancy ?? 0), 0)
+  const left = selection.filter((pick) => pick.kind === 'agent').length - people.length
+  return (
+    <div className="sim-selected">
+      <div className="sim-selected-head">
+        <p className="sim-selected-name">{plural(selection.length, 'item', 'items')} selected</p>
+        <button type="button" className="sim-link" onClick={onClear}>Clear</button>
+      </div>
+      <dl className="sim-facts">
+        {people.length > 0 && <div><dt>People</dt><dd>{people.length}{down > 0 ? `, ${down} down` : ''}</dd></div>}
+        {left > 0 && <div><dt>Left</dt><dd>{plural(left, 'person has', 'people have')} left</dd></div>}
+        {doors.length > 0 && <div><dt>Doors</dt><dd>{doors.length}{closed > 0 ? `, ${closed} closed` : ''}</dd></div>}
+        {rooms.length > 0 && <div><dt>Rooms</dt><dd>{rooms.map((pick) => nameOf(scene, pick.id)).join(', ')}</dd></div>}
+        {rooms.length > 0 && <div><dt>In rooms</dt><dd>{plural(inRooms, 'person', 'people')}</dd></div>}
+      </dl>
+      {buttons}
+    </div>
+  )
+}
+
+/** Facts about one selected person, door or room. */
+function single(pick: Pick, view: SimulationView) {
+  const scene = view.scene!
+  const frame = view.current?.frame ?? null
+  const name = nameOf(scene, pick.id)
+  if (pick.kind === 'agent') {
+    const agent = frame?.agents.find((a) => a.id === pick.id)
+    if (!agent) return <p className="sim-muted">{name} is no longer in the simulation.</p>
     return (
-      <div className="sim-selected">
+      <>
+        <p className="sim-selected-name">{name === pick.id ? `Person ${name}` : name}</p>
+        <dl className="sim-facts">
+          <div><dt>Status</dt><dd>{isDown(scene, frame, pick.id) ? 'Down' : STATE_TEXT[agent.state] ?? agent.state}</dd></div>
+          {agent.controller && <div><dt>Doing</dt><dd>{agent.controller.replaceAll('-', ' ')}</dd></div>}
+        </dl>
+      </>
+    )
+  }
+  if (pick.kind === 'portal') {
+    const record = scene.map.portals.find((p) => p.id === pick.id)
+    return (
+      <>
         <p className="sim-selected-name">{name}</p>
         <dl className="sim-facts">
-          <div><dt>Status</dt><dd>{open ? 'Open' : 'Closed'}</dd></div>
+          <div><dt>Status</dt><dd>{isOpen(scene, pick.id) ? 'Open' : 'Closed'}</dd></div>
           {record && <div><dt>Connects</dt><dd>{record.connects.map((id) => nameOf(scene, id)).join(' ↔ ')}</dd></div>}
           {record && <div><dt>Width</dt><dd>{formatSize(Math.max(record.width, record.height), scene.map.units)}</dd></div>}
         </dl>
-        <button type="button" className="sim-action" onClick={() => onAction(setDoor(selection.id, name, !open))}>
-          {open ? 'Close door' : 'Open door'}
-        </button>
-      </div>
+      </>
     )
   }
-  const zone = view.metrics?.zones.find((z) => z.zoneId === selection.id)
-  const metric = scene.map.units === 'm'
+  const zone = view.metrics?.zones.find((z) => z.zoneId === pick.id)
   return (
-    <div className="sim-selected">
+    <>
       <p className="sim-selected-name">{name}</p>
       <dl className="sim-facts">
         <div><dt>People</dt><dd>{zone?.occupancy ?? 0}</dd></div>
-        {metric && zone && <div><dt>Density</dt><dd>{zone.density.toFixed(2)} people/m²</dd></div>}
+        {scene.map.units === 'm' && zone && <div><dt>Density</dt><dd>{zone.density.toFixed(2)} people/m²</dd></div>}
       </dl>
-    </div>
+    </>
   )
 }
 

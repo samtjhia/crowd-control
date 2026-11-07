@@ -1,10 +1,10 @@
 import { Application, BitmapText, Container, Graphics, Sprite, Text } from 'pixi.js'
 import type { AgentState, Camera, RenderAgentMetadata, RenderScene, Shape, Vec2 } from '@crowd-control/contract'
 import type { SimulationClient } from '../worker/simulationClient.ts'
-import { HAIR_TONES, SKIN_TONES, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, type AgentDrawMode } from './agentStyle.ts'
-import { FigureAtlas, type FigurePose } from './figureAtlas.ts'
+import { HAIR_TONES, SKIN_TONES, figureLook, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, type AgentDrawMode } from './agentStyle.ts'
+import { FigureAtlas, type FigureLook, type FigurePose } from './figureAtlas.ts'
 import { fitCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera.ts'
-import { pickAt, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
+import { pickAt, pickInBox, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
 import { displayPositions } from './interpolate.ts'
 import { COLORS, layoutMap, type MapLayout } from './mapLayout.ts'
 
@@ -40,6 +40,7 @@ type AgentView = {
   topPx: number
   badgeText: string | null
   colors: { body: string; skin: string; hair: string }
+  look: FigureLook
   pose: FigurePose | null
   fallen: boolean
   rotates: boolean
@@ -111,11 +112,15 @@ export class CrowdRenderer {
   /** World positions drawn on the last frame, so clicks hit what the user sees. */
   private positions = new Map<string, Vec2>()
   private pickable: readonly PickKind[] = []
-  private readonly pickListeners = new Set<(pick: Pick | null) => void>()
-  private selection: Pick | null = null
+  private readonly pickListeners = new Set<(pick: Pick | null, additive: boolean) => void>()
+  private readonly boxListeners = new Set<(picks: Pick[]) => void>()
+  private boxSelect = false
+  /** The Shift-drag selection box, in screen pixels, while it is being drawn. */
+  private marquee: { from: Vec2; to: Vec2 } | null = null
+  private selection: Pick[] = []
   private readonly selectionMark = new Graphics()
   /** The selected room's floor strips, cached until the scene or selection changes. */
-  private selectedFloor: { scene: RenderScene; id: string; strips: { x: number; y: number; width: number; height: number }[] } | null = null
+  private selectedFloors: { scene: RenderScene | null; strips: Map<string, { x: number; y: number; width: number; height: number }[]> } = { scene: null, strips: new Map() }
 
   static async create(host: HTMLElement, client: SimulationClient, options: RendererOptions = {}): Promise<CrowdRenderer> {
     const app = new Application()
@@ -208,17 +213,33 @@ export class CrowdRenderer {
     this.pickable = [...kinds]
   }
 
-  /** Notified with what was clicked (null for empty floor or wall). Dragging never counts as a click. */
-  onPick(listener: (pick: Pick | null) => void): () => void {
+  /**
+   * Notified with what was clicked (null for empty floor or wall), and whether Shift was held
+   * to add to the selection. Dragging never counts as a click.
+   */
+  onPick(listener: (pick: Pick | null, additive: boolean) => void): () => void {
     this.pickListeners.add(listener)
     return () => {
       this.pickListeners.delete(listener)
     }
   }
 
-  /** Outlines the selected person, door or room; null clears it. */
-  setSelection(pick: Pick | null) {
-    this.selection = pick
+  /** Lets Shift-drag draw a selection box instead of panning (plain drag always pans). */
+  setBoxSelect(enabled: boolean) {
+    this.boxSelect = enabled
+  }
+
+  /** Notified with the people and doors inside a finished Shift-drag box. */
+  onBoxSelect(listener: (picks: Pick[]) => void): () => void {
+    this.boxListeners.add(listener)
+    return () => {
+      this.boxListeners.delete(listener)
+    }
+  }
+
+  /** Highlights the selected people, doors and rooms; an empty list clears it. */
+  setSelection(picks: readonly Pick[]) {
+    this.selection = [...picks]
   }
 
   /** What is under a screen point (canvas pixels), among the pickable kinds. */
@@ -245,6 +266,7 @@ export class CrowdRenderer {
     this.hostObserver.disconnect()
     this.cameraListeners.clear()
     this.pickListeners.clear()
+    this.boxListeners.clear()
     this.atlas.clear()
     this.detachInput()
     this.app.destroy(true, { children: true })
@@ -472,7 +494,7 @@ export class CrowdRenderer {
       if (!view) {
         view = {
           body: new Graphics(), figure: null, badge: null, label: null, state: null, metadata: null, pixelsPerUnit: 0, mode: null,
-          radiusPx: 0, topPx: 0, badgeText: null, colors: { body: '', skin: '', hair: '' }, pose: null, fallen: false, rotates: false,
+          radiusPx: 0, topPx: 0, badgeText: null, colors: { body: '', skin: '', hair: '' }, look: figureLook(agent.id), pose: null, fallen: false, rotates: false,
           last: null, heading: 0, phase: stableIndex(agent.id, 2),
         }
         this.layers.agents.addChild(view.body)
@@ -602,7 +624,7 @@ export class CrowdRenderer {
   /** Points a person's sprite at the pre-drawn figure for this pose and size. */
   private applyFigure(view: AgentView, pose: FigurePose) {
     if (!view.figure) return
-    const art = this.atlas.get(view.colors.body, view.colors.skin, view.colors.hair, pose, view.radiusPx * 2.6)
+    const art = this.atlas.get(view.colors.body, view.colors.skin, view.colors.hair, view.look, pose, view.radiusPx * 2.6)
     view.figure.texture = art.texture
     view.figure.anchor.set(art.anchorX, art.anchorY)
     view.pose = pose
@@ -618,47 +640,68 @@ export class CrowdRenderer {
 
   /**
    * Selection in one accent colour used nowhere else on the map: a ring with a soft glow
-   * around a person, a glowing outline around a door, and a light tint over a room's floor.
+   * around each person, a glowing outline around each door, and a light tint over each
+   * room's floor. A Shift-drag box shows while it is being drawn.
    */
   private drawSelection() {
     const mark = this.selectionMark
     mark.clear()
-    const pick = this.selection
-    if (!pick || !this.scene) return
+    if (!this.scene) return
+    const scene = this.scene
     const ppu = this.camera.pixelsPerUnit
-    if (pick.kind === 'agent') {
-      const at = this.positions.get(pick.id)
-      const view = this.agentViews.get(pick.id)
-      if (!at || !view) return
-      const centre = worldToScreen(this.camera, at)
-      const radius = Math.max(view.radiusPx, view.topPx * 0.6) + 4
-      mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
-      mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.width, color: SELECTION.color })
-      return
+    if (this.selectedFloors.scene !== scene) this.selectedFloors = { scene, strips: new Map() }
+
+    let tinted = false
+    for (const pick of this.selection) {
+      if (pick.kind !== 'zone') continue
+      let strips = this.selectedFloors.strips.get(pick.id)
+      if (!strips) {
+        strips = zoneStrips(scene, pick.id)
+        this.selectedFloors.strips.set(pick.id, strips)
+      }
+      for (const strip of strips) {
+        const corner = worldToScreen(this.camera, strip)
+        // Strips overlap by a fraction of a pixel so the tint has no seams between rows.
+        mark.rect(corner.x, corner.y, strip.width * ppu, strip.height * ppu + 0.5)
+        tinted = true
+      }
     }
-    if (pick.kind === 'portal') {
-      const rect = portalRects(this.scene).find((r) => r.id === pick.id)
-      if (!rect) return
-      const corner = worldToScreen(this.camera, rect)
-      const outline = () => mark.roundRect(corner.x - 3, corner.y - 3, rect.width * ppu + 6, rect.height * ppu + 6, 4)
-      outline().stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
-      outline().stroke({ width: SELECTION.width, color: SELECTION.color })
-      return
-    }
-    if (this.selectedFloor?.scene !== this.scene || this.selectedFloor.id !== pick.id) {
-      this.selectedFloor = { scene: this.scene, id: pick.id, strips: zoneStrips(this.scene, pick.id) }
-    }
-    for (const strip of this.selectedFloor.strips) {
-      const corner = worldToScreen(this.camera, strip)
-      // Strips overlap by a fraction of a pixel so the tint has no seams between rows.
-      mark.rect(corner.x, corner.y, strip.width * ppu, strip.height * ppu + 0.5)
-    }
-    mark.fill({ color: SELECTION.color, alpha: SELECTION.tintAlpha })
+    if (tinted) mark.fill({ color: SELECTION.color, alpha: SELECTION.tintAlpha })
     // Rectangular rooms also get a border; on grid maps the tinted cells already show the shape.
-    const room = this.scene.map.rooms.find((r) => r.id === pick.id)
-    if (room && !('grid' in this.scene.map && this.scene.map.grid)) {
-      const corner = worldToScreen(this.camera, room)
-      mark.rect(corner.x, corner.y, room.width * ppu, room.height * ppu).stroke({ width: SELECTION.width, color: SELECTION.color, alpha: 0.8 })
+    if (!('grid' in scene.map && scene.map.grid)) {
+      for (const pick of this.selection) {
+        const room = pick.kind === 'zone' ? scene.map.rooms.find((candidate) => candidate.id === pick.id) : undefined
+        if (!room) continue
+        const corner = worldToScreen(this.camera, room)
+        mark.rect(corner.x, corner.y, room.width * ppu, room.height * ppu).stroke({ width: SELECTION.width, color: SELECTION.color, alpha: 0.8 })
+      }
+    }
+
+    const doors = portalRects(scene)
+    for (const pick of this.selection) {
+      if (pick.kind === 'agent') {
+        const at = this.positions.get(pick.id)
+        const view = this.agentViews.get(pick.id)
+        if (!at || !view) continue
+        const centre = worldToScreen(this.camera, at)
+        const radius = Math.max(view.radiusPx, view.topPx * 0.6) + 4
+        mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
+        mark.circle(centre.x, centre.y, radius).stroke({ width: SELECTION.width, color: SELECTION.color })
+      } else if (pick.kind === 'portal') {
+        const rect = doors.find((candidate) => candidate.id === pick.id)
+        if (!rect) continue
+        const corner = worldToScreen(this.camera, rect)
+        const outline = () => mark.roundRect(corner.x - 3, corner.y - 3, rect.width * ppu + 6, rect.height * ppu + 6, 4)
+        outline().stroke({ width: SELECTION.glowWidth, color: SELECTION.color, alpha: SELECTION.glowAlpha })
+        outline().stroke({ width: SELECTION.width, color: SELECTION.color })
+      }
+    }
+
+    if (this.marquee) {
+      const { from, to } = this.marquee
+      mark.rect(Math.min(from.x, to.x), Math.min(from.y, to.y), Math.abs(to.x - from.x), Math.abs(to.y - from.y))
+        .fill({ color: SELECTION.color, alpha: 0.08 })
+        .stroke({ width: 1, color: SELECTION.color, alpha: 0.9 })
     }
   }
 
@@ -670,7 +713,7 @@ export class CrowdRenderer {
   // ---------------------------------------------------------------- input
 
   private attachPointerInput(canvas: HTMLCanvasElement): () => void {
-    let dragging: { x: number; y: number; id: number; travelled: number } | null = null
+    let dragging: { x: number; y: number; id: number; travelled: number; box: boolean; start: Vec2 } | null = null
     const local = (event: PointerEvent) => {
       const bounds = canvas.getBoundingClientRect()
       return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
@@ -682,7 +725,7 @@ export class CrowdRenderer {
     }
     const onDown = (event: PointerEvent) => {
       if (event.button !== 0) return
-      dragging = { x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0 }
+      dragging = { x: event.clientX, y: event.clientY, id: event.pointerId, travelled: 0, box: event.shiftKey && this.boxSelect, start: local(event) }
       canvas.setPointerCapture(event.pointerId)
     }
     const onMove = (event: PointerEvent) => {
@@ -693,8 +736,12 @@ export class CrowdRenderer {
       }
       const dx = event.clientX - dragging.x, dy = event.clientY - dragging.y
       const travelled = dragging.travelled + Math.hypot(dx, dy)
-      // Small jitters during a click don't pan; past the slop the whole drag pans.
-      if (travelled > CLICK_SLOP_PX) {
+      // Small jitters during a click don't pan; past the slop the whole drag pans (or draws the box).
+      if (travelled > CLICK_SLOP_PX && dragging.box) {
+        this.marquee = { from: dragging.start, to: local(event) }
+        dragging = { ...dragging, x: event.clientX, y: event.clientY, travelled }
+        canvas.style.cursor = 'crosshair'
+      } else if (travelled > CLICK_SLOP_PX) {
         this.pan({ x: dx, y: dy })
         dragging = { ...dragging, x: event.clientX, y: event.clientY, travelled }
         canvas.style.cursor = 'grabbing'
@@ -705,11 +752,17 @@ export class CrowdRenderer {
     const onUp = (event: PointerEvent) => {
       if (dragging?.id !== event.pointerId) return
       const click = dragging.travelled <= CLICK_SLOP_PX && event.type === 'pointerup'
+      const marquee = this.marquee
       dragging = null
+      this.marquee = null
       canvas.style.cursor = ''
-      if (click && this.pickable.length > 0) {
+      if (marquee && event.type === 'pointerup' && this.scene) {
+        const frame = this.client.getView().current?.frame ?? null
+        const picks = pickInBox(this.scene, frame, this.positions, screenToWorld(this.camera, marquee.from), screenToWorld(this.camera, marquee.to))
+        for (const listener of this.boxListeners) listener(picks)
+      } else if (click && this.pickable.length > 0) {
         const pick = this.pickAtScreen(local(event))
-        for (const listener of this.pickListeners) listener(pick)
+        for (const listener of this.pickListeners) listener(pick, event.shiftKey)
       }
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
