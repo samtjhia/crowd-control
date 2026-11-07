@@ -98,3 +98,46 @@ test('changes can be asked for on prepared venues and uploaded plans, not just g
     assert.equal(built.ok, true, `${layout.mode}: ${JSON.stringify(built)}`)
   }
 })
+
+test('new scenarios can be set in any prepared venue, with its real rooms and doors', async () => {
+  const { venueOptions } = await import('./scenario.ts')
+  const venues = venueOptions()
+  assert.deepEqual(venues.map((v) => v.name), ['Hillside Alley', 'Riverside School', 'Harbour Concert Hall', 'Hackathon Hall'])
+  const alley = venues[0]!
+  assert.deepEqual(alley.layout, { mode: 'lookup', venue: 'Hillside Alley', floor: 'Street level' })
+  assert.ok(alley.inventory.some((item) => item.id === 'alley_head' && item.kind === 'portal' && item.label === 'Alley head'))
+  assert.ok(alley.inventory.every((item) => item.kind === 'zone' || item.kind === 'portal'), 'rooms and doors only, no people')
+})
+
+test('previews name doors and rooms the way the plan does', async () => {
+  const { describeOperations } = await import('../planner/describe.ts')
+  const inventory = [{ id: 'alley_head', kind: 'portal' as const, label: 'Alley head', tags: [], componentNames: ['portal'] }]
+  const close = { op: 'set' as const, targets: { ids: ['alley_head'] }, values: { components: { portal: { open: false } } } }
+  assert.deepEqual(describeOperations([close], inventory), ['Close Alley head'])
+  assert.deepEqual(describeOperations([close], []), ['Close alley head'], 'without a label, the ID reads as words')
+})
+
+test('the conversation and the assistant’s scenarios survive a reload', async () => {
+  const { loadAssistant, saveMessages, saveScenarios } = await import('./assistantStore.ts')
+  const memory = new Map<string, string>()
+  const global = globalThis as unknown as { localStorage?: unknown }
+  global.localStorage = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => { memory.set(k, v) } }
+  try {
+    const change = { schemaVersion: 1 as const, simulationId: 's', requestId: 'r', operations: [{ op: 'set' as const, targets: { ids: ['exit'] }, values: { components: { portal: { open: false } } } }] }
+    saveMessages([
+      { id: 1, from: 'you', text: 'close the exit', kind: 'change' },
+      { id: 2, from: 'assistant', change, prompt: 'close the exit', inventory: [], status: 'applied' },
+    ])
+    saveScenarios([{ id: 'assistant-1', title: 'Assistant: drill', plan, model }])
+    const restored = loadAssistant()
+    assert.equal(restored.messages.length, 2)
+    assert.equal(restored.scenarios[0]!.id, 'assistant-1', 'saving messages kept the scenarios, and the other way round')
+    const applied = restored.messages[1]!
+    assert.ok('change' in applied && applied.note === 'Applied in an earlier run.', 'a change from before the reload is marked as belonging to that run')
+    saveMessages(Array.from({ length: 100 }, (_, k) => ({ id: k, from: 'you' as const, text: `m${k}`, kind: 'change' as const })))
+    assert.equal(loadAssistant().messages.length, 60, 'only the most recent messages are kept')
+  } finally {
+    delete global.localStorage
+  }
+  assert.deepEqual(loadAssistant(), { messages: [], scenarios: [] }, 'without storage it simply starts fresh')
+})

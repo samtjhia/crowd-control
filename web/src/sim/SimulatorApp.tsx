@@ -21,7 +21,8 @@ import type { Pick, PickKind } from '../render/hitTest.ts'
 import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
 import { DensityPanel } from './DensityPanel.tsx'
 import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
-import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startScenario, type Scenario } from './scenario.ts'
+import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startScenario, venueOptions, type Scenario } from './scenario.ts'
+import { loadAssistant, saveScenarios } from './assistantStore.ts'
 import { AssistantPanel } from './AssistantPanel.tsx'
 import { loadSavedVenues, presetFor } from './savedVenues.ts'
 
@@ -77,13 +78,12 @@ const UPLOAD_OPTION = '__upload'
 /** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
 function initialScenarioId(): string {
   const requested = new URLSearchParams(window.location.search).get(SCENARIO_PARAM)
-  return SCENARIOS.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
+  const known = [...SCENARIOS, ...loadAssistant().scenarios]
+  return known.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
 }
 
 /** Keeps the choice in the URL so a reload or a shared link opens the same venue. */
 function rememberScenario(id: string) {
-  // Scenarios the assistant wrote live only in this page, so a reload can't find them.
-  if (id.startsWith(ASSISTANT_PREFIX)) return
   const url = new URL(window.location.href)
   if (id === SCENARIOS[0]!.id) url.searchParams.delete(SCENARIO_PARAM)
   else url.searchParams.set(SCENARIO_PARAM, id)
@@ -160,7 +160,8 @@ export default function SimulatorApp() {
 
   const [scenarioId, setScenarioId] = useState(initialScenarioId)
   /** Scenarios the assistant wrote in this visit; they join the picker. */
-  const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>([])
+  const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>(() => loadAssistant().scenarios)
+  useEffect(() => { saveScenarios(assistantScenarios) }, [assistantScenarios])
   const scenario = [...SCENARIOS, ...assistantScenarios].find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0]!
   /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
   const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
@@ -185,17 +186,23 @@ export default function SimulatorApp() {
   const runAssistantPlan = (plan: ScenarioPlan, title: string): string | null => {
     const model = presetForPlan(plan)
     const check = startScenario(plan, model)
-    if (!check.ok) return `The simulator couldn’t build that plan: ${check.error.message} Try rephrasing it, or ask for something simpler.`
+    if (!check.ok) return `This can’t be built: ${check.error.message}`
     const id = `${ASSISTANT_PREFIX}${assistantScenarios.length + 1}`
     setAssistantScenarios((all) => [...all, { id, title: `Assistant: ${title}`, plan, model }])
     chooseScenario(id)
     return null
   }
-  /** The venue the assistant should keep using for new scenarios, when this is a real venue. */
-  const venue = scenario.plan.layout.mode === 'generate' ? null : {
-    layout: scenario.plan.layout,
-    name: scenario.plan.layout.mode === 'lookup' ? scenario.plan.layout.venue : scenario.title.replace(/ (uploaded)$/, ''),
+  /** Test-builds a plan the assistant wrote, without loading it; returns why it can't be built. */
+  const checkAssistantPlan = (plan: ScenarioPlan): string | null => {
+    const check = startScenario(plan, presetForPlan(plan))
+    return check.ok ? null : check.error.message
   }
+  /** Venues a new scenario can use, and which one is loaded now (null for a made-up building). */
+  const venues = useMemo(() => venueOptions(SCENARIOS[0]!.model), [])
+  const layout = scenario.plan.layout
+  const currentVenueId = layout.mode === 'lookup'
+    ? venues.find((v) => v.layout.mode === 'lookup' && v.layout.venue === layout.venue && v.layout.floor === layout.floor)?.id ?? null
+    : layout.mode === 'upload' ? layout.assetId : null
 
   /** Same description, a different building: the plan's seed first, then the next seeds in turn. */
   const nextLayout = () => {
@@ -415,7 +422,7 @@ export default function SimulatorApp() {
       <PlaybackBar client={client} view={view} ready={ready} now={now} incidents={incidents} />
 
       <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
-        <AssistantPanel client={client} view={view} venue={venue} onRunPlan={runAssistantPlan} />
+        <AssistantPanel client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
       </SidePanel>
 
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>

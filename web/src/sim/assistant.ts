@@ -124,6 +124,17 @@ export function interpret(reply: Extract<ReturnType<typeof PlannerReplySchema.pa
   }
 }
 
+/**
+ * The line added to a new-scenario request in a venue: how many people each area holds at the
+ * start, so the planner writes crowds that fit rather than plans the simulator must refuse.
+ */
+export function capacityNote(capacities: Record<string, number>): string {
+  const rooms = Object.entries(capacities).filter(([, n]) => n > 0)
+  if (rooms.length === 0) return ''
+  const list = rooms.map(([id, n]) => `${id} ${n}`).join(', ')
+  return `How many people each area can hold at the start (all spawns into one area together must stay at or below this): ${list}.`
+}
+
 /** A short title for a scenario the assistant wrote, from the person's own words. */
 export function titleFrom(prompt: string): string {
   const words = prompt.trim().replace(/\s+/g, ' ')

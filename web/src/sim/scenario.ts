@@ -1,7 +1,7 @@
-import { compile, preparedVenues, type CompileOptions } from '@crowd-control/compiler'
+import { compile, preparedVenues, spawnCapacities, type CompileOptions } from '@crowd-control/compiler'
 import { DISC_IMPULSE_VERSION, ModelPresetSchema } from '@crowd-control/contract'
 import { loadSavedVenues, presetFor, savedScenarioId, starterPlan, type SavedVenue } from './savedVenues.ts'
-import type { Capabilities, CompileOutput, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
+import type { Capabilities, CompileOutput, InventoryItem, LayoutSource, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
 
 /**
  * What the simulator can run today. The planner is told the same list, so it never asks for
@@ -47,6 +47,37 @@ export function venueAssets(): PreparedMap[] {
     venues = built.value
   }
   return venues
+}
+
+/** A venue the assistant can set a new scenario in: its layout source and its rooms and doors. */
+export type VenueOption = {
+  id: string; name: string; layout: LayoutSource; inventory: InventoryItem[]
+  /** People each room holds at the starting spacing, so the planner writes crowds that fit. */
+  capacities: Record<string, number>
+}
+
+/** Rooms and doors of a prepared map, as the planner's inventory (real IDs, labels and tags). */
+export function mapInventory(map: PreparedMap): InventoryItem[] {
+  return map.entities.flatMap((entity): InventoryItem[] => entity.kind === 'zone' || entity.kind === 'portal'
+    ? [{ id: entity.id, kind: entity.kind, ...(entity.label !== undefined && { label: entity.label }), tags: [...(entity.tags ?? [])], componentNames: entity.kind === 'portal' ? ['portal'] : [] }]
+    : [])
+}
+
+/**
+ * Every venue a new scenario can use: the prepared venues, then floor plans saved in this browser.
+ * `bodies` is the body-width preset for plans saved without a scale.
+ */
+export function venueOptions(bodies?: ModelPreset): VenueOption[] {
+  const prepared = venueAssets().flatMap((map): VenueOption[] => map.source.mode === 'lookup'
+    ? [{ id: map.id, name: map.source.venue, layout: { mode: 'lookup', venue: map.source.venue, floor: map.source.floor }, inventory: mapInventory(map), capacities: spawnCapacities(map, PEDESTRIAN_PRESET) }]
+    : [])
+  const saved = loadSavedVenues().map((venue): VenueOption => ({
+    id: venue.map.id, name: venue.name,
+    layout: { mode: 'upload', assetId: venue.map.id, page: venue.map.source.mode === 'upload' ? venue.map.source.page : 1 },
+    inventory: mapInventory(venue.map),
+    capacities: venue.map.grid.units === 'm' ? spawnCapacities(venue.map, PEDESTRIAN_PRESET) : bodies ? spawnCapacities(venue.map, bodies) : {},
+  }))
+  return [...prepared, ...saved]
 }
 
 /** The prepared venues plus every floor plan saved in this browser, read fresh each time. */

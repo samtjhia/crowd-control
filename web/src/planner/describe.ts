@@ -63,7 +63,7 @@ export function describeOperation(operation: Operation, inventory: InventoryItem
       return displayName(item?.label ?? id)
     }).join(', ') ?? 'selected entities'
     const portalOpen = operation.values.components?.portal?.open
-    if (portalOpen !== undefined) return `${portalOpen ? 'Open' : 'Close'} portal ${targets}`
+    if (portalOpen !== undefined) return `${portalOpen ? 'Open' : 'Close'} ${targets}`
     const speed = operation.values.components?.navigation?.preferredSpeed
     if (speed !== undefined) return `Set preferred speed to ${speed} for ${targets}`
     const multiplier = operation.values.components?.mobility?.speedMultiplier

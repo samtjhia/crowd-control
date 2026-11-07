@@ -695,6 +695,22 @@
 }
 
 .sim .sim-ask-kind button[aria-checked='true'] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+.sim-where { display: flex; align-items: center; gap: 8px; padding: 0 4px; color: var(--muted); font-size: 12px; }
+.sim-where select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.sim-where select:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.sim .sim-clear-chat { justify-self: center; font-size: 11.5px; }
 .sim-keep-venue { display: flex; align-items: center; gap: 7px; padding: 0 4px; color: var(--muted); font-size: 12px; line-height: 16px; }
 .sim-keep-venue input { width: 14px; height: 14px; margin: 0; accent-color: var(--green); }
 

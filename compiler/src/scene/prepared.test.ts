@@ -120,3 +120,13 @@ test('an unscaled floor plan cannot be run in metres', () => {
   wrongPage.plan.layout = { mode: 'upload', assetId: 'upload-abc123', page: 2 }
   assert.equal(code(compile(wrongPage)), 'MAP_NOT_FOUND')
 })
+
+test('room capacities match what placement allows, so a crowd of that size always fits', async () => {
+  const { spawnCapacities } = await import('./capacity.ts')
+  const input = lookupExample()
+  const capacities = spawnCapacities(input.assets[0]!, input.model)
+  assert.equal(capacities.lobby, 30, 'the 6 × 5 m lobby holds 30 at 1 m spacing')
+  assert.ok(capacities.cafe! > 0)
+  assert.equal(code(compile(lookupExample(capacities.lobby))), null, 'exactly the capacity fits')
+  assert.equal(code(compile(lookupExample(capacities.lobby! + 1))), 'NO_WALKABLE_SPACE', 'one more does not')
+})
