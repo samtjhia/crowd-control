@@ -1,6 +1,7 @@
 import { parseCompileInput, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
 import { chainLayout, designPopulation } from './layout/chain.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
+import { resolveProfiles } from './profiles/catalog.ts'
 import { fail } from './result.ts'
 import { placeInitialAgents } from './spawn/lattice.ts'
 
@@ -30,7 +31,7 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
-/** Generated chain layouts (§8). Sizing, the glyph map and the starting crowd are built; profiles and goals follow in steps 4–6. */
+/** Generated chain layouts (§8). Sizing, the glyph map, profiles and the starting crowd are built; goals follow in steps 5–6. */
 function compileGenerated(input: CompileInput): Result<CompileOutput> {
   const { layout } = input.plan
   if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
@@ -43,9 +44,11 @@ function compileGenerated(input: CompileInput): Result<CompileOutput> {
   if (cutOff.length > 0) {
     return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Not every space connects: ${cutOff.join(', ')} cannot be reached`, { affectedIds: cutOff })
   }
-  const agents = placeInitialAgents(input.plan.initialOperations, rooms, input.model)
+  const profiles = resolveProfiles(input.plan, input.model)
+  if (!profiles.ok) return profiles
+  const agents = placeInitialAgents(input.plan.initialOperations, rooms, profiles.value, input.model)
   if (!agents.ok) return agents
-  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are placed but profiles and goals are not compiled yet', { path: 'plan.layout' })
+  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are placed but goals are not compiled yet', { path: 'plan.layout' })
 }
 
 /** Prepared venue lookup: built in step 8. */

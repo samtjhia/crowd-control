@@ -1,8 +1,6 @@
-import type { AgentBlueprint, ModelPreset, Operation, Placement, Result, RoomRecord } from '@crowd-control/contract'
+import type { AgentBlueprint, AgentProfile, ModelPreset, Operation, Placement, Result, RoomRecord } from '@crowd-control/contract'
+import { DEFAULT_PROFILE } from '../profiles/catalog.ts'
 import { fail, ok } from '../result.ts'
-
-/** Profile used when a spawn template names none. Step 4 resolves profiles properly. */
-export const DEFAULT_PROFILE = 'person'
 
 type Point = { x: number; y: number }
 
@@ -32,9 +30,10 @@ export function roomLattice(room: RoomRecord, radius: number, pitch: number) {
  * a1, a2, … Later spawns into the same room continue that room's lattice, so nobody overlaps.
  * Scheduled spawns are left to the engine, which places them when they fall due.
  *
+ * Each body's clearance uses its template radius override, else its profile's radius.
  * Controllers are not attached here; goals are compiled in a later step.
  */
-export function placeInitialAgents(operations: Operation[], rooms: RoomRecord[], model: ModelPreset): Result<AgentBlueprint[]> {
+export function placeInitialAgents(operations: Operation[], rooms: RoomRecord[], profiles: { [id: string]: AgentProfile }, model: ModelPreset): Result<AgentBlueprint[]> {
   const pitch = model.layout.spacingDiameters * model.layout.bodyDiameter
   const latticeRadius = model.defaultAgent.physical.radius
   const used = new Map<string, number>()
@@ -51,7 +50,8 @@ export function placeInitialAgents(operations: Operation[], rooms: RoomRecord[],
     if (!room) return fail('NOT_FOUND', `No room called "${roomId}" to spawn into`, { path, affectedIds: [roomId] })
 
     const { template } = operation
-    const radius = template.components?.physical?.radius ?? latticeRadius
+    const profile = template.profile ?? DEFAULT_PROFILE
+    const radius = template.components?.physical?.radius ?? profiles[profile]?.radius ?? latticeRadius
     if (2 * radius > pitch) {
       return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Agents of radius ${radius} are wider than the spawn spacing of ${pitch}`, { path: `plan.initialOperations.${index}.template` })
     }
@@ -70,7 +70,7 @@ export function placeInitialAgents(operations: Operation[], rooms: RoomRecord[],
         id: `a${agents.length + 1}`,
         ...(template.label !== undefined && { label: template.label }),
         tags: [...(template.tags ?? [])],
-        profile: template.profile ?? DEFAULT_PROFILE,
+        profile,
         x,
         y,
         ...(template.components !== undefined && { components: JSON.parse(JSON.stringify(template.components)) as typeof template.components }),

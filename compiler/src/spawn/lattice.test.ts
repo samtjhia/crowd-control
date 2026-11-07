@@ -3,7 +3,10 @@ import test from 'node:test'
 import type { CompileInput, Operation, Result, RoomRecord } from '@crowd-control/contract'
 import { chainLayout, designPopulation } from '../layout/chain.ts'
 import { fixture, workedExample } from '../testing.ts'
-import { placeInitialAgents, roomLattice } from './lattice.ts'
+import { placeInitialAgents as place, roomLattice } from './lattice.ts'
+
+const profiles = { person: { radius: 0.5, preferredSpeed: 1 }, staff: { radius: 0.5, preferredSpeed: 1 }, wide: { radius: 1.5, preferredSpeed: 1 } }
+const placeInitialAgents = (operations: Operation[], all: RoomRecord[], model: CompileInput['model']) => place(operations, all, profiles, model)
 
 function value<T>(result: Result<T>): T {
   assert.equal(result.ok, true, JSON.stringify(result))
@@ -82,6 +85,7 @@ test('impossible placements fail clearly', () => {
   assert.equal(code(placeInitialAgents([spawn(1, 'kitchen')], all, input.model)), 'NOT_FOUND')
   assert.equal(code(placeInitialAgents([spawn(1, 'hall', { components: { physical: { radius: 1.5 } } })], all, input.model)), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
   const near: Operation = { op: 'spawn', template: { kind: 'agent' }, count: 1, placement: { near: { ids: ['hall_door'] } } }
+  assert.equal(code(placeInitialAgents([spawn(1, 'hall', { profile: 'wide' })], all, input.model)), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
   assert.equal(code(placeInitialAgents([near], all, input.model)), 'UNSUPPORTED_CAPABILITY')
   const byTag: Operation = { op: 'spawn', template: { kind: 'agent' }, count: 1, placement: { inside: { tags: ['indoor'] } } }
   assert.equal(code(placeInitialAgents([byTag], all, input.model)), 'UNSUPPORTED_CAPABILITY')
