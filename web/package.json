@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pretest": "npm run build --workspace @crowd-control/contract",
+    "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@crowd-control/contract": "*",
