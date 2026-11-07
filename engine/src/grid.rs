@@ -12,6 +12,7 @@ pub struct GridData {
     pub units: Units,
     pub blocked: Vec<u8>,
     pub traversal_cost: Vec<f32>,
+    pub terrain_speed_multiplier: Vec<f32>,
     pub zone_index: Vec<u32>,
     pub portal_index: Vec<u32>,
     pub zone_ids: Vec<Option<Id>>,
@@ -72,6 +73,23 @@ impl GridData {
                 return Err(invalid("Invalid grid value or dictionary index"));
             }
             let costs: Vec<f32> = grid.traversal_cost.iter().map(|c| c.0 as f32).collect();
+            let terrain: Vec<f32> = grid.terrain_speed_multiplier.as_ref().map_or_else(
+                || vec![1.0; size],
+                |v| v.iter().map(|s| s.0 as f32).collect(),
+            );
+            if terrain.len() != size
+                || terrain
+                    .iter()
+                    .any(|s| !s.is_finite() || *s <= 0.0 || *s > 1.0)
+                || grid
+                    .terrain_speed_multiplier
+                    .as_ref()
+                    .is_some_and(|v| v.iter().any(|s| s.0 > 1.0))
+            {
+                return Err(invalid(
+                    "Terrain speed multipliers require one Float32 value in (0,1] per cell",
+                ));
+            }
             if costs
                 .iter()
                 .enumerate()
@@ -88,6 +106,7 @@ impl GridData {
                 units: map.units.clone(),
                 blocked: grid.blocked.iter().map(|v| v.0 as u8).collect(),
                 traversal_cost: costs,
+                terrain_speed_multiplier: terrain,
                 zone_index: grid.zone_index.iter().map(|v| v.0 as u32).collect(),
                 portal_index: grid.portal_index.iter().map(|v| v.0 as u32).collect(),
                 zone_ids: grid.zone_ids.clone(),
@@ -117,6 +136,7 @@ impl GridData {
                 units: map.units.clone(),
                 blocked: vec![1; size],
                 traversal_cost: vec![1.0; size],
+                terrain_speed_multiplier: vec![1.0; size],
                 zone_index: vec![0; size],
                 portal_index: vec![0; size],
                 zone_ids: vec![None],
@@ -273,7 +293,7 @@ impl GridData {
                 let top = row as f64 * self.cell_size;
                 let dx = x - x.clamp(left, left + self.cell_size);
                 let dy = y - y.clamp(top, top + self.cell_size);
-                if radius - dx.hypot(dy) > radius * 1e-10 {
+                if radius - crate::geometry::norm(dx, dy) > radius * 1e-10 {
                     cells.push(row * self.width + col);
                 }
             }

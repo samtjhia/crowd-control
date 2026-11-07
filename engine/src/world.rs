@@ -55,7 +55,7 @@ impl World {
         }
         if !s.jobs.is_empty() || !s.rules.is_empty() || model.contact.is_some() {
             return Err(unsupported(
-                "Jobs, rules and contact physics are not enabled in part three",
+                "Jobs, rules and contact physics are not enabled in part four",
             ));
         }
         if s.agents.len() > 2000 {
@@ -196,7 +196,10 @@ impl World {
                 if a.components.physical.blocks_movement
                     && b.components.physical.blocks_movement
                     && sum
-                        - (a.position.x.0 - b.position.x.0).hypot(a.position.y.0 - b.position.y.0)
+                        - crate::geometry::norm(
+                            a.position.x.0 - b.position.x.0,
+                            a.position.y.0 - b.position.y.0,
+                        )
                         > sum * 1e-10
                 {
                     return Err((
@@ -266,9 +269,19 @@ impl World {
         if !self.navigator.prepared {
             self.prepare_navigation()?;
         }
+        let before = self.agents.clone();
+        let before_tick = self.tick;
         while self.tick < next {
-            self.navigator
-                .step(&self.grid, &mut self.agents, self.initial.scene.model.dt.0);
+            if let Err(error) = self.navigator.step(
+                &self.grid,
+                &mut self.agents,
+                self.initial.scene.model.dt.0,
+                self.tick,
+            ) {
+                self.agents = before;
+                self.tick = before_tick;
+                return Err(error);
+            }
             self.tick += 1;
         }
         Ok(())
@@ -428,6 +441,46 @@ pub fn wire<T: Serialize>(value: &T) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn movement_failure_rolls_back_the_whole_batch() {
+        let input: Value = serde_json::from_str(include_str!(
+            "../../contract/fixtures/engine-movement-load.json"
+        ))
+        .unwrap();
+        let initial = serde_json::from_value(input["compiled"].clone()).unwrap();
+        let mut world = World::load(initial, &Id("engine-demo".into())).unwrap();
+        world.agents[0].components.navigation.preferred_speed = Nonnegative(10000.0);
+        world.agents[0].components.navigation.maximum_speed = Nonnegative(10000.0);
+        world.agents[0].timers.reaction_remaining = Nonnegative(0.05);
+        let before = world.snapshot(&Id("saved".into()));
+        assert_eq!(world.advance(2).unwrap_err().0, "RESOURCE_LIMIT");
+        assert_eq!(world.snapshot(&Id("saved".into())), before);
+    }
+    #[test]
+    fn terrain_and_immobile_serialization_resume_without_resetting_goals() {
+        let input: Value = serde_json::from_str(include_str!(
+            "../../contract/fixtures/engine-movement-load.json"
+        ))
+        .unwrap();
+        let initial = serde_json::from_value(input["compiled"].clone()).unwrap();
+        let mut world = World::load(initial, &Id("engine-demo".into())).unwrap();
+        world.advance(17).unwrap();
+        let stop = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"stop","operations":[{"op":"set","targets":{"ids":["a1"]},"values":{"components":{"mobility":{"speedMultiplier":0}},"appearance":{"pose":"fallen"}}}]});
+        assert_eq!(world.apply_request(&stop).unwrap()["ok"], true);
+        let mut restored: World =
+            serde_json::from_str(&serde_json::to_string(&world).unwrap()).unwrap();
+        for w in [&mut world, &mut restored] {
+            w.advance(20).unwrap();
+            let recover = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"recover","operations":[{"op":"set","targets":{"ids":["a1"]},"values":{"components":{"mobility":{"speedMultiplier":1}},"appearance":{"pose":"upright"}}}]});
+            assert_eq!(w.apply_request(&recover).unwrap()["ok"], true);
+            w.advance(30).unwrap();
+        }
+        assert_eq!(
+            restored.snapshot(&Id("saved".into())),
+            world.snapshot(&Id("saved".into()))
+        );
+        assert_eq!(restored.history.outcomes, world.history.outcomes);
+    }
     #[test]
     fn shared_fields_and_active_roundtrip_preserve_route_progress() {
         let mut input: Value = serde_json::from_str(include_str!(

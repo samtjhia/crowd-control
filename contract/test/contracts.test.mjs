@@ -34,6 +34,8 @@ test('PRD and worker fixtures pass strict contracts without normalization', () =
     'engine-static-load': c.WorkerCommandSchema,
     'engine-grid-load': c.WorkerCommandSchema,
     'engine-navigation-load': c.WorkerCommandSchema,
+    'engine-movement-load': c.WorkerCommandSchema,
+    'engine-crossing-load': c.WorkerCommandSchema,
   };
   for (const [name, schema] of Object.entries(fixtures)) {
     const original = fixture(name);
@@ -201,6 +203,24 @@ test('uncalibrated upload can be previewed but cannot claim metre units', () => 
   map.grid.units = 'm'; rejects(c.PreparedMapSchema, map, 'SCALE_CALIBRATION_REQUIRED');
   map.source.calibration = { pointsPx: [[0, 0], [250, 0]], distanceMetres: 10, metresPerPixel: .04 };
   check(c.PreparedMapSchema, map);
+});
+
+test('terrain speed is a separate optional copied Float32 grid buffer', () => {
+  const grid = fixture('engine-grid-load').compiled.scene.map.grid;
+  const speed = Array(grid.width * grid.height).fill(0.5);
+  const input = { ...grid, terrainSpeedMultiplier: speed };
+  check(c.GridDataSchema, input);
+  const packed = c.gridToBuffers(input);
+  assert.equal(packed.ok, true);
+  assert.ok(packed.value.terrainSpeedMultiplier instanceof Float32Array);
+  speed[0] = 1;
+  assert.equal(packed.value.terrainSpeedMultiplier[0], 0.5);
+  assert.deepEqual(c.gridFromBuffers(packed.value).value.terrainSpeedMultiplier, Array(speed.length).fill(0.5));
+  for (const bad of [[], [0], [-1], [2], [Infinity], [1e-100]]) {
+    const values = bad.length ? Array(speed.length).fill(bad[0]) : bad;
+    assert.equal(c.gridToBuffers({ ...grid, terrainSpeedMultiplier: values }).ok, false);
+  }
+  assert.equal(c.gridFromBuffers(c.gridToBuffers(grid).value).value.terrainSpeedMultiplier, undefined);
 });
 
 test('saved runs and storage updates validate their complete envelopes', () => {

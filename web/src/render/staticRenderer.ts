@@ -41,23 +41,25 @@ export async function createStaticRenderer(host: HTMLElement) {
         for (const graphic of app.stage.removeChildren()) graphic.destroy()
         agents.clear()
         const map = scene.map
-        const drawCell = (x: number, y: number, color: string) => {
+        const drawCell = (x: number, y: number, color: string, slow = false) => {
           const graphic = new pixi.Graphics().rect((x * map.cellSize - camera.pan.x) * scale, (y * map.cellSize - camera.pan.y) * scale, map.cellSize * scale, map.cellSize * scale).fill(color)
+          if (slow) graphic.stroke({ color: '#D97706', width: 2 })
           app.stage.addChild(graphic)
         }
-        const paint = (x: number, y: number, blocked: boolean, id: string | null | undefined) => {
+        const paint = (x: number, y: number, blocked: boolean, id: string | null | undefined, terrain = 1) => {
           const room = map.rooms.find((r) => r.id === id)
           const portal = map.portals.find((p) => p.id === id)
-          drawCell(x, y, blocked ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? '#E2E8F0')
+          drawCell(x, y, blocked ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? '#E2E8F0', !blocked && terrain < 1)
         }
         if ('grid' in map) {
           const grid = map.grid
-          grid.blocked.forEach((blocked, i) => paint(i % grid.width, Math.floor(i / grid.width), blocked === 1, grid.portalIds[grid.portalIndex[i]!] ?? grid.zoneIds[grid.zoneIndex[i]!]))
+          grid.blocked.forEach((blocked, i) => paint(i % grid.width, Math.floor(i / grid.width), blocked === 1, grid.portalIds[grid.portalIndex[i]!] ?? grid.zoneIds[grid.zoneIndex[i]!], grid.terrainSpeedMultiplier?.[i]))
         } else map.rows.forEach((row, y) => [...row].forEach((glyph, x) => paint(x, y, glyph === '#', map.legend[glyph])))
         for (const agent of scene.agents) {
           const r = agent.radius * scale
           const graphic = new pixi.Graphics()
-          switch (agent.appearance.symbol ?? 'circle') {
+          if (agent.appearance.pose === 'fallen') graphic.rect(-r * 0.9, -r * 0.3, r * 1.8, r * 0.6)
+          else switch (agent.appearance.symbol ?? 'circle') {
             case 'circle': graphic.circle(0, 0, r); break
             case 'square': graphic.rect(-r / Math.SQRT2, -r / Math.SQRT2, r * Math.SQRT2, r * Math.SQRT2); break
             case 'triangle': graphic.poly([0, -r, Math.sqrt(3) * r / 2, r / 2, -Math.sqrt(3) * r / 2, r / 2]); break

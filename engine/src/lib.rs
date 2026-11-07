@@ -1,7 +1,8 @@
-//! Authoritative initialized worlds and fixed simulation clocks; movement follows.
+//! Authoritative worlds, fixed ticks and collision-safe local movement.
 mod core;
 mod geometry;
 mod grid;
+mod movement;
 mod navigation;
 mod portal_changes;
 mod protocol;

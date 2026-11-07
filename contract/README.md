@@ -56,11 +56,15 @@ npm run typecheck --workspace @crowd-control/contract
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits and the performance target
-remain implementation work. Parts one–three now provide Rust world initialization,
+remain implementation work. Parts one–four now provide Rust world initialization,
 full runtime agents, both grid encodings, seeded streams, fixed-clock playback and
 snapshot export, basic reach navigation and recorded immediate portal.open changes.
 Actual Wasm tests include native parity and host pacing. Browser worker/PixiJS
-acceptance remains pending; crowd avoidance, restore and replay remain unimplemented.
+acceptance remains pending; restore and replay remain unimplemented. Part four adds
+acceleration, local avoidance, swept-disc exclusion and recorded mobility/recovery.
+Optional grid.terrainSpeedMultiplier supplies one Float32 value in (0,1] per cell;
+omitting it means all 1. It is separate from traversalCost and survives buffer copies.
+engine-movement-load.json and engine-crossing-load.json exercise these capabilities.
 
 ## Engine input example
 

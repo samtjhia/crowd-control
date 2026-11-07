@@ -33,9 +33,11 @@ export const MapSourceSchema = z.discriminatedUnion('mode', [
 export const GridDataSchema = z.strictObject({
   width: PositiveIntegerSchema, height: PositiveIntegerSchema, cellSize: PositiveSchema, units: UnitsSchema,
   blocked: z.array(z.union([z.literal(0), z.literal(1)])), traversalCost: z.array(FiniteSchema.nonnegative()), zoneIndex: z.array(CounterSchema), portalIndex: z.array(CounterSchema), zoneIds: z.array(IdSchema.nullable()).min(1), portalIds: z.array(IdSchema.nullable()).min(1),
+  terrainSpeedMultiplier: z.array(PositiveSchema.max(1)).optional(),
 }).superRefine((v, ctx) => {
   const size = v.width * v.height;
   for (const key of ['blocked', 'traversalCost', 'zoneIndex', 'portalIndex'] as const) if (v[key].length !== size) ctx.addIssue({ code: 'custom', path: [key], message: 'Grid buffer length must equal width × height' });
+  if (v.terrainSpeedMultiplier && v.terrainSpeedMultiplier.length !== size) ctx.addIssue({ code: 'custom', path: ['terrainSpeedMultiplier'], message: 'Grid buffer length must equal width × height' });
   if (v.traversalCost.some((cost, i) => v.blocked[i] === 0 && cost <= 0)) ctx.addIssue({ code: 'custom', path: ['traversalCost'], message: 'Walkable cells require positive traversal cost' });
   for (const [indices, ids, path] of [[v.zoneIndex, v.zoneIds, 'zoneIndex'], [v.portalIndex, v.portalIds, 'portalIndex']] as const) {
     if (ids[0] !== null || ids.slice(1).some((id) => id === null) || new Set(ids).size !== ids.length || indices.some((i) => i >= ids.length)) ctx.addIssue({ code: 'custom', path: [path], message: 'Invalid grid membership dictionary or index' });

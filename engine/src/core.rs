@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "navigation-engine-v3";
+pub const ENGINE_VERSION: &str = "movement-engine-v4";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -156,7 +156,7 @@ impl Engine {
                     .loaded
                     .as_mut()
                     .unwrap()
-                    .portal_request(c.request.as_ref().unwrap())?;
+                    .apply_request(c.request.as_ref().unwrap())?;
                 if result["ok"] == true {
                     let mut messages = self.publication(&c.command_id, true);
                     messages[0]["applied"] = result["value"].clone();
@@ -170,9 +170,7 @@ impl Engine {
             "query" => {
                 let query = c.query.as_ref().unwrap();
                 if query["kind"] != "history" {
-                    return Err(unsupported(
-                        "Only history queries are enabled in part three",
-                    ));
+                    return Err(unsupported("Only history queries are enabled in part four"));
                 }
                 if query.as_object().is_none_or(|v| v.len() != 1) {
                     return Err(invalid("Unknown history query fields"));
@@ -183,7 +181,7 @@ impl Engine {
                 ])
             }
             _ => Err(unsupported(format!(
-                "{} is not enabled in part three",
+                "{} is not enabled in part four",
                 c.r#type
             ))),
         }

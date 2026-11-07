@@ -1,4 +1,4 @@
-//! Part-one input DTOs. Unsupported executable payloads are retained only to reject them.
+//! Strict input/runtime DTOs for the supported engine subset.
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -124,7 +124,7 @@ dto!(Profile { radius: Positive, preferred_speed: Nonnegative, maximum_speed: Op
 dto!(Agent { id: Id, label: Option<String>, tags: Vec<Id>, profile: Id, x: Number, y: Number, controller: Option<Id>, components: Option<Overrides>, appearance: Option<Appearance> });
 dto!(Room { id: Id, label: Option<String>, tags: Option<Vec<Id>>, x: Number, y: Number, width: Positive, height: Positive, appearance: Option<MapAppearance> });
 dto!(Portal { id: Id, label: Option<String>, tags: Option<Vec<Id>>, x: Number, y: Number, width: Positive, height: Positive, connects: [Id;2], open: bool, one_way: Option<bool>, traversal_time: Option<Nonnegative>, appearance: Option<MapAppearance> });
-dto!(Grid { width: Counter, height: Counter, cell_size: Positive, units: Units, blocked: Vec<Counter>, traversal_cost: Vec<Nonnegative>, zone_index: Vec<Counter>, portal_index: Vec<Counter>, zone_ids: Vec<Option<Id>>, portal_ids: Vec<Option<Id>> });
+dto!(Grid { width: Counter, height: Counter, cell_size: Positive, units: Units, blocked: Vec<Counter>, traversal_cost: Vec<Nonnegative>, terrain_speed_multiplier: Option<Vec<Positive>>, zone_index: Vec<Counter>, portal_index: Vec<Counter>, zone_ids: Vec<Option<Id>>, portal_ids: Vec<Option<Id>> });
 dto!(Calibration {
     points_px: [[Number; 2]; 2],
     distance_metres: Positive,
@@ -248,14 +248,13 @@ pub enum SetKind {
 dto!(PortalRequest { schema_version: Counter, simulation_id: Id, request_id: Id, action: Option<CreateAction>, label: Option<String>, at: Option<Nonnegative>, operations: Vec<Value> });
 dto!(PortalSelector { ids: Vec<Id>, kind: Option<EntityKind> });
 dto!(PortalOpen { open: bool });
-dto!(PortalComponents { portal: PortalOpen });
-dto!(PortalValues {
-    components: PortalComponents
-});
-dto!(PortalOperation {
+dto!(ChangeComponents { portal: Option<PortalOpen>, mobility: Option<Mobility> });
+dto!(PoseOverride { pose: Pose });
+dto!(ChangeValues { components: ChangeComponents, appearance: Option<PoseOverride> });
+dto!(ChangeOperation {
     op: SetKind,
     targets: PortalSelector,
-    values: PortalValues
+    values: ChangeValues
 });
 
 pub fn preflight(value: &Value) -> Result<(), &'static str> {

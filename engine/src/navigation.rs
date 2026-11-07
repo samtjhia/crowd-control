@@ -67,7 +67,7 @@ impl Ord for Entry {
 
 pub fn parse_goal(value: &serde_json::Value) -> Result<ReachGoal, Failure> {
     if value["kind"] != "reach" {
-        return Err(unsupported("Only reach goals are enabled in part three"));
+        return Err(unsupported("Only reach goals are enabled in part four"));
     }
     let goal: ReachGoal =
         serde_json::from_value(value.clone()).map_err(|e| invalid(e.to_string()))?;
@@ -134,7 +134,7 @@ fn center(grid: &GridData, i: usize) -> Point {
         y: Number((i / grid.width) as f64 * grid.cell_size + grid.cell_size / 2.0),
     }
 }
-fn index(grid: &GridData, p: &Point) -> usize {
+pub fn index(grid: &GridData, p: &Point) -> usize {
     (p.y.0 / grid.cell_size).floor() as usize * grid.width
         + (p.x.0 / grid.cell_size).floor() as usize
 }
@@ -431,7 +431,7 @@ impl Navigator {
             if !travel.is_finite() || (travel / grid.cell_size).ceil() * 4.0 + 8.0 > 256.0 {
                 return Err((
                     "RESOURCE_LIMIT",
-                    "Navigation travel per tick exceeds the waypoint budget".into(),
+                    "Movement travel per tick exceeds the subdivision budget".into(),
                 ));
             }
             let radius = a.components.physical.radius.0;
@@ -593,129 +593,159 @@ impl Navigator {
         self.prepared = true;
         Ok(())
     }
-    pub fn step(&self, grid: &GridData, agents: &mut [AgentRuntime], dt: f64) {
-        // shortcut: this path follower ignores mobile neighbors; add steering/acceleration in part four.
-        for (i, route) in self.routes.iter().enumerate() {
-            let Some(route) = route else {
-                continue;
-            };
-            let a = &mut agents[i];
-            if a.current_goal
-                .as_ref()
-                .is_none_or(|g| g.status == "completed" || g.status == "failed")
-            {
-                continue;
-            }
+    pub fn step(
+        &self,
+        grid: &GridData,
+        agents: &mut [AgentRuntime],
+        dt: f64,
+        tick: u64,
+    ) -> Result<(), Failure> {
+        crate::movement::advance(self, grid, agents, dt, tick)
+    }
+    pub fn ready(&self, a: &mut AgentRuntime, i: usize, dt: f64) -> bool {
+        if a.components.mobility.speed_multiplier.0 == 0.0 {
+            a.state = "immobile".into();
             a.velocity = Point {
                 x: Number(0.0),
                 y: Number(0.0),
             };
-            if a.components.mobility.speed_multiplier.0 == 0.0 {
-                a.state = "immobile".into();
-                continue;
-            }
-            if a.timers.reaction_remaining.0 > 0.0 {
-                a.timers.reaction_remaining.0 = countdown(a.timers.reaction_remaining.0, dt);
-                a.state = "reacting".into();
-                continue;
-            }
-            if route.blocked {
-                a.state = "blocked".into();
-                continue;
-            }
-            if a.timers.wait_remaining.0 > 0.0 {
-                a.timers.wait_remaining.0 = countdown(a.timers.wait_remaining.0, dt);
-                a.state = "waiting".into();
-                continue;
-            }
-            let field = &self.fields[&route.key];
-            let old = a.position.clone();
-            let mut budget = speed(a) * dt;
-            let epsilon = grid.cell_size * 1e-9;
+            return false;
+        }
+        let Some(route) = &self.routes[i] else {
+            return false;
+        };
+        if a.current_goal
+            .as_ref()
+            .is_none_or(|g| g.status == "completed" || g.status == "failed")
+        {
+            return false;
+        }
+        let state = if a.timers.reaction_remaining.0 > 0.0 {
+            a.timers.reaction_remaining.0 = countdown(a.timers.reaction_remaining.0, dt);
+            Some("reacting")
+        } else if route.blocked {
+            Some("blocked")
+        } else if a.timers.wait_remaining.0 > 0.0 {
+            a.timers.wait_remaining.0 = countdown(a.timers.wait_remaining.0, dt);
+            Some("waiting")
+        } else {
+            None
+        };
+        if let Some(state) = state {
+            a.state = state.into();
+            a.velocity = Point {
+                x: Number(0.0),
+                y: Number(0.0),
+            };
+            false
+        } else {
             a.state = "moving".into();
             a.state_reason = None;
-            for _ in 0..256 {
-                let cell = index(grid, &a.position);
-                if a.navigation.target_point.is_none() {
-                    let current = center(grid, cell);
-                    if distance(&a.position, &current) > epsilon {
-                        a.navigation.target_point = Some(current);
-                    } else {
-                        let next = field.next[cell];
-                        if next == NONE {
-                            a.state = "blocked".into();
-                            break;
-                        }
-                        if next == cell as u32 {
-                            complete(a);
-                            break;
-                        }
-                        a.navigation.target_point = Some(center(grid, next as usize));
-                        let portal = grid.portal_index[next as usize];
-                        if portal != 0 && portal != grid.portal_index[cell] {
-                            let wait = self.portal_info[portal as usize].unwrap().3;
-                            if wait > 0.0 {
-                                a.timers.wait_remaining = Nonnegative(wait);
-                                a.state = "waiting".into();
-                                break;
-                            }
-                        }
-                    }
+            true
+        }
+    }
+    pub fn waypoint(
+        &self,
+        grid: &GridData,
+        a: &mut AgentRuntime,
+        i: usize,
+        work: &mut usize,
+    ) -> Result<Option<(Point, f64)>, Failure> {
+        let Some(route) = self.routes[i].as_ref() else {
+            return Ok(None);
+        };
+        let field = &self.fields[&route.key];
+        let epsilon = grid.cell_size * 1e-7;
+        let cell = index(grid, &a.position);
+        if let Some(target) = a.navigation.target_point.as_ref() {
+            let to = index(grid, target);
+            let next = field.next[cell];
+            if next == cell as u32 && to != cell {
+                a.navigation.target_point = Some(center(grid, cell));
+            } else if to == cell && next != NONE && next != cell as u32 {
+                let p = grid.portal_index[next as usize];
+                let delayed = p != 0
+                    && p != grid.portal_index[cell]
+                    && self.portal_info[p as usize].unwrap().3 > 0.0;
+                let next_point = center(grid, next as usize);
+                // Follow the field through a cell without forcing crossing streams onto its center.
+                if !delayed
+                    && geometry::clear(
+                        grid,
+                        &[],
+                        &a.position,
+                        &next_point,
+                        a.components.physical.radius.0,
+                        work,
+                    )?
+                    && self.permits(grid, &a.position, &next_point)
+                {
+                    a.navigation.target_point = Some(next_point);
                 }
-                let target = a.navigation.target_point.as_ref().unwrap();
-                let to = index(grid, target);
-                let target_center = center(grid, to);
-                let remaining = distance(&a.position, target)
-                    + distance(target, &target_center)
-                    + f64::from(field.hops[to]) * grid.cell_size;
-                let stop = a
-                    .current_goal
-                    .as_ref()
-                    .unwrap()
-                    .spec
-                    .stop_distance
-                    .map_or(0.0, |d| d.0);
-                if remaining <= stop + epsilon {
-                    complete(a);
-                    break;
-                }
-                if budget <= epsilon {
-                    if speed(a) == 0.0 {
-                        a.state = "waiting".into();
-                        a.state_reason = Some("zero-desired-speed".into());
-                    }
-                    break;
-                }
-                let d = distance(&a.position, target);
-                let travel = budget.min(d).min(remaining - stop);
-                if d <= epsilon {
-                    a.position = target.clone();
-                    a.navigation.target_point = None;
-                    continue;
-                }
-                a.position.x.0 += (target.x.0 - a.position.x.0) / d * travel;
-                a.position.y.0 += (target.y.0 - a.position.y.0) / d * travel;
-                budget -= travel;
-                if travel >= d {
-                    a.position = target.clone();
-                    a.navigation.target_point = None;
-                }
-                if remaining - travel <= stop + epsilon {
-                    complete(a);
-                    break;
-                }
-                if travel < d {
-                    break;
-                }
-            }
-            a.zone_id = grid.zone_at(a.position.x.0, a.position.y.0);
-            if a.state == "moving" {
-                a.velocity = Point {
-                    x: Number((a.position.x.0 - old.x.0) / dt),
-                    y: Number((a.position.y.0 - old.y.0) / dt),
-                };
             }
         }
+        if a.navigation
+            .target_point
+            .as_ref()
+            .is_some_and(|p| distance(&a.position, p) <= epsilon)
+        {
+            a.navigation.target_point = None;
+        }
+        if a.navigation.target_point.is_none() {
+            let current = center(grid, cell);
+            if distance(&a.position, &current) > epsilon {
+                a.navigation.target_point = Some(current);
+            } else {
+                let next = field.next[cell];
+                if next == NONE {
+                    a.state = "blocked".into();
+                    a.state_reason = Some("unreachable-at-current-topology".into());
+                    a.velocity = Point {
+                        x: Number(0.0),
+                        y: Number(0.0),
+                    };
+                    return Ok(None);
+                }
+                if next == cell as u32 {
+                    complete(a);
+                    return Ok(None);
+                }
+                a.navigation.target_point = Some(center(grid, next as usize));
+                let portal = grid.portal_index[next as usize];
+                if portal != 0 && portal != grid.portal_index[cell] {
+                    let wait = self.portal_info[portal as usize].unwrap().3;
+                    if wait > 0.0 {
+                        a.timers.wait_remaining = Nonnegative(wait);
+                        a.state = "waiting".into();
+                        a.velocity = Point {
+                            x: Number(0.0),
+                            y: Number(0.0),
+                        };
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        let target = a.navigation.target_point.as_ref().unwrap();
+        let to = index(grid, target);
+        let remaining = distance(&a.position, target)
+            + distance(target, &center(grid, to))
+            + f64::from(field.hops[to]) * grid.cell_size;
+        let stop = a
+            .current_goal
+            .as_ref()
+            .unwrap()
+            .spec
+            .stop_distance
+            .map_or(0.0, |d| d.0);
+        if remaining <= stop + epsilon {
+            complete(a);
+            return Ok(None);
+        }
+        Ok(Some((target.clone(), remaining - stop)))
+    }
+    pub fn permits(&self, grid: &GridData, from: &Point, to: &Point) -> bool {
+        allowed(grid, &self.portal_info, index(grid, from), index(grid, to)).unwrap_or(false)
     }
     #[cfg(test)]
     pub fn field_count(&self) -> usize {
@@ -728,6 +758,10 @@ fn complete(a: &mut AgentRuntime) {
     a.state_reason = None;
     a.navigation.target_point = None;
     a.navigation.flow_field_id = None;
+    a.velocity = Point {
+        x: Number(0.0),
+        y: Number(0.0),
+    };
 }
 fn countdown(remaining: f64, dt: f64) -> f64 {
     if remaining <= dt * (1.0 + 1e-9) {

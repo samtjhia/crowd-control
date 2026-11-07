@@ -92,34 +92,73 @@ test('actual Wasm navigation, topology interventions and history match native Ru
   const initial = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-navigation-load.json', import.meta.url), 'utf8'))
   const header = { schemaVersion: 1, simulationId: 'engine-demo' }
   const change = (requestId: string, open: boolean) => ({ ...header, commandId: requestId, type: 'apply_request', request: { ...header, requestId, action: 'create_intervention', label: 'Door change', operations: [{ op: 'set', targets: { ids: ['door'] }, values: { components: { portal: { open } } } }] } })
-  const commands = [initial,
+  const commands: unknown[] = [initial,
     { ...header, commandId: 'move', type: 'step', ticks: 10 },
     change('close', false),
     { ...header, commandId: 'blocked', type: 'step', ticks: 20 },
     { ...header, commandId: 'blocked-state', type: 'snapshot', snapshotId: 'blocked' },
     change('open', true),
-    { ...header, commandId: 'move-again', type: 'step', ticks: 50 },
-    change('occupied', false),
-    { ...header, commandId: 'finish', type: 'step', ticks: 50 },
-    change('close', false),
-    change('occupied', false),
+  ]
+  const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+  let frame = wasm.at(-1).find((m: WorkerMessage) => m.type === 'frame').frame
+  for (let i = 0; i < 160 && frame.agents[0].x < 3.3; i++) {
+    const command = { ...header, commandId: `approach-${i}`, type: 'step', ticks: 1 }
+    commands.push(command)
+    const messages = JSON.parse(bindings.dispatch(handle, JSON.stringify(command)))
+    wasm.push(messages); frame = messages.find((m: WorkerMessage) => m.type === 'frame').frame
+  }
+  assert.ok(frame.agents[0].x >= 3.3 && frame.agents[0].x < 3.8)
+  for (const c of [change('occupied', false),
+    { ...header, commandId: 'finish', type: 'step', ticks: 160 },
+    change('close', false), change('occupied', false),
     { ...header, commandId: 'history', type: 'query', query: { kind: 'history' } },
     { ...header, commandId: 'final', type: 'snapshot', snapshotId: 'complete' },
-  ]
-  for (const command of commands) assert.equal(parseWorkerCommand(command).ok, true, JSON.stringify(command))
-  const wasm = commands.map((command) => JSON.parse(bindings.dispatch(handle, JSON.stringify(command))))
-  for (const messages of wasm) for (const message of messages) {
-    const result = parseWorkerMessage(message)
-    assert.equal(result.ok, true, JSON.stringify(result))
-  }
+  ]) { commands.push(c); wasm.push(JSON.parse(bindings.dispatch(handle, JSON.stringify(c)))) }
+  for (const c of commands) assert.equal(parseWorkerCommand(c).ok, true)
+  for (const messages of wasm) for (const message of messages) assert.equal(parseWorkerMessage(message).ok, true)
   const executable = fileURLToPath(new URL(`../../target/debug/examples/protocol${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url))
   const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((line) => JSON.parse(line))
   assert.deepEqual(wasm, native)
   assert.equal(wasm[4][0].snapshot.agents[0].state, 'blocked')
-  assert.equal(wasm[7][0].error.code, 'NO_WALKABLE_SPACE')
+  assert.equal(wasm.flat().find((m) => m.commandId === 'occupied').error.code, 'NO_WALKABLE_SPACE')
   const final = state(bindings, handle)
   assert.equal(final.agents[0]!.currentGoal!.status, 'completed')
-  assert.equal(final.topologyVersion, 2)
-  assert.equal(final.historyRevision, 2)
+  assert.equal(final.topologyVersion, 2); assert.equal(final.historyRevision, 2)
   bindings.destroy_engine(handle)
+})
+
+test('actual Wasm movement, crossing streams, terrain and recovery match native Rust', async () => {
+  const bindings = await engine()
+  const header = { schemaVersion: 1, simulationId: 'engine-demo' }
+  for (const fixture of ['engine-movement-load', 'engine-crossing-load']) {
+    const initial = JSON.parse(readFileSync(new URL(`../../contract/fixtures/${fixture}.json`, import.meta.url), 'utf8'))
+    const id = initial.compiled.scene.agents[0].id
+    const change = (requestId: string, speedMultiplier: number) => ({ ...header, commandId: requestId, type: 'apply_request', request: { ...header, requestId, operations: [{ op: 'set', targets: { ids: [id], kind: 'agent' }, values: { components: { mobility: { speedMultiplier } }, appearance: { pose: speedMultiplier === 0 ? 'fallen' : 'upright' } } }] } })
+    const commands = [initial,
+      { ...header, commandId: 'move', type: 'step', ticks: 60 },
+      change('stop', 0),
+      { ...header, commandId: 'held', type: 'step', ticks: 20 },
+      { ...header, commandId: 'stopped-state', type: 'snapshot', snapshotId: 'stopped' },
+      change('recover', 1),
+      { ...header, commandId: 'finish', type: 'step', ticks: 700 },
+      { ...header, commandId: 'final', type: 'snapshot', snapshotId: 'complete' },
+    ]
+    const handle = bindings.create_engine()
+    for (const c of commands) assert.equal(parseWorkerCommand(c).ok, true)
+    const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+    for (const messages of wasm) for (const message of messages) {
+      const parsed = parseWorkerMessage(message)
+      assert.equal(parsed.ok, true, JSON.stringify(parsed))
+      assert.notEqual(message.type, 'error', JSON.stringify(message))
+    }
+    const executable = fileURLToPath(new URL(`../../target/debug/examples/protocol${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url))
+    const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((line) => JSON.parse(line))
+    assert.deepEqual(wasm, native)
+    const stopped = wasm[4][0].snapshot.agents.find((a: { id: string }) => a.id === id)
+    assert.equal(stopped.state, 'immobile')
+    assert.equal(stopped.currentGoal.status, 'suspended')
+    assert.deepEqual(stopped.position, { x: wasm[2][2].frame.agents.find((a: { id: string }) => a.id === id).x, y: wasm[2][2].frame.agents.find((a: { id: string }) => a.id === id).y })
+    assert.equal(wasm[7][0].snapshot.agents.every((a: { currentGoal: { status: string } }) => a.currentGoal.status === 'completed'), true)
+    bindings.destroy_engine(handle)
+  }
 })

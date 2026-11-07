@@ -8,17 +8,27 @@ pub struct Body {
     pub radius: f64,
 }
 pub fn distance(a: &Point, b: &Point) -> f64 {
-    (a.x.0 - b.x.0).hypot(a.y.0 - b.y.0)
+    norm(a.x.0 - b.x.0, a.y.0 - b.y.0)
+}
+// Use the same IEEE arithmetic in native Rust and Wasm, independent of platform libm.
+pub fn norm(x: f64, y: f64) -> f64 {
+    let large = x.abs().max(y.abs());
+    if large == 0.0 {
+        0.0
+    } else {
+        let r = x.abs().min(y.abs()) / large;
+        large * (1.0 + r * r).sqrt()
+    }
 }
 pub fn point_segment(x: f64, y: f64, a: &Point, b: &Point) -> f64 {
     let length = distance(a, b);
     if length == 0.0 {
-        return (x - a.x.0).hypot(y - a.y.0);
+        return norm(x - a.x.0, y - a.y.0);
     }
     let ux = (b.x.0 - a.x.0) / length;
     let uy = (b.y.0 - a.y.0) / length;
     let t = ((x - a.x.0) * ux + (y - a.y.0) * uy).clamp(0.0, length);
-    (x - (a.x.0 + t * ux)).hypot(y - (a.y.0 + t * uy))
+    norm(x - (a.x.0 + t * ux), y - (a.y.0 + t * uy))
 }
 fn segment_rect(a: &Point, b: &Point, l: f64, t: f64, r: f64, bottom: f64) -> f64 {
     let mut enter: f64 = 0.0;
@@ -42,7 +52,7 @@ fn segment_rect(a: &Point, b: &Point, l: f64, t: f64, r: f64, bottom: f64) -> f6
     if enter <= exit {
         return 0.0;
     }
-    let point_rect = |p: &Point| (p.x.0 - p.x.0.clamp(l, r)).hypot(p.y.0 - p.y.0.clamp(t, bottom));
+    let point_rect = |p: &Point| norm(p.x.0 - p.x.0.clamp(l, r), p.y.0 - p.y.0.clamp(t, bottom));
     let mut d = point_rect(a).min(point_rect(b));
     for (x, y) in [(l, t), (l, bottom), (r, t), (r, bottom)] {
         d = d.min(point_segment(x, y, a, b));
