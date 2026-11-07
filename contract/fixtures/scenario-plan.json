@@ -196,7 +196,8 @@
                 "outside"
               ]
             },
-            "selection": "lowest-cost"
+            "selection": "lowest-cost",
+            "departOnArrival": true
           }
         }
       ]

@@ -103,3 +103,10 @@ footer { padding: 0.75rem 0; }
   .app-shell { padding-top: 2rem; }
   .panel-heading { align-items: flex-start; flex-direction: column; }
 }
+
+.simulation-view { margin-top: 1.5rem; overflow: auto; }
+.simulation-view canvas { display: block; max-width: 100%; height: auto; }
+
+[role="alert"] { color: #b91c1c; }
+.playback-controls { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin: .75rem 0; }
+.playback-controls input, .playback-controls select { font: inherit; padding: .4rem; max-width: 8rem; }

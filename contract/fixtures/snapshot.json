@@ -222,7 +222,8 @@
     "leave": {
       "kind": "reach",
       "targetZone": "outside",
-      "selection": "lowest-cost"
+      "selection": "lowest-cost",
+      "departOnArrival": true
     }
   },
   "agents": [

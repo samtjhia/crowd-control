@@ -30,7 +30,7 @@ export const PlacementSchema = z.union([
   z.strictObject({ inside: EntitySelectorSchema, ...placementOptions }), z.strictObject({ near: EntitySelectorSchema, ...placementOptions }), z.strictObject({ along: EntitySelectorSchema, ...placementOptions }),
 ]);
 const GoalLeafSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('reach'), target: SelectorSchema, selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() }),
+  z.strictObject({ kind: z.literal('reach'), target: SelectorSchema, departOnArrival: z.boolean().optional(), selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() }),
   z.strictObject({ kind: z.literal('avoid'), target: SelectorSchema, distance: NonnegativeSchema, urgency: NonnegativeSchema.optional() }),
   z.strictObject({ kind: z.literal('wait'), duration: SimTimeSchema, inside: SelectorSchema.optional() }),
   z.strictObject({ kind: z.literal('wander'), inside: SelectorSchema, duration: SimTimeSchema.optional(), changeTargetEvery: PositiveSchema.optional() }),

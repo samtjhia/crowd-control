@@ -91,7 +91,7 @@ export function compileGoal(goal: Goal, world: StaticWorld, path: string): Resul
     case 'reach': {
       const target = destination(goal.target, world, `${path}.target`)
       if (!target.ok) return target
-      return ok({ kind: 'reach', ...target.value, ...optional('selection', goal.selection), ...optional('stopDistance', goal.stopDistance), ...optional('urgency', goal.urgency) })
+      return ok({ kind: 'reach', ...target.value, ...optional('selection', goal.selection), ...optional('stopDistance', goal.stopDistance), ...optional('urgency', goal.urgency), ...optional('departOnArrival', goal.departOnArrival) })
     }
     case 'avoid': {
       const target = destination(goal.target, world, `${path}.target`)

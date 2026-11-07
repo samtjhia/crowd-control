@@ -12,3 +12,5 @@ export * from './adapters.js';
 export * from './ui.js';
 export * from './validation.js';
 export * from './serialization.js';
+
+export * from './contact.js';
