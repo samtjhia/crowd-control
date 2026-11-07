@@ -226,3 +226,11 @@
 .editor-key-object { background: rgb(217 119 6 / 0.65); }
 
 .editor-notice { padding: 8px 10px; border-radius: 10px; background: #eef4fd; color: #234a8a; font-size: 12px; line-height: 1.45; }
+
+/* ---- Doors ---- */
+
+.editor-door-name { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.editor .editor-tags button { display: inline-flex; align-items: center; gap: 4px; }
+.editor-key-door { background: #ea580c; }
+.editor-key-exit { background: #16a34a; }
+.editor-key-closed { background: #bb6479; }

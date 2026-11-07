@@ -12,6 +12,8 @@ import { useCropTool, type CropTool } from './useCropTool.ts'
 import { useScaleTool } from './useScaleTool.ts'
 import { useRoomEditor } from './useRoomEditor.ts'
 import { RoomsStep } from './RoomsStep.tsx'
+import { useDoorEditor } from './useDoorEditor.ts'
+import { DoorsStep } from './DoorsStep.tsx'
 import { useWallEditor } from './useWallEditor.ts'
 import { ScaleStep } from './ScaleStep.tsx'
 import type { PlanCamera } from './planView.ts'
@@ -42,7 +44,7 @@ export default function EditorApp() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const canvasRef = useRef<PlanCanvasHandle>(null)
-  const reached = plan ? 3 : 0 // Up to Rooms (index 3); later steps arrive one at a time.
+  const reached = plan ? 4 : 0 // Up to Doors (index 4); Check & save arrives next.
   const [fade, setFade] = useState(0.55)
   const redraw = useCallback(() => canvasRef.current?.redraw(), [])
   const crop = useCropTool(plan, redraw)
@@ -54,6 +56,8 @@ export default function EditorApp() {
   const rooms = useRoomEditor(plan, step === 'rooms', walls.readBlocked, metresPerPixel, redraw)
   const stepIndex = STEPS.findIndex((s) => s.id === step)
   const roomTool = step === 'rooms' && rooms.tool !== 'move'
+  const doors = useDoorEditor(plan, step === 'doors', rooms.layer, metresPerPixel, redraw, cameraOf)
+  const doorTool = step === 'doors' && doors.tool !== 'move'
   const tracing = stepIndex >= 2 // walls onward: fade the plan under the tracing
   const cropping = step === 'upload' && crop.active
 
@@ -61,8 +65,9 @@ export default function EditorApp() {
   const traced = useCallback((context: CanvasRenderingContext2D, camera: PlanCamera) => {
     if (stepIndex >= 3) rooms.drawOverlay(context, camera)
     if (stepIndex >= 2) walls.drawOverlay(context, camera, { brush: step === 'walls' })
+    if (stepIndex >= 4) doors.drawOverlay(context, camera)
     scale.drawOverlay(context, camera, { measuring, metresPerPixel })
-  }, [rooms, walls, scale, step, stepIndex, measuring, metresPerPixel])
+  }, [rooms, walls, doors, scale, step, stepIndex, measuring, metresPerPixel])
 
   /** Applies the crop box (or goes back to the whole image). Wall tracing starts again on the new image. */
   const applyCrop = async (box: Parameters<typeof cropPlan>[1]) => {
@@ -118,6 +123,27 @@ export default function EditorApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [step, rooms])
 
+  useEffect(() => {
+    if (step !== 'doors') return
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('input, textarea, select')) return
+      const key = event.key.toLowerCase()
+      const command = event.ctrlKey || event.metaKey
+      if (command && key === 'z') { if (event.shiftKey) doors.redo(); else doors.undo() }
+      else if (command && key === 'y') doors.redo()
+      else if (command || event.altKey) return
+      else if (key === 'v') doors.setTool('select')
+      else if (key === 'd') doors.setTool('add')
+      else if (key === 'm') doors.setTool('move')
+      else if ((key === 'delete' || key === 'backspace') && doors.selected !== null) doors.remove(doors.selected)
+      else if (key === 'escape') doors.setSelected(null)
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [step, doors])
+
   const open = async (file: File | undefined) => {
     if (!file) return
     setLoading(true)
@@ -139,9 +165,9 @@ export default function EditorApp() {
       {plan && (
         <PlanCanvas ref={canvasRef} pixels={plan.pixels} insets={insets}
           imageOpacity={tracing ? fade : 1} drawOverlay={cropping ? crop.drawOverlay : stepIndex >= 1 ? traced : undefined}
-          mode={cropping || measuring || roomTool || (step === 'walls' && walls.tool !== 'move') ? 'draw' : 'pan'}
-          drawCursor={cropping || measuring || roomTool ? 'crosshair' : 'none'}
-          stroke={cropping ? crop.stroke : measuring ? scale.stroke : step === 'rooms' ? rooms.stroke : walls.stroke}
+          mode={cropping || measuring || roomTool || doorTool || (step === 'walls' && walls.tool !== 'move') ? 'draw' : 'pan'}
+          drawCursor={step === 'doors' && doors.tool === 'select' ? 'pointer' : cropping || measuring || roomTool || doorTool ? 'crosshair' : 'none'}
+          stroke={cropping ? crop.stroke : measuring ? scale.stroke : step === 'rooms' ? rooms.stroke : step === 'doors' ? doors.stroke : walls.stroke}
           onHover={step === 'walls' ? walls.onHover : undefined} />
       )}
 
@@ -173,7 +199,8 @@ export default function EditorApp() {
             {step === 'upload' && <UploadStep plan={plan} onReplace={open} loading={loading} error={error} crop={crop} onApplyCrop={applyCrop} onNext={() => { crop.cancel(); setStep('scale') }} />}
             {step === 'scale' && <ScaleStep plan={plan} scale={scale} onBack={() => setStep('upload')} onNext={() => setStep('walls')} />}
             {step === 'walls' && <WallsStep walls={walls} fade={fade} onFade={setFade} onBack={() => setStep('scale')} onNext={() => setStep('rooms')} />}
-            {step === 'rooms' && <RoomsStep rooms={rooms} onBack={() => setStep('walls')} />}
+            {step === 'rooms' && <RoomsStep rooms={rooms} onBack={() => setStep('walls')} onNext={() => setStep('doors')} />}
+            {step === 'doors' && <DoorsStep doors={doors} onBack={() => setStep('rooms')} />}
           </aside>
           <div className="sim-float sim-zoom editor-zoom" role="group" aria-label="Zoom">
             <button type="button" className="sim-icon-btn" aria-label="Zoom in" onClick={() => canvasRef.current?.zoom(1.25)}><Plus size={15} /></button>
