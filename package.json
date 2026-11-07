@@ -1,0 +1,30 @@
+{
+  "name": "crowd-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Crowd Control — HackTrent 2026",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "contract",
+    "compiler",
+    "history",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @crowd-control/web",
+    "dev:server": "npm run dev --workspace @crowd-control/server",
+    "build": "npm run build --workspaces && cargo build --workspace",
+    "check": "npm run build --workspace @crowd-control/contract && npm run typecheck --workspaces && cargo fmt --all --check && cargo check --workspace",
+    "lint": "npm run lint --workspace @crowd-control/web",
+    "test": "cargo test --workspace"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "@types/node": "^24.13.3"
+  }
+}
