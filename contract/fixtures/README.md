@@ -11,3 +11,7 @@ Its contact solver/version/data are test fixtures, not implemented physics.
 
 Tests validate and round-trip these files without normalizing their contents.
 They do not run a compiler, measure physical behavior or execute replay.
+
+`engine-load.json` is a complete small worker load message for starting engine
+development: two initial attendees, one future arrival, and an alarm-driven exit.
+It has no contact model. Its model parameters are illustrative, not calibrated.

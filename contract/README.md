@@ -57,3 +57,23 @@ npm run typecheck --workspace @crowd-control/contract
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits, Rust Serde/ABI bindings,
 PixiJS rendering and the 2,000-agent/4×/60-fps target remain implementation work.
+
+## Engine input example
+
+`fixtures/engine-load.json` is a complete WorkerCommand load payload: CompileOutput
+plus an empty initial history. Two agents wander, one arrives at simulation second
+5, and the alarm at second 10 assigns all current attendees the leave controller.
+The dimensions are model units. Contact physics is omitted from this movement
+example; it does not enable compression-triggered falls.
+
+On load, expand rows/legend into grid membership, resolve preset → profile → agent
+overrides, and create independent AgentRuntime records with zero velocities,
+nullable sensors, goal progress, timers and seeded RNG. Expand compact spawn/event
+rules into ordinary engine instructions. Preserve future selectors and find spawn
+positions against occupancy when due. The initial agents already exist in the
+compiled scene: do not spawn them again from history.
+
+Step at fixed dt (0.05 s here), execute due jobs/rules, update navigation/movement,
+then publish versioned scene/frame/metric messages. Appearance only affects
+render metadata. B owns position handling; the engine applies updates in worker
+state. Pin the actual engine build in versions.engine for saved runs.
