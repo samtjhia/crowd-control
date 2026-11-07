@@ -372,7 +372,19 @@ test('prepared fire drill, concert and hackathon demos finish their advertised b
     const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: scenario.plan.simulationId, commandId: type, type, ...extra })
     const handle = bindings.create_engine()
     try {
-      for (const command of [h('load', { compiled: compiled.value, history: { historyRevision: 0, records: [], outcomes: [] } }), h('run_to', { time: scenario.id === 'hillside-alley' ? 180 : 600 })]) {
+      const commands = [h('load', { compiled: compiled.value, history: { historyRevision: 0, records: [], outcomes: [] } })]
+      if (scenario.id === 'school-wing') commands.push(h('run_to', { time: 60 }))
+      for (const command of commands) {
+        const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(command)))
+        assert.ok(messages.every((m) => m.type !== 'error'))
+      }
+      if (scenario.id === 'school-wing') {
+        const reports: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'classrooms-clear' }))))
+        const report = reports.find((m) => m.type === 'snapshot')
+        assert.ok(report?.type === 'snapshot')
+        assert.ok(report.snapshot.agents.every((a) => !a.zoneId?.startsWith('room_')), 'every classroom empties by 60 seconds, rather than waiting out a long completion budget')
+      }
+      for (const command of [h('run_to', { time: scenario.id === 'school-wing' ? 120 : scenario.id === 'concert-floor' ? 300 : scenario.id === 'hillside-alley' ? 180 : 600 })]) {
         const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(command)))
         assert.ok(messages.every((m) => m.type !== 'error'), `${scenario.id}: ${JSON.stringify(messages.find((m) => m.type === 'error'))}`)
       }
@@ -384,11 +396,49 @@ test('prepared fire drill, concert and hackathon demos finish their advertised b
       assert.equal(agents.length, compiled.value.scene.agents.length)
       if (scenario.id === 'hackathon-hall') {
         assert.ok(agents.filter((a) => a.tags.includes('arrival')).every((a) => a.zoneId === 'hall' && a.currentGoal?.cursor[0]?.childIndex === 1), `all arrivals reach the hall and start wandering: ${JSON.stringify(agents.filter((a) => a.tags.includes('arrival') && (a.zoneId !== 'hall' || a.currentGoal?.cursor[0]?.childIndex !== 1)).map((a) => ({ id: a.id, position: a.position, zone: a.zoneId, cursor: a.currentGoal?.cursor })))}`)
+        const randomBefore = new Map(agents.map((a) => [a.id, a.randomState]))
+        const advanced: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('step', { ticks: 61 }))))
+        assert.ok(advanced.every((m) => m.type !== 'error'))
+        const later: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'still-wandering' }))))
+        const next = later.find((m) => m.type === 'snapshot')
+        assert.ok(next?.type === 'snapshot')
+        assert.ok(next.snapshot.agents.every((a) => a.randomState !== randomBefore.get(a.id)), 'all hackathon agents keep selecting wander targets after arrivals finish')
       } else if (scenario.id === 'hillside-alley') {
         for (const direction of ['uphill', 'downhill']) assert.ok(agents.some((a) => a.tags.includes(direction) && a.currentGoal?.cursor[0]?.childIndex === 1), `${direction} traffic crosses the alley`)
       } else {
         assert.ok(agents.every((a) => a.state === 'departed'), `${scenario.id}: ${agents.filter((a) => a.state !== 'departed').length} never exited`)
       }
+    } finally { bindings.destroy_engine(handle) }
+  }
+})
+
+test('concert evacuation keeps making progress across different crowd seeds', async () => {
+  const { scenarios, startScenario, movementPreset } = await import('../../web/src/sim/scenario.ts')
+  const worked = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
+  const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
+  const scenario = scenarios(worked, movementPreset(preset)).find((s) => s.id === 'concert-floor')!
+  const bindings = await engine()
+  for (const seed of [7, 99]) {
+    const compiled = startScenario({ ...scenario.plan, seed }, scenario.model)
+    assert.ok(compiled.ok)
+    const handle = bindings.create_engine()
+    const send = (type: string, extra = {}): WorkerMessage[] => {
+      const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify({ schemaVersion: 1, simulationId: scenario.plan.simulationId, commandId: type, type, ...extra })))
+      assert.ok(messages.every((m) => m.type !== 'error'), JSON.stringify(messages.find((m) => m.type === 'error')))
+      return messages
+    }
+    try {
+      send('load', { compiled: compiled.value, history: { historyRevision: 0, records: [], outcomes: [] } })
+      let departed = 0
+      for (const time of [90, 120, 150, 180, 210, 240, 270, 300]) {
+        const frame = send('run_to', { time }).find((m) => m.type === 'frame')
+        assert.ok(frame?.type === 'frame')
+        assert.equal(frame.frame.agents.length, 430)
+        const count = frame.frame.agents.filter((a) => a.state === 'departed').length
+        assert.ok(count > departed || departed === 430, `seed ${seed}: exits stopped making progress at ${time}s (${count}/430)`)
+        departed = count
+      }
+      assert.equal(departed, 430, `seed ${seed}: people left behind`)
     } finally { bindings.destroy_engine(handle) }
   }
 })

@@ -6,7 +6,7 @@ import { createEngineHost, MAX_TICKS_PER_BATCH } from './engineHost.ts'
 import type { WorkerClock } from './clock.ts'
 
 const load = JSON.parse(readFileSync(new URL('../../../contract/fixtures/engine-static-load.json', import.meta.url), 'utf8')) as WorkerCommand
-function setup(stepCostMs = 0) {
+function setup(stepCostMs = 0, withDensity = false) {
   const clock: WorkerClock & { time: number; callback: (() => void) | undefined; elapse(ms: number): void } = {
     time: 0, callback: undefined, now: () => clock.time,
     every(_ms, callback) { clock.callback = callback; return () => { clock.callback = undefined } },
@@ -15,14 +15,16 @@ function setup(stepCostMs = 0) {
   let tick = 0, destroyed = false
   const batches: number[] = [], received: WorkerMessage[] = []
   const bindings: WasmEngineBindings = {
-    abi_version: () => 1, engine_version: () => 'contact-engine-v8.1', create_engine: () => 1, destroy_engine() { destroyed = true },
+    abi_version: () => 1, engine_version: () => 'contact-engine-v8.3', create_engine: () => 1, destroy_engine() { destroyed = true },
     dispatch(_handle, json) {
       const command = JSON.parse(json) as WorkerCommand
       if (command.simulationId !== 'engine-demo') return JSON.stringify([{ schemaVersion: 1, simulationId: command.simulationId, type: 'error', commandId: command.commandId, error: { code: 'INVALID_SCHEMA', message: 'wrong simulation' } }])
       if (command.type === 'load' || command.type === 'reset') tick = 0
       if (command.type === 'step') { batches.push(command.ticks); tick += command.ticks; clock.time += stepCostMs * command.ticks }
       const stamp = { streamId: 'clock-test', tick, time: tick * 0.05, topologyVersion: 0, sceneVersion: 1, historyRevision: 0 }
-      return JSON.stringify([{ schemaVersion: 1, simulationId: 'engine-demo', commandId: command.commandId, type: 'ack', stamp }, ...(command.type === 'step' ? [{ schemaVersion: 1, simulationId: 'engine-demo', type: 'frame', frame: { ...stamp, agents: [] } }] : [])])
+      return JSON.stringify([{ schemaVersion: 1, simulationId: 'engine-demo', commandId: command.commandId, type: 'ack', stamp }, ...(command.type === 'step' ? [{ schemaVersion: 1, simulationId: 'engine-demo', type: 'frame', frame: { ...stamp, agents: [] } }, ...(withDensity ? [{ schemaVersion: 1, simulationId: 'engine-demo', type: 'metrics', stamp,
+        sample: { time: tick * .05, present: 0, departed: 0, blocked: 0, immobile: 0, removed: 0, zones: [], portals: [], queues: [], clearance: { t50: null, t90: null, t100: null } },
+        density: { width: 1, height: 1, cellSize: 1, origin: { x: 0, y: 0 }, units: 'people/model-unit2', values: [0] } }] : [])] : [])])
     },
   }
   const host = createEngineHost(bindings, (message) => received.push(message), clock)
@@ -95,5 +97,17 @@ test('expensive Rust ticks shrink catch-up batches instead of growing stalls', (
   assert.ok(s.tick() - before <= 1, 'pause is not preceded by a giant catch-up dispatch')
   s.clock.elapse(10000)
   assert.equal(s.clock.callback, undefined)
+  s.host.dispose()
+})
+
+test('automatic density transport is capped in wall time without losing ticks or metric counts', () => {
+  const s = setup(0, true)
+  s.send('speed', 8); s.send('resume')
+  for (let i = 0; i < 60; i++) s.clock.elapse(1000 / 60)
+  assert.equal(s.tick(), 160)
+  const metrics = s.received.filter((m) => m.type === 'metrics')
+  assert.equal(metrics.length, 60, 'live counts keep the full publication rate')
+  const grids = metrics.filter((m) => m.density)
+  assert.ok(grids.length >= 4 && grids.length <= 5, `${grids.length} density grids sent in one second`)
   s.host.dispose()
 })

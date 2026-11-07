@@ -82,7 +82,7 @@ export function starterPlan(venue: SavedVenue, count?: number): ScenarioPlan {
   const page = source.mode === 'upload' ? source.page : 1
   const initialOperations: Operation[] = [
     { op: 'spawn', template: { kind: 'agent', tags: ['crowd'], appearance: { fill: '#2563EB' } }, count: people, placement: { inside: { ids: [room] } } },
-    { op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'wander', inside: { ids: [room] } } },
+    { op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'wander', changeTargetEvery: 6, inside: { ids: [room] } } },
   ]
   return {
     schemaVersion: 1, simulationId: `${venue.map.id}-demo`.slice(0, 200), seed: 42,

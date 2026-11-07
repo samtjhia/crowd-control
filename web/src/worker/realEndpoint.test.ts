@@ -76,3 +76,19 @@ test('unused endpoints do not construct workers during discarded React renders',
     else Reflect.deleteProperty(globalThis, 'Worker')
   }
 })
+
+test('validation timing observes responses without accepting malformed messages', async () => {
+  const port = new Port(), durations: number[] = []
+  const endpoint = createRealEndpoint({ worker: port, onValidationTime: (ms) => durations.push(ms) })
+  const messages: WorkerMessage[] = []
+  endpoint.subscribe((m) => messages.push(m))
+  endpoint.send(pause)
+  port.emit(ack)
+  port.emit({ schemaVersion: 1, type: 'frame' })
+  await Promise.resolve()
+  assert.equal(durations.length, 2)
+  assert.ok(durations.every((ms) => Number.isFinite(ms) && ms >= 0))
+  assert.ok(messages.some((m) => m.type === 'error'))
+  assert.equal(port.stopped, true)
+  endpoint.dispose()
+})

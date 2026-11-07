@@ -1,5 +1,5 @@
 import { commandError } from './dispatchCommand.ts'
-import { loadWasmEngine } from './wasmBindings.ts'
+import { ENGINE_VERSION, loadWasmEngine } from './wasmBindings.ts'
 import { createEngineHost } from './engineHost.ts'
 
 const scope = globalThis as unknown as {
@@ -7,7 +7,7 @@ const scope = globalThis as unknown as {
   postMessage(message: unknown): void
 }
 const publicationSession = crypto.randomUUID()
-const ready = loadWasmEngine(`${import.meta.env.BASE_URL}engine/crowd_control_engine.wasm`)
+const ready = loadWasmEngine(`${import.meta.env.BASE_URL}engine/crowd_control_engine.wasm?v=${encodeURIComponent(ENGINE_VERSION)}`)
   .then((bindings) => createEngineHost(bindings, (message) => {
     // Transport identity is independent of physics randomness and worker lifetimes.
     if ('stamp' in message) message.stamp.streamId = `${publicationSession}/${message.stamp.streamId}`

@@ -486,3 +486,33 @@ v8 timings above are historical; full performance acceptance remains part 10.
 
 Regressions cover departure/reset, sprite destruction, repeated cache churn and
 large zoom textures, preserved playback debt, and expensive-tick batch reduction.
+
+### Current movement and rendering (v8.3)
+
+- Blend downhill flow directions in open space; retain validated near-goal,
+  terrain and delayed-portal waypoints. Door guidance uses the full body-clear
+  opening and aligns sideways without sending agents backward. Swept collision,
+  one-way, stop-distance and queue/interaction constraints remain enforced.
+- Hard-exclusion motion advances front agents first, rotating ties. Predict
+  followers against already-updated neighbour velocities; contact solving keeps
+  its simultaneous order. Empty contact scenes can continue advancing.
+- Demo wandering is indefinite and refreshes targets every six seconds, including
+  arrivals after reaching the hall. An explicit no-goal/clear-goal means idle.
+- Reuse Pixi geometry across moving/waiting/idle/reacting transitions. Pose changes
+  animate; meaningful annotations and appearance changes still restyle. Alarm
+  pulses animate opacity, without a map-sized animated shadow.
+- Prepare common-radius clearance at load and skip unused reach-distance grids.
+  Wasm asset URLs include the engine version. Rebuild and fully reload to update
+  Rust; Reset only restarts the loaded instance.
+
+Regressions check two body-width lanes through a one-unit door, zero graphics
+rebuilds for 1,000 stop/start transitions, and continuing hackathon wandering.
+School classrooms must clear by 60 s and all 192 people by 120 s. Concert seeds
+7/99 must increase departures at each 30 s sample after 90 s and finish by 300 s.
+Seed 42 traces clear school by 120 s and concert by 240 s. These are liveness
+checks, not calibrated real-world evacuation times.
+
+Browser FPS is unverified: local-server binding is blocked in this session.
+The 2,000-agent benchmark remains near/below 4× compute budget: 78.9 ticks/CPU s
+without contact, 65.8 with contact; 80 required, excluding transfer/rendering.
+JSON bridging/validation remains costly; full performance acceptance is pending.

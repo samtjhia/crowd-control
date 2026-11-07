@@ -86,7 +86,7 @@
 .map-marker-above { transform: translate(-50%, calc(-100% - 6px)); }
 .map-marker .status-icon { box-shadow: 0 0 0 2px #ffffff, 0 2px 6px rgb(20 30 20 / 0.2); }
 
-/* Venue-wide event: a ring traces the whole map and pulses three times, then fades away. */
+/* Pulse opacity only: animating a map-sized shadow repaints the whole viewport. */
 .map-pulse {
   position: absolute;
   border: 3px solid var(--ring);
@@ -101,14 +101,8 @@
 .status-ring-instruction { --ring: var(--blue); }
 
 @keyframes map-pulse {
-  0% { opacity: 0; box-shadow: 0 0 0 0 var(--ring); }
-  10% { opacity: 1; box-shadow: 0 0 0 0 var(--ring); }
-  30% { opacity: 1; box-shadow: 0 0 0 14px transparent; }
-  31% { box-shadow: 0 0 0 0 var(--ring); }
-  55% { opacity: 1; box-shadow: 0 0 0 14px transparent; }
-  56% { box-shadow: 0 0 0 0 var(--ring); }
-  80% { opacity: 0.9; box-shadow: 0 0 0 14px transparent; }
-  100% { opacity: 0; box-shadow: 0 0 0 14px transparent; }
+  0%, 30%, 60%, 100% { opacity: 0; }
+  10%, 40%, 70% { opacity: 1; }
 }
 
 /* ...and stays as a badge on the map's top-left corner. */
@@ -1042,3 +1036,10 @@
 .sim-scenario-pop-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .sim .sim-action.is-danger { background: #a1324c; }
 .sim .sim-action.is-danger:hover { background: #87283f; }
+
+.sim-debug {
+  position: absolute; z-index: 50; left: 12px; bottom: 84px;
+  display: grid; gap: 3px; padding: 9px 12px;
+  background: #fff; color: #172033; border: 1px solid #9aa9a0; border-radius: 6px;
+  font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
+}

@@ -38,3 +38,17 @@ test('timeline extent always leaves room ahead of the playhead', () => {
   assert.equal(formatClock(134.04), '02:14.0')
   assert.equal(formatClock(134.9, false), '02:14')
 })
+
+test('430 canonical Rust departures form one row and never flood the timeline', () => {
+  const events = [event(0, 45, 'alarm'), ...Array.from({ length: 430 }, (_, i) => event(i + 1, 60 + i / 10, 'departure', `a${i + 1}`))]
+  const incidents = toIncidents(events)
+  assert.equal(incidents.length, 2)
+  assert.equal(incidents[1]!.count, 430)
+  assert.equal(incidents[1]!.title, 'Left the venue')
+  assert.deepEqual(timelineMarkers(incidents).map((i) => i.title), ['Alarm'])
+})
+
+test('both engine departure spellings combine without hiding intervening events', () => {
+  const incidents = toIncidents([event(1, 1, 'departure', 'a1'), event(2, 2, 'departed', 'a2'), event(3, 3, 'fall', 'a3'), event(4, 4, 'departure', 'a4')])
+  assert.deepEqual(incidents.map((i) => [i.title, i.count]), [['Left the venue', 2], ['Fall', 1], ['Left the venue', 1]])
+})

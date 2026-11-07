@@ -319,3 +319,17 @@ fn valid_wall_tangent_start_joins_a_nearby_clearance_cell() {
     let s = snapshot(&mut e);
     assert!(x(&s["agents"][0]) > 6.0, "{}", s["agents"]);
 }
+
+#[test]
+fn open_flow_preserves_parallel_lanes_instead_of_snapping_people_to_cell_centres() {
+    let mut e = load(input(vec![
+        agent("a", 3.2, 4.2, "east"),
+        agent("b", 3.2, 7.8, "east"),
+    ]));
+    step(&mut e, 40);
+    let s = snapshot(&mut e);
+    assert!(x(&s["agents"][0]) > 4.0);
+    assert!(x(&s["agents"][1]) > 4.0);
+    assert!((y(&s["agents"][0]) - 4.2).abs() < 1e-8, "{}", s["agents"]);
+    assert!((y(&s["agents"][1]) - 7.8).abs() < 1e-8, "{}", s["agents"]);
+}

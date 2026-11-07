@@ -291,3 +291,16 @@ fn each_matching_subject_owns_a_distinct_scheduled_descendant() {
             .all(|a| a["state"] != "immobile")
     );
 }
+
+#[test]
+fn empty_contact_scene_can_keep_advancing_after_all_agents_are_removed() {
+    let mut e = init(fixture());
+    let out = apply(
+        &mut e,
+        "clear",
+        json!([{"op":"remove","targets":{"kind":"agent"}}]),
+    );
+    assert_eq!(out[0]["type"], "ack", "{out:?}");
+    step(&mut e, 10);
+    assert!(state(&mut e)["agents"].as_array().unwrap().is_empty());
+}

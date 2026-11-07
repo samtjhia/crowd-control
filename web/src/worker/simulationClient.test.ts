@@ -136,3 +136,55 @@ test('metrics retain throttled density and reject stale streams, revisions, scen
   emit({ ...first, stamp: stamp('live', 12) }); assert.equal(client.getView().metrics, null)
   client.dispose()
 })
+
+test('view ownership survives StrictMode remount and terminates the worker on final unmount', async () => {
+  let stopped = 0, detached = 0
+  const client = new SimulationClient({ kind: 'real', send() {}, subscribe() { return () => { detached++ } }, dispose() { stopped++ } })
+  const first = client.retain()
+  first()
+  const remounted = client.retain()
+  await Promise.resolve()
+  assert.equal(stopped, 0)
+  remounted(); remounted()
+  await Promise.resolve()
+  assert.equal(stopped, 1)
+  assert.equal(detached, 1)
+  client.dispose()
+  assert.equal(stopped, 1)
+  assert.throws(() => client.retain(), /disposed/)
+})
+
+test('disposing a client settles outstanding requests and disposes its endpoint', async () => {
+  let stopped = false
+  const client = new SimulationClient({ kind: 'real', send() {}, subscribe() { return () => {} }, dispose() { stopped = true } })
+  const load = client.load(compiled)
+  client.dispose()
+  assert.equal((await load).type, 'error')
+  assert.equal(stopped, true)
+  await assert.rejects(client.pause(), /disposed/)
+})
+
+test('many worker publications produce one view notification per paint without delaying acknowledgements', async () => {
+  const { endpoint, emit, sent } = scriptedEndpoint()
+  const paints: Array<() => void> = []
+  let cancelled = 0, notifications = 0
+  const client = new SimulationClient(endpoint, () => 10, (paint) => { paints.push(paint); return () => { cancelled++ } })
+  client.subscribe(() => { notifications++ })
+  const loading = client.load(compiled)
+  emit({ ...header, type: 'ack', commandId: sent[0]!.commandId, stamp: stamp('live', 0) })
+  assert.equal((await loading).type, 'ack', 'acknowledgements do not wait for a paint')
+  emit(sceneMessage('live'))
+  for (let tick = 0; tick < 100; tick++) emit(frameMessage('live', tick))
+  assert.equal(client.getView().current!.frame.tick, 99, 'the renderer can read the latest state immediately')
+  assert.equal(client.getView().previous!.frame.tick, 98)
+  assert.equal(notifications, 0)
+  assert.equal(paints.length, 1)
+  paints.shift()!()
+  assert.equal(notifications, 1)
+  emit(frameMessage('live', 100))
+  assert.equal(paints.length, 1)
+  client.dispose()
+  assert.equal(cancelled, 1)
+  paints.shift()!()
+  assert.equal(notifications, 1, 'unmounted views receive no late paint notification')
+})

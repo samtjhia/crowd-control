@@ -17,6 +17,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
   let owedTicks = 0
   let commandSequence = 0
   let tickCostMs = 0
+  let lastDensityAt = 0
   const stop = () => { stopLoop?.(); stopLoop = undefined; playing = false }
   const accrue = () => {
     const now = clock.now()
@@ -38,7 +39,15 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
     for (const message of messages) {
       // Internal stepping has no UI command awaiting acknowledgement.
       if (message.type === 'error') { const { commandId: _id, ...error } = message; publish(error) }
-      else if (message.type !== 'ack') publish(message)
+      else if (message.type !== 'ack') {
+        // The live peak readout needs at most 5 Hz; physics/history sampling is unchanged.
+        if (message.type === 'metrics' && message.density) {
+          const now = clock.now()
+          if (now - lastDensityAt < 200) delete message.density
+          else lastDensityAt = now
+        }
+        publish(message)
+      }
     }
   }
   const pulse = () => {
@@ -60,7 +69,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
           case 'load':
           case 'reset':
             if (command.type === 'load') { simulationId = command.simulationId; dt = command.compiled.scene.model.dt }
-            stop(); owedTicks = 0; tickCostMs = 0; multiplier = 1; last = clock.now(); break
+            stop(); owedTicks = 0; tickCostMs = 0; multiplier = 1; last = clock.now(); lastDensityAt = last; break
           case 'resume':
             if (!playing) { last = clock.now(); playing = true; stopLoop = clock.every(1000 / 60, pulse) }
             break

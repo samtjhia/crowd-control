@@ -134,6 +134,9 @@ pub fn advance(
     metrics: &mut crate::metrics::Metrics,
     contact: Option<(&crate::contact::Config, &mut crate::contact::State)>,
 ) -> Result<(), Failure> {
+    if agents.is_empty() {
+        return Ok(());
+    }
     let mut active: Vec<bool> = agents
         .iter_mut()
         .enumerate()
@@ -204,8 +207,25 @@ pub fn advance(
         } else {
             vec![]
         };
-        for order in 0..agents.len() {
-            let i = (order + (tick % agents.len() as u64) as usize) % agents.len();
+        let rotation = (tick % agents.len() as u64) as usize;
+        let mut order: Vec<_> = (0..agents.len())
+            .map(|i| (i + rotation) % agents.len())
+            .collect();
+        if contact.is_none() {
+            let costs: Vec<_> = agents
+                .iter()
+                .enumerate()
+                .map(|(i, a)| nav.progress_cost(grid, a, i))
+                .collect();
+            // Let the front advance before followers predict their motion; rotate equal-cost ties.
+            order.sort_unstable_by(|&a, &b| {
+                costs[a].total_cmp(&costs[b]).then_with(|| {
+                    ((a + agents.len() - rotation) % agents.len())
+                        .cmp(&((b + agents.len() - rotation) % agents.len()))
+                })
+            });
+        }
+        for i in order {
             if !active[i] {
                 continue;
             }
@@ -363,7 +383,7 @@ pub fn advance(
                     let finish = end.sub(V::of(&agents[j].position));
                     let sum = me.radius + old[j].radius;
                     let offset = old[j].p.sub(me.p);
-                    let relative = old[j].v.sub(v);
+                    let relative = V::of(&agents[j].velocity).sub(v);
                     let vv = relative.dot(relative);
                     let closest_time = if vv > 0.0 {
                         (-offset.dot(relative) / vv).clamp(0.0, 0.75)

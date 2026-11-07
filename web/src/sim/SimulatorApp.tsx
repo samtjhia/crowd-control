@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Diagnostics } from './Diagnostics.tsx'
+import { Profiler, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import '@fontsource-variable/dm-sans'
+import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
@@ -62,6 +65,7 @@ function insetsFor(panels: Panels) {
  * Demo plans compiled in the browser, until the planner supplies them: the Technical PRD §8
  * worked example (model units) and one per prepared venue (metres).
  */
+const DEBUG = new URLSearchParams(window.location.search).has('debug')
 const REAL_ENGINE = new URLSearchParams(window.location.search).get('engine') === 'real'
 const SCENARIOS = scenarios(workedPlan as ScenarioPlan, REAL_ENGINE ? movementPreset(examplePreset.resolvedModel as ModelPreset) : examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
@@ -148,7 +152,15 @@ function saveHeatmap(on: boolean) {
 
 export default function SimulatorApp() {
   // Keep mock demos available; /sim?engine=real uses the same client with Rust/Wasm.
-  const [client] = useState(() => new SimulationClient(REAL_ENGINE ? createRealEndpoint() : createMockEndpoint()))
+  const validation = useRef({ ms: 0, worstMs: 0, reactMs: 0, reactWorst: 0, commits: 0 })
+  const recordValidation = useCallback((ms: number) => {
+    validation.current.ms += ms
+    validation.current.worstMs = Math.max(validation.current.worstMs, ms)
+  }, [])
+  // oxlint-disable-next-line react/refs -- the observer runs only in asynchronous Worker.onmessage
+  const [client] = useState(() => new SimulationClient(REAL_ENGINE ? createRealEndpoint({
+    onValidationTime: DEBUG ? recordValidation : undefined,
+  }) : createMockEndpoint()))
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<CrowdRenderer | null>(null)
   const [camera, setCamera] = useState<Camera | null>(null)
@@ -372,6 +384,7 @@ export default function SimulatorApp() {
   // changes are applied, each scheduled for the moment it originally took effect.
   const replayedStream = useRef<string | null>(null)
   const staleStream = useRef<string | null>(null)
+  useEffect(() => client.retain(), [client])
   useEffect(() => {
     if (!replaying || !view.streamId || !ready || replayedStream.current === view.streamId || staleStream.current === view.streamId) return
     if (view.simulationId !== replaying.scenario.plan.simulationId) return
@@ -401,7 +414,7 @@ export default function SimulatorApp() {
     let stopCamera = () => {}
     let stopPick = () => {}
     let stopBox = () => {}
-    void CrowdRenderer.create(host, client, { fontFamily: MAP_FONT, zoneTint: 0.4, paddingPx: 40, agentDrawMode: drawModeRef.current }).then((created) => {
+    void CrowdRenderer.create(host, client, { fontFamily: MAP_FONT, zoneTint: 0.4, paddingPx: 40, agentDrawMode: drawModeRef.current, measurePerformance: DEBUG }).then((created) => {
       if (cancelled) {
         created.destroy()
         return
@@ -489,7 +502,7 @@ export default function SimulatorApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [client])
 
-  return (
+  const content = (
     <div className={`sim${panels.left ? ' has-left' : ''}${panels.right ? ' has-right' : ''}`}>
       <div className="sim-stage">
         <div className="sim-canvas" ref={hostRef}>
@@ -504,6 +517,8 @@ export default function SimulatorApp() {
         <PointPins points={points} camera={camera} selected={selection.length === 1 && selection[0]!.kind === 'point' ? selection[0]!.id : null}
           onSelect={(id) => setSelection([{ kind: 'point', id }])} />
       </div>
+
+      {DEBUG && <Diagnostics client={client} renderer={rendererRef} validation={validation} />}
 
       <header className="sim-float sim-topbar">
         <p className="sim-brand"><BrandMark /> Crowd Control</p>
@@ -624,6 +639,11 @@ export default function SimulatorApp() {
         onClick={() => setPanels({ left: false, right: false })} />
     </div>
   )
+  return DEBUG ? <Profiler id="simulator" onRender={(_id, _phase, duration) => {
+    validation.current.reactMs += duration
+    validation.current.reactWorst = Math.max(validation.current.reactWorst, duration)
+    validation.current.commits++
+  }}>{content}</Profiler> : content
 }
 
 /**
@@ -716,7 +736,7 @@ function Legend() {
       <summary>Legend and shortcuts</summary>
       <ul className="sim-legend-list">
         <li><MapSwatch kind="person" /> People (figure or marker), colour by group</li>
-        <li><MapSwatch kind="left" /> Left the venue (faded)</li>
+        <li><MapSwatch kind="left" /> Departed people leave the live view</li>
         <li><MapSwatch kind="down" /> Down (lying figure or capsule)</li>
         <li><MapSwatch kind="open" /> Open door</li>
         <li><MapSwatch kind="closed" /> Closed door</li>

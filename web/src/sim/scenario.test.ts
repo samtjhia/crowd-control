@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import type { CompileOutput, Frame, ScenarioPlan, WorkerCommand, WorkerMessage } from '@crowd-control/contract'
+import type { CompiledGoal, CompileOutput, Frame, ScenarioPlan, WorkerCommand, WorkerMessage } from '@crowd-control/contract'
 import { MockSimulation } from '../worker/mock/simulation.ts'
 import { describeScenario, scenarios, startScenario } from './scenario.ts'
 
@@ -138,5 +138,21 @@ test('evacuation demos select agents despite shared room tags and explicitly dep
     if (operation.op !== 'assign_goal') throw new Error('expected evacuation')
     assert.equal('kind' in operation.targets && operation.targets.kind, 'agent')
     assert.equal(operation.goal.kind === 'reach' && operation.goal.departOnArrival, true)
+    if (operation.goal.kind === 'reach') assert.equal(operation.goal.urgency, id === 'concert-floor' ? 0.4 : 0)
+  }
+})
+
+test('hackathon has persistent, periodically refreshed wander before and after arrivals', () => {
+  const scenario = all.find((s) => s.id === 'hackathon-hall')!
+  const result = startScenario(scenario.plan, scenario.model)
+  assert.ok(result.ok)
+  for (const agent of result.value.scene.agents) {
+    const controller: CompiledGoal = result.value.scene.controllers[agent.controller!]!
+    const wander: CompiledGoal = controller.kind === 'sequence' ? controller.goals.at(-1)! : controller
+    assert.equal(wander.kind, 'wander')
+    if (wander.kind === 'wander') {
+      assert.equal(wander.changeTargetEvery, 6)
+      assert.equal(wander.duration, undefined, 'ambient movement does not expire')
+    }
   }
 })

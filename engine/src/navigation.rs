@@ -11,6 +11,7 @@ use std::{
 };
 
 const NONE: u32 = u32::MAX;
+type PortalInfo = (u32, u32, bool, f64, [f64; 4]);
 const DIRS: [(isize, isize); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 #[derive(Debug, Clone)]
 struct Clearance {
@@ -40,7 +41,7 @@ pub struct Navigator {
     routes: Vec<Option<Route>>,
     cells: usize,
     work: usize,
-    portal_info: Vec<Option<(u32, u32, bool, f64)>>,
+    portal_info: Vec<Option<PortalInfo>>,
     intents: Vec<Option<Intent>>,
     bodies: Vec<Body>,
     visible: Vec<Option<(Point, Point)>>,
@@ -246,7 +247,7 @@ fn target_distances(
     }
     d
 }
-fn portals(grid: &GridData, map: &Map) -> Vec<Option<(u32, u32, bool, f64)>> {
+fn portals(grid: &GridData, map: &Map) -> Vec<Option<PortalInfo>> {
     let zone_indices: BTreeMap<&Id, u32> = grid
         .zone_ids
         .iter()
@@ -265,6 +266,7 @@ fn portals(grid: &GridData, map: &Map) -> Vec<Option<(u32, u32, bool, f64)>> {
                     zone_indices[&p.connects[1]],
                     p.one_way.unwrap_or(false),
                     p.traversal_time.map_or(0.0, |t| t.0),
+                    [p.x.0, p.y.0, p.width.0, p.height.0],
                 )
             })
         })
@@ -272,7 +274,7 @@ fn portals(grid: &GridData, map: &Map) -> Vec<Option<(u32, u32, bool, f64)>> {
 }
 fn allowed(
     grid: &GridData,
-    p: &[Option<(u32, u32, bool, f64)>],
+    p: &[Option<PortalInfo>],
     from: usize,
     to: usize,
 ) -> Result<bool, Failure> {
@@ -308,7 +310,7 @@ fn entry(
     p: &Point,
     radius: f64,
     bodies: &[Body],
-    portals: &[Option<(u32, u32, bool, f64)>],
+    portals: &[Option<PortalInfo>],
     work: &mut usize,
 ) -> Result<Option<usize>, Failure> {
     let cell = index(grid, p);
@@ -449,7 +451,6 @@ impl Navigator {
             next: vec![NONE; grid.blocked.len()],
             hops: vec![0; grid.blocked.len()],
         };
-        let distances = target_distances(grid, map, positions, actual);
         let hazards: Vec<_> = if matches!(intent.goal.kind, GoalKind::Avoid) {
             candidates(&intent.goal)
                 .iter()
@@ -495,6 +496,7 @@ impl Navigator {
                 && intent.point.is_none()
                 && !positions.contains_key(actual))
         {
+            let distances = target_distances(grid, map, positions, actual);
             let mut cells = vec![false; grid.blocked.len()];
             for i in 0..cells.len() {
                 if clear.walk[i] && distances[i] <= grid.cell_size * 1.5 + radius {
@@ -678,6 +680,16 @@ impl Navigator {
                 radius: a.components.physical.radius.0,
             })
             .collect();
+        // Build shared body clearance at load, rather than on the first alarm-time route.
+        if let Some(first) = agents.first() {
+            let radius = first.components.physical.radius.0;
+            if agents
+                .iter()
+                .all(|a| a.components.physical.radius.0 == radius)
+            {
+                self.clearance(grid, map, &bodies, radius)?;
+            }
+        }
         self.bodies = bodies.clone();
         self.routes = vec![None; agents.len()];
         self.visible = vec![None; agents.len()];
@@ -937,6 +949,22 @@ impl Navigator {
     ) -> Result<(), Failure> {
         crate::movement::advance(self, grid, agents, dt, tick, metrics, contact)
     }
+    pub fn progress_cost(&self, grid: &GridData, a: &AgentRuntime, i: usize) -> f64 {
+        let Some(route) = &self.routes[i] else {
+            return f64::INFINITY;
+        };
+        if let Some(point) = &route.direct {
+            return distance(&a.position, point);
+        }
+        let field = &self.fields[route.key.as_ref().unwrap()];
+        if let Some(point) = &a.navigation.target_point {
+            let to = index(grid, point);
+            if field.distance[to].is_finite() {
+                return distance(&a.position, point) + field.distance[to];
+            }
+        }
+        field.distance[index(grid, &a.position)]
+    }
     pub fn ready(&self, a: &mut AgentRuntime, i: usize, dt: f64) -> bool {
         if a.components.mobility.speed_multiplier.0 == 0.0 {
             a.state = "immobile".into();
@@ -979,6 +1007,151 @@ impl Navigator {
             true
         }
     }
+    fn opening_waypoint(
+        &self,
+        grid: &GridData,
+        a: &AgentRuntime,
+        i: usize,
+        work: &mut usize,
+    ) -> Result<Option<(Point, f64)>, Failure> {
+        if grid.portal_ids.len() <= 1 {
+            return Ok(None);
+        }
+        let route = self.routes[i].as_ref().unwrap();
+        if route.stop != 0.0
+            || self.intents[i]
+                .as_ref()
+                .is_none_or(|intent| !matches!(intent.goal.kind, GoalKind::Reach))
+        {
+            return Ok(None);
+        }
+        let field = &self.fields[route.key.as_ref().unwrap()];
+        let radius = a.components.physical.radius.0;
+        let mut cursor = index(grid, &a.position);
+        if !field.distance[cursor].is_finite() {
+            let Some(anchor) = entry(
+                grid,
+                field,
+                &a.position,
+                radius,
+                &self.bodies,
+                &self.portal_info,
+                work,
+            )?
+            else {
+                return Ok(None);
+            };
+            cursor = anchor;
+        }
+        let mut portal = grid.portal_index[cursor];
+        for _ in 0..8 {
+            if portal != 0 {
+                break;
+            }
+            let next = field.next[cursor];
+            if next == NONE || next == cursor as u32 {
+                return Ok(None);
+            }
+            cursor = next as usize;
+            portal = grid.portal_index[cursor];
+        }
+        if portal == 0
+            || a.navigation.target_entity_id.as_ref() == grid.portal_ids[portal as usize].as_ref()
+        {
+            return Ok(None);
+        }
+        let (_, _, _, delay, [x, y, width, height]) = self.portal_info[portal as usize].unwrap();
+        if delay > 0.0 {
+            return Ok(None);
+        }
+        let mut exit = None;
+        for _ in 0..32 {
+            let next = field.next[cursor];
+            if next == NONE || next == cursor as u32 {
+                return Ok(None);
+            }
+            if grid.portal_index[next as usize] != portal {
+                exit = Some((cursor, next as usize));
+                break;
+            }
+            cursor = next as usize;
+        }
+        let Some((last, next)) = exit else {
+            return Ok(None);
+        };
+        let horizontal = last / grid.width == next / grid.width;
+        let positive = next > last;
+        let sign = if positive { 1.0 } else { -1.0 };
+        let (align, through) = if horizontal {
+            if height < 2.0 * radius {
+                return Ok(None);
+            }
+            let lo = y + radius;
+            let hi = y + height - radius;
+            if lo > hi {
+                return Ok(None);
+            }
+            let lateral = a.position.y.0.clamp(lo, hi);
+            let near = if positive { x } else { x + width };
+            let far = if positive { x + width } else { x };
+            (
+                Point {
+                    x: Number(if positive {
+                        a.position.x.0.max(near - radius)
+                    } else {
+                        a.position.x.0.min(near + radius)
+                    }),
+                    y: Number(lateral),
+                },
+                Point {
+                    x: Number(far + sign * radius),
+                    y: Number(lateral),
+                },
+            )
+        } else {
+            if width < 2.0 * radius {
+                return Ok(None);
+            }
+            let lo = x + radius;
+            let hi = x + width - radius;
+            if lo > hi {
+                return Ok(None);
+            }
+            let lateral = a.position.x.0.clamp(lo, hi);
+            let near = if positive { y } else { y + height };
+            let far = if positive { y + height } else { y };
+            (
+                Point {
+                    x: Number(lateral),
+                    y: Number(if positive {
+                        a.position.y.0.max(near - radius)
+                    } else {
+                        a.position.y.0.min(near + radius)
+                    }),
+                },
+                Point {
+                    x: Number(lateral),
+                    y: Number(far + sign * radius),
+                },
+            )
+        };
+        // Preserve each person's lateral position across the usable aperture, including edge lanes.
+        for point in [through, align] {
+            let distance = distance(&a.position, &point);
+            if distance > grid.cell_size * 1e-7
+                && geometry::clear(grid, &self.bodies, &a.position, &point, radius, work)?
+            {
+                let to = index(grid, &point);
+                if field.distance[to].is_finite() {
+                    return Ok(Some((
+                        point,
+                        distance + f64::from(field.hops[to]) * grid.cell_size,
+                    )));
+                }
+            }
+        }
+        Ok(None)
+    }
     pub fn waypoint(
         &mut self,
         grid: &GridData,
@@ -1000,6 +1173,10 @@ impl Navigator {
         let field = &self.fields[route.key.as_ref().unwrap()];
         let epsilon = grid.cell_size * 1e-7;
         let cell = index(grid, &a.position);
+        if let Some((point, remaining)) = self.opening_waypoint(grid, a, i, work)? {
+            a.navigation.target_point = Some(point.clone());
+            return Ok(Some((point, remaining)));
+        }
         if !field.distance[cell].is_finite() {
             if let Some(i) = entry(
                 grid,
@@ -1017,6 +1194,70 @@ impl Navigator {
                 return Ok(Some((target, remaining)));
             }
             return Ok(None);
+        }
+        // Blend all downhill directions; a shared field should not funnel everyone onto cell centres.
+        if route.stop == 0.0 && field.hops[cell] > 8 && field.distance[cell].is_finite() {
+            let mut dx = 0.0;
+            let mut dy = 0.0;
+            for (dir, &(x, y)) in DIRS.iter().enumerate() {
+                if self.clearance[&a.components.physical.radius.0.to_bits()].edges[cell]
+                    & (1 << dir)
+                    == 0
+                {
+                    continue;
+                }
+                if let Some(next) = neighbour(grid, cell, dir) {
+                    let drop = (field.distance[cell] - field.distance[next]).max(0.0);
+                    dx += x as f64 * drop;
+                    dy += y as f64 * drop;
+                }
+            }
+            let length = geometry::norm(dx, dy);
+            if length > 0.0 && length.is_finite() {
+                let travel =
+                    (f64::from(field.hops[cell]) * grid.cell_size).min(grid.cell_size * 2.0);
+                let point = Point {
+                    x: Number(a.position.x.0 + dx / length * travel),
+                    y: Number(a.position.y.0 + dy / length * travel),
+                };
+                let width = grid.width as f64 * grid.cell_size;
+                let height = grid.height as f64 * grid.cell_size;
+                if point.x.0 >= 0.0 && point.y.0 >= 0.0 && point.x.0 < width && point.y.0 < height {
+                    let to = index(grid, &point);
+                    let delayed = (cell / grid.width).min(to / grid.width)
+                        ..=(cell / grid.width).max(to / grid.width);
+                    let no_delay = delayed.into_iter().all(|y| {
+                        ((cell % grid.width).min(to % grid.width)
+                            ..=(cell % grid.width).max(to % grid.width))
+                            .all(|x| {
+                                let p = grid.portal_index[y * grid.width + x];
+                                p == 0 || self.portal_info[p as usize].unwrap().3 == 0.0
+                            })
+                    });
+                    if no_delay
+                        && field.distance[to] < field.distance[cell]
+                        && same_terrain(grid, cell, to, work)?
+                        && geometry::clear(
+                            grid,
+                            &self.bodies,
+                            &a.position,
+                            &point,
+                            a.components.physical.radius.0,
+                            work,
+                        )?
+                    {
+                        let remaining = distance(&a.position, &point)
+                            + f64::from(field.hops[to]) * grid.cell_size
+                            - route.stop;
+                        if remaining <= epsilon {
+                            complete(a);
+                            return Ok(None);
+                        }
+                        a.navigation.target_point = Some(point.clone());
+                        return Ok(Some((point, remaining)));
+                    }
+                }
+            }
         }
         // Keep a visible lookahead until approached instead of rebuilding it every substep.
         if let Some(target) = &a.navigation.target_point {

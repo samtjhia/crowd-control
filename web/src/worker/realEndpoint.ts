@@ -10,7 +10,7 @@ export type WorkerPort = {
 }
 export type RealEndpoint = WorkerEndpoint & { kind: 'real'; dispose(): void }
 
-export function createRealEndpoint(options: { worker?: WorkerPort } = {}): RealEndpoint {
+export function createRealEndpoint(options: { worker?: WorkerPort; onValidationTime?: (ms: number) => void } = {}): RealEndpoint {
   let worker: WorkerPort | undefined = options.worker
   const listeners = new Set<(message: WorkerMessage) => void>()
   const pending = new Map<string, WorkerCommand>()
@@ -31,7 +31,9 @@ export function createRealEndpoint(options: { worker?: WorkerPort } = {}): RealE
   const connect = (port: WorkerPort) => {
     port.onmessage = (event) => {
       if (disposed || failed) return
+      const started = options.onValidationTime ? performance.now() : 0
       const parsed = parseWorkerMessage(event.data)
+      options.onValidationTime?.(performance.now() - started)
       if (!parsed.ok) { fail(`Invalid worker response: ${parsed.error.message}`); return }
       const message = parsed.value
       if ('commandId' in message && message.commandId) pending.delete(message.commandId)

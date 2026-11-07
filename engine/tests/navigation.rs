@@ -415,3 +415,27 @@ fn recorded_request_memory_is_bounded_without_mutating_the_world() {
     assert_eq!(send(&mut e, c)[0]["error"]["code"], "RESOURCE_LIMIT");
     assert_eq!(snapshot(&mut e), before);
 }
+
+#[test]
+fn doorway_guidance_uses_both_body_width_lanes_in_a_one_unit_opening() {
+    let mut v = load();
+    v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
+    let mut a = v["compiled"]["scene"]["agents"][0].clone();
+    a["x"] = json!(2.5);
+    a["y"] = json!(2.25);
+    a["components"] = json!({"physical":{"radius":0.25}});
+    let mut b = a.clone();
+    b["id"] = json!("a2");
+    b["y"] = json!(2.75);
+    v["compiled"]["scene"]["agents"] = json!([a, b]);
+    let mut e = init(v);
+    step(&mut e, 80);
+    let s = snapshot(&mut e);
+    for (i, a) in s["agents"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(a["state"], "departed", "{}", s["agents"]);
+        assert!(
+            (a["position"]["y"].as_f64().unwrap() - (2.25 + i as f64 * 0.5)).abs() < 1e-6,
+            "body-clear edge lanes must not converge onto a shared cell centre: {a}"
+        );
+    }
+}

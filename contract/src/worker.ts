@@ -48,4 +48,5 @@ export type WorkerEndpoint = {
   kind: 'real' | 'mock';
   send(command: WorkerCommand): void;
   subscribe(listener: (message: WorkerMessage) => void): () => void;
+  dispose?(): void;
 };

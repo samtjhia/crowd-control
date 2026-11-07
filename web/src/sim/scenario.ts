@@ -147,9 +147,9 @@ const spawn = (count: number, zone: string, tags: string[], fill: string, symbol
   ({ op: 'spawn', template: { kind: 'agent', tags, appearance: { fill, symbol } }, count, placement: { inside: inside(zone) } })
 const assign = (tag: string, goal: Extract<Operation, { op: 'assign_goal' }>['goal']): Operation => ({ op: 'assign_goal', targets: { kind: 'agent' as const, tags: [tag] }, goal })
 const alarmAt = (at: number) => [{ op: 'schedule' as const, id: 'alarm', at, operations: [{ op: 'emit' as const, event: { name: 'alarm' } }] }]
-const evacuate = (tag: string, target: { ids: string[] }) => [{
+const evacuate = (tag: string, target: { tags: string[] } | { ids: string[] }, urgency = 0) => [{
   op: 'define_rule' as const, id: 'evacuate', when: { kind: 'event' as const, name: 'alarm' }, once: true,
-  operations: [{ op: 'assign_goal' as const, targets: { kind: 'agent' as const, tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const, departOnArrival: true } }],
+  operations: [{ op: 'assign_goal' as const, targets: { kind: 'agent' as const, tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const, departOnArrival: true, urgency } }],
 }]
 const lookup = (venue: string, floor: string) => ({ mode: 'lookup' as const, venue, floor })
 const header = (simulationId: string) => ({ schemaVersion: 1 as const, simulationId, seed: 42 })
@@ -168,8 +168,8 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
         initialOperations: [
           spawn(80, 'station_plaza', ['crowd', 'uphill'], '#2563EB'),
           spawn(80, 'bar_street', ['crowd', 'downhill'], '#EA580C', 'square'),
-          assign('uphill', { kind: 'sequence', goals: [{ kind: 'reach', target: inside('bar_street') }, { kind: 'wander', inside: inside('bar_street') }] }),
-          assign('downhill', { kind: 'sequence', goals: [{ kind: 'reach', target: inside('station_plaza') }, { kind: 'wander', inside: inside('station_plaza') }] }),
+          assign('uphill', { kind: 'sequence', goals: [{ kind: 'reach', target: inside('bar_street') }, { kind: 'wander', changeTargetEvery: 6, inside: inside('bar_street') }] }),
+          assign('downhill', { kind: 'sequence', goals: [{ kind: 'reach', target: inside('station_plaza') }, { kind: 'wander', changeTargetEvery: 6, inside: inside('station_plaza') }] }),
         ],
         timeline: [], rules: [],
       },
@@ -192,11 +192,11 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
         initialOperations: [
           spawn(400, 'floor', ['audience'], '#7C3AED'),
           spawn(30, 'bar', ['audience', 'at-bar'], '#DB2777', 'square'),
-          assign('audience', { kind: 'wander', inside: inside('floor') }),
+          assign('audience', { kind: 'wander', changeTargetEvery: 6, inside: inside('floor') }),
           // The bar crowd takes turns at the counter (four served at once), then mills about.
-          assign('at-bar', { kind: 'sequence', repeat: 5, goals: [{ kind: 'interact', target: inside('bar_counter') }, { kind: 'wander', inside: inside('bar'), duration: 20 }] }),
+          assign('at-bar', { kind: 'sequence', repeat: 5, goals: [{ kind: 'interact', target: inside('bar_counter') }, { kind: 'wander', inside: inside('bar'), changeTargetEvery: 6, duration: 20 }] }),
         ],
-        timeline: alarmAt(45), rules: evacuate('audience', { ids: ['street'] }),
+        timeline: alarmAt(45), rules: evacuate('audience', { tags: ['outside'] }, 0.4),
       },
     },
     {
@@ -210,14 +210,14 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
           // Most hackers sit at the nearest table and work.
           assign('seated', { kind: 'sequence', goals: [{ kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' }, { kind: 'wait', duration: 300 }] }),
           // Some take turns at the snack table (three served at once), then roam.
-          assign('hungry', { kind: 'sequence', repeat: 3, goals: [{ kind: 'interact', target: inside('snacks') }, { kind: 'wander', inside: inside('hall'), duration: 40 }] }),
+          assign('hungry', { kind: 'sequence', repeat: 3, goals: [{ kind: 'interact', target: inside('snacks') }, { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6, duration: 40 }] }),
           // Arrivals enter through the check-in desks (4 s each), find the nearest table and settle in, then roam.
           assign('arrival', {
             kind: 'sequence', goals: [
               { kind: 'reach', target: inside('hall') },
               { kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' },
               { kind: 'wait', duration: 60 },
-              { kind: 'wander', inside: inside('hall') },
+              { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6 },
             ],
           }),
         ],
