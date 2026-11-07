@@ -1,0 +1,65 @@
+/* Sign-in states: the simulator's green workspace, one calm panel, the brand above it. */
+.auth-page {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-rows: auto 1fr auto;
+  justify-items: center;
+  gap: 24px;
+  padding: 28px 16px 24px;
+  background: var(--cc-workspace);
+  color: var(--cc-text);
+  font: 15px/1.55 var(--cc-body);
+  -webkit-font-smoothing: antialiased;
+}
+.auth-page ::selection { background: #d0e6ba; }
+.auth-brand { justify-self: start; margin-left: max(0px, calc(50vw - 560px)); }
+
+.auth-panel {
+  align-self: center;
+  width: min(100%, 440px);
+  padding: 36px 36px 32px;
+  border-radius: 22px;
+  background: var(--cc-card);
+  box-shadow: var(--cc-shadow);
+}
+.auth-panel h1 {
+  margin: 0 0 10px;
+  font: 700 28px/1.15 var(--cc-display);
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.auth-panel p { margin: 0; color: var(--cc-muted); text-wrap: pretty; }
+.auth-panel p[role='alert'] { color: var(--cc-text); }
+.auth-panel code { padding: 1px 6px; border-radius: 6px; background: var(--cc-well); font-size: 0.88em; }
+.auth-missing { display: grid; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
+
+.auth-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 44px;
+  margin-top: 26px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--cc-green);
+  color: #fff;
+  cursor: pointer;
+  font: 600 15px/1 var(--cc-body);
+  transition: background 140ms var(--cc-ease), transform 140ms var(--cc-ease);
+}
+.auth-button:hover { background: var(--cc-green-hover); }
+.auth-button:active { transform: translateY(1px); }
+.auth-button:focus-visible { outline: 2px solid var(--cc-green); outline-offset: 3px; }
+
+.auth-loading { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.auth-spin { color: var(--cc-green); animation: auth-spin 0.9s linear infinite; }
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .auth-spin { animation: none; } }
+
+.auth-foot { margin: 0; color: var(--cc-muted); font-size: 13px; }
+
+@media (max-width: 480px) {
+  .auth-panel { padding: 28px 22px 24px; }
+  .auth-panel h1 { font-size: 24px; }
+}

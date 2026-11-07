@@ -152,7 +152,7 @@ const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
  * made since, that names it, as plain sentences ("People tagged arrival: go to Hall, then go to
  * the nearest table…"). A danger placed from the map says so.
  */
-export function placeReasons(scene: RenderScene, plan: ScenarioPlan | null, changes: readonly AppliedChange[], id: string): string[] {
+export function placeReasons(scene: RenderScene, plan: ScenarioPlan | null, changes: readonly Pick<AppliedChange, 'operations' | 'at'>[], id: string): string[] {
   const inventory = sceneInventory(scene)
   const tags = inventory.find((item) => item.id === id)?.tags ?? []
   const reasons: string[] = []

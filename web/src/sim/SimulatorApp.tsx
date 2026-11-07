@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import '@fontsource-variable/dm-sans'
-import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
@@ -25,6 +23,8 @@ import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startSc
 import { loadAssistant, saveScenarios } from './assistantStore.ts'
 import { AssistantPanel } from './AssistantPanel.tsx'
 import { loadSavedVenues, presetFor } from './savedVenues.ts'
+import { AccountMenu, BrandMark } from '../site/Site.tsx'
+import { useRunSaving } from './useRunSaving.ts'
 
 /** What each tool can click: Select anything, Trip people, Doors doors, Danger the floor. */
 const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'object', 'portal', 'zone'], box: ['agent', 'object', 'portal', 'zone'], trip: ['agent'], doors: ['portal'], danger: ['zone'] }
@@ -146,6 +146,8 @@ export default function SimulatorApp() {
     return { left: wide, right: wide }
   })
   const view = useSyncExternalStore(client.subscribe, client.getView)
+  // Runs save to the signed-in account as they play, for Past simulations.
+  const save = useRunSaving(view)
   const incidents = useMemo(() => toIncidents(view.events), [view.events])
   const now = view.current?.frame.time ?? 0
   const ready = view.current !== null
@@ -403,6 +405,7 @@ export default function SimulatorApp() {
           </p>
         )}
         {view.endpointKind === 'mock' ? <p className="sim-tag" title="Driven by the development mock worker, not the simulation engine">Mock data</p> : <p className="sim-tag">Rust engine · movement only</p>}
+        <AccountMenu save={save} />
       </header>
 
       <MapToolbar tool={tool} onTool={setTool} />
@@ -455,11 +458,6 @@ export default function SimulatorApp() {
         onClick={() => setPanels({ left: false, right: false })} />
     </div>
   )
-}
-
-/** Benito's landing mark: six pill-shaped people leaning into motion. */
-function BrandMark() {
-  return <span className="sim-brand-mark" aria-hidden="true"><i /><i /><i /><i /><i /><i /></span>
 }
 
 /**

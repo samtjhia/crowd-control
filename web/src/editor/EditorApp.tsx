@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
-import '@fontsource-variable/dm-sans'
-import '@fontsource-variable/manrope'
 import { ArrowLeft, Check, Crop, ImageUp, Maximize2, Minus, Plus } from 'lucide-react'
 import { LIMITS } from '../sim/scenario.ts'
+import { AccountMenu } from '../site/Site.tsx'
 import '../sim/simulator.css'
 import './editor.css'
 import { PlanCanvas, type PlanCanvasHandle } from './PlanCanvas.tsx'
@@ -200,6 +199,7 @@ export default function EditorApp() {
             )
           })}
         </ol>
+        <AccountMenu />
       </header>
 
       {!plan ? (

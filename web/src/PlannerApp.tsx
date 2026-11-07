@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useAuth0 } from '@auth0/auth0-react'
+import { SiteHeader } from './site/Site.tsx'
 import {
   CompileOutputSchema,
   CreateInterventionRequestSchema,
@@ -626,17 +627,17 @@ function App() {
   const summary = previewPlan ? describePlan(previewPlan) : null
 
   return (
+    <div className="site-page">
+    <SiteHeader />
     <main className="app-shell">
       <header className="page-heading">
-        <p className="eyebrow">HackTrent 2026 · Planner demo</p>
-        <h1>Crowd Control</h1>
-        <p>Describe a crowd scenario and review the plan before applying it.</p>
+        <h1>Planner</h1>
+        <p>The original step-by-step planner: describe a scenario, review the plan, then run it on sample data. The simulator’s Assistant does this on real venues.</p>
       </header>
 
       <section className="panel" aria-labelledby="chat-heading">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Step 1 · Scenario</p>
             <h2 id="chat-heading">Describe your scenario</h2>
           </div>
           <span className="mode-badge">Gemini via server</span>
@@ -669,14 +670,12 @@ function App() {
 
         {otherReply?.kind === 'clarification' && (
           <section className="preview-card" aria-labelledby="reply-heading">
-            <p className="eyebrow">Planner response</p>
             <h3 id="reply-heading">One detail needs clarification</h3>
             <p>{otherReply.message}</p>
           </section>
         )}
         {otherReply?.kind === 'answer' && (
           <section className="preview-card" aria-labelledby="reply-heading">
-            <p className="eyebrow">Planner response</p>
             <h3 id="reply-heading">Answer</h3>
             <p>{otherReply.text}</p>
           </section>
@@ -693,7 +692,6 @@ function App() {
       <section className="panel" aria-labelledby="review-heading">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Step 2 · Review</p>
             <h2 id="review-heading">Review the plan</h2>
           </div>
           {previewSource && <span className="mode-badge">{previewSource === 'sample' ? 'Offline fixture' : 'Gemini plan'}</span>}
@@ -738,7 +736,6 @@ function App() {
       <section className="panel status-panel" aria-labelledby="status-heading">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Step 3</p>
             <h2 id="status-heading">Mock simulation</h2>
           </div>
           <span className="mode-badge">Development data</span>
@@ -760,7 +757,6 @@ function App() {
               <span className="fine-print">Collect more metrics and trigger scheduled events for evidence-based explanations.</span>
             </div>
             <section className="followup-panel" aria-labelledby="followup-heading">
-              <p className="eyebrow">Step 4 · Follow-up</p>
               <h3 id="followup-heading">Change the running sample</h3>
               <p className="muted">Describe a supported change to this mock simulation, such as adding people to a zone or changing a portal. Review the proposal before applying it.</p>
               <form onSubmit={(event) => preview(event, followupPrompt, true)}>
@@ -780,14 +776,12 @@ function App() {
 
               {followupReply?.kind === 'clarification' && (
                 <section className="preview-card" aria-labelledby="followup-reply-heading">
-                  <p className="eyebrow">Planner response</p>
                   <h4 id="followup-reply-heading">One detail needs clarification</h4>
                   <p>{followupReply.message}</p>
                 </section>
               )}
               {followupReply?.kind === 'answer' && (
                 <section className="preview-card" aria-labelledby="followup-reply-heading">
-                  <p className="eyebrow">Planner response</p>
                   <h4 id="followup-reply-heading">Answer</h4>
                   <p>{followupReply.text}</p>
                 </section>
@@ -801,7 +795,6 @@ function App() {
 
               {previewFollowup && (
                 <section className="preview-card" aria-labelledby="followup-preview-heading">
-                  <p className="eyebrow">Review · Mock worker</p>
                   <h4 id="followup-preview-heading">Intervention preview</h4>
                   <p>{displayName(previewFollowup.label ?? 'Proposed change')}{previewFollowup.at === undefined ? ' · apply now' : ` · at ${previewFollowup.at} seconds`}</p>
                   <ul>
@@ -818,7 +811,6 @@ function App() {
             </section>
 
             <section className="followup-panel" aria-labelledby="why-heading">
-              <p className="eyebrow">Ask about this run</p>
               <h3 id="why-heading">Why did that happen?</h3>
               <p className="muted">
                 Ask about observed behavior. Gemini receives up to 40 recent metric samples,
@@ -842,7 +834,6 @@ function App() {
               {whyStatus && <p className="message" role="status">{whyStatus}</p>}
               {whyReply && (
                 <section className="preview-card" aria-labelledby="why-answer-heading">
-                  <p className="eyebrow">Evidence-based explanation</p>
                   <h4 id="why-answer-heading">Answer</h4>
                   <p>{whyReply.text}</p>
                   <p className="fine-print">
@@ -850,7 +841,7 @@ function App() {
                   </p>
                   {whyReply.evidenceEventIds.length > 0 && (
                     <>
-                      <p className="eyebrow">Cited events</p>
+                      <p className="field-label">Cited events</p>
                       <ul>
                         {whyReply.evidenceEventIds.map((id) => {
                           const record = recentEvents.find((eventRecord) => eventRecord.id === id)
@@ -876,7 +867,7 @@ function App() {
                   {historyEntries.map((entry) => (
                     <li className="history-entry" key={entry.request.requestId}>
                       <strong>{displayName(entry.request.label ?? describeOperation(entry.request.operations[0]!, inventory))}</strong>
-                      <p className="eyebrow">You wrote</p>
+                      <p className="field-label">You wrote</p>
                       <blockquote className="history-prompt">{entry.prompt}</blockquote>
                       <ul>
                         {describeOperations(entry.request.operations, inventory).map((description, index) => (
@@ -896,7 +887,6 @@ function App() {
             <section className="analytics-panel" aria-labelledby="analytics-heading">
               <div className="panel-heading">
                 <div>
-                  <p className="eyebrow">Saved run data · Tiger Data</p>
                   <h3 id="analytics-heading">Simulation analytics</h3>
                 </div>
                 <button
@@ -963,6 +953,7 @@ function App() {
 
       <footer>Schema version {SCHEMA_VERSION} · Generated plans are previews until compiler integration is complete.</footer>
     </main>
+    </div>
   )
 }
 

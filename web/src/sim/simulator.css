@@ -183,20 +183,7 @@
   letter-spacing: -0.04em;
 }
 
-/* The landing page's brand mark: six leaning pill people. */
-.sim-brand-mark {
-  display: grid;
-  grid-template-columns: repeat(3, 3px);
-  gap: 3px;
-  margin: 3px 2px 0 2px;
-  transform: rotate(-12deg);
-}
-
-.sim-brand-mark i { position: relative; width: 3px; height: 8px; border-radius: 3px; background: var(--green); }
-.sim-brand-mark i::before { content: ''; position: absolute; top: -4px; width: 3px; height: 3px; border-radius: 50%; background: inherit; }
-.sim-brand-mark i:nth-child(2), .sim-brand-mark i:nth-child(5) { background: #89a581; }
-.sim-brand-mark i:nth-child(3) { background: #7898b5; }
-.sim-brand-mark i:nth-child(4) { background: #c58a9a; }
+/* The brand mark itself is shared: site/site.css (.cc-mark). */
 
 .sim-scenario {
   display: flex;

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { useAuth0 } from '@auth0/auth0-react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useAuthFetch } from '../site/useAuthFetch.ts'
 import { Check, LoaderCircle, Play, RotateCcw, SendHorizontal, X } from 'lucide-react'
 import type { CreateInterventionRequest, InterventionSummary, InventoryItem, ScenarioPlan } from '@crowd-control/contract'
 import { describeOperations, describePlan, displayName } from '../planner/describe.ts'
@@ -45,14 +45,8 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
   const [kind, setKind] = useState<AskKind>('change')
   const [where, setWhere] = useState<string>(currentVenueId ?? GENERATE)
   const [busy, setBusy] = useState(false)
-  // The planner API needs the signed-in person's Auth0 token, like the planner page sends.
-  const { getAccessTokenSilently } = useAuth0()
-  const authFetch = useCallback(async (url: string, init: RequestInit) => {
-    const token = await getAccessTokenSilently()
-    const headers = new Headers(init.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return fetch(url, { ...init, headers })
-  }, [getAccessTokenSilently])
+  // The planner API needs the signed-in person's Auth0 token.
+  const authFetch = useAuthFetch()
   const nextId = useRef(messages.reduce((max, m) => Math.max(max, m.id), 0) + 1)
   const list = useRef<HTMLOListElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
@@ -166,7 +160,7 @@ ${places}` : prompt, kind: 'change',
     // A time already passed (the planner often writes "at": 0 for "now") means now, not a replay.
     const now = client.getView().current?.frame.time ?? 0
     const when = change.at !== undefined && change.at > now ? change.at : undefined
-    const result = await client.apply(change.label ?? titleFrom(prompt), change.operations, when)
+    const result = await client.apply(change.label ?? titleFrom(prompt), change.operations, when, prompt)
     update(id, result.ok ? { status: 'applied', note: undefined } : { note: explainRefusal(result.error.message) })
   }
 

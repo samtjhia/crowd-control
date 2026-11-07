@@ -1,0 +1,139 @@
+/* Past simulations: the simulator's green workspace, a list of runs and the chosen run's details. */
+.hist-page {
+  min-height: 100dvh;
+  padding-bottom: 48px;
+  background: var(--cc-workspace);
+  color: var(--cc-text);
+  font: 14px/1.55 var(--cc-body);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+.hist-page ::selection { background: #d0e6ba; }
+.hist-page :focus-visible { outline: 2px solid var(--cc-green); outline-offset: 2px; }
+.hist-page h1, .hist-page h2, .hist-page h3 { font-family: var(--cc-display); letter-spacing: -0.03em; text-wrap: balance; }
+
+.hist { width: min(100% - 32px, 1120px); margin: 0 auto; }
+
+.hist-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 44px 4px 22px;
+}
+.hist-head h1 { margin: 0 0 6px; font-size: clamp(28px, 4vw, 36px); font-weight: 700; line-height: 1.1; }
+.hist-head p { max-width: 60ch; margin: 0; color: var(--cc-muted); }
+
+/* Buttons and links, in the simulator's voice. */
+.hist-page .hist-refresh,
+.hist-page .hist-button,
+.hist-page .hist-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  cursor: pointer;
+  font: 600 14px/1 var(--cc-body);
+  text-decoration: none;
+  transition: background 140ms var(--cc-ease), color 140ms var(--cc-ease);
+}
+.hist-page .hist-refresh { flex: none; height: 36px; padding: 0 14px; border-radius: 11px; background: var(--cc-card); color: var(--cc-text); box-shadow: 0 1px 2px rgb(20 30 20 / 0.06); }
+.hist-page .hist-refresh:hover { background: var(--cc-well); }
+.hist-page .hist-refresh:disabled { color: var(--cc-muted); cursor: default; }
+.hist-page .hist-button { height: 40px; margin-top: 18px; padding: 0 16px; border-radius: 12px; background: var(--cc-green); color: #fff; }
+.hist-page .hist-button:hover { background: var(--cc-green-hover); }
+.hist-page .hist-link { padding: 0; background: none; color: var(--cc-green); text-decoration: underline; text-underline-offset: 3px; }
+
+.hist-spin { animation: hist-spin 0.9s linear infinite; }
+@keyframes hist-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .hist-spin { animation: none; } }
+
+.hist-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: start; gap: 16px; }
+.hist-body.is-single { grid-template-columns: minmax(0, 560px); }
+.hist-list, .hist-detail { border-radius: var(--cc-radius); background: var(--cc-card); box-shadow: var(--cc-shadow); }
+.hist-list { padding: 8px; }
+.hist-detail { position: sticky; top: 88px; min-height: 240px; padding: 24px 26px 22px; }
+
+.hist-note { display: flex; align-items: center; gap: 10px; margin: 0; padding: 14px 12px; color: var(--cc-muted); }
+.hist-detail .hist-note { padding: 6px 0; }
+.hist-empty { padding: 28px 22px 26px; }
+.hist-empty h2 { margin: 0 0 6px; font-size: 19px; }
+.hist-empty p { max-width: 46ch; margin: 0; color: var(--cc-muted); }
+.hist-placeholder { display: grid; min-height: 190px; place-items: center; margin: 0; padding: 0 24px; color: var(--cc-muted); text-align: center; }
+.hist-problem p { margin: 0 0 6px; }
+
+/* The run list: one row per run, the whole row picks it; Open goes to the simulator. */
+.hist-runs { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.hist-runs li { position: relative; display: flex; align-items: center; border-radius: 12px; transition: background 140ms var(--cc-ease); }
+.hist-runs li:hover { background: var(--cc-well); }
+.hist-runs li.is-current { background: var(--cc-green-soft); }
+.hist-page .hist-run {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  min-width: 0;
+  padding: 12px 12px 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.hist-run-name { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.hist-run-when { color: var(--cc-muted); font-size: 13px; white-space: nowrap; }
+.hist-run-meta { grid-column: 1 / -1; color: var(--cc-muted); font-size: 13px; }
+.hist-open {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  color: var(--cc-green);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.hist-open:hover { background: var(--cc-card); }
+
+/* Details of the chosen run. */
+.hist-detail-head { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--cc-hair); }
+.hist-detail-head h2 { margin: 0 0 2px; font-size: 22px; font-weight: 700; }
+.hist-detail-head p { margin: 0; color: var(--cc-muted); }
+.hist-detail h3 { margin: 22px 0 8px; font-size: 15px; font-weight: 650; }
+.hist-detail-head + h3 { margin-top: 0; }
+
+.hist-table { width: 100%; border-collapse: collapse; }
+.hist-table th, .hist-table td { padding: 7px 0; border-bottom: 1px solid var(--cc-hair); text-align: left; }
+.hist-table thead th { padding-top: 0; color: var(--cc-muted); font-size: 12px; font-weight: 500; }
+.hist-table thead th span { color: var(--cc-faint); }
+.hist-table tbody th { font-weight: 500; }
+.hist-table tr:last-child > * { border-bottom: 0; }
+.hist-table .num { padding-left: 16px; text-align: right; white-space: nowrap; }
+.hist-table td.num svg { margin-right: 5px; vertical-align: -2px; }
+.hist-table td.is-down { color: var(--cc-green); }
+.hist-table td.is-up { color: var(--cc-rose); }
+.hist-table.is-compact { margin-top: 6px; font-size: 13px; }
+
+.hist-changes { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.hist-changes > li { padding: 12px 14px; border-radius: 12px; background: var(--cc-well); }
+.hist-change-what { margin: 0; font-weight: 550; }
+.hist-change-what time { margin-right: 6px; color: var(--cc-muted); font-weight: 500; }
+.hist-changes .hist-table th, .hist-changes .hist-table td { border-bottom-color: var(--cc-well-strong); }
+
+.hist-fine { margin: 20px 0 0; color: var(--cc-muted); font-size: 12px; }
+
+@media (max-width: 520px) {
+  .hist-page .hist-run { grid-template-columns: 1fr; }
+  .hist-run-name { white-space: normal; }
+}
+
+@media (max-width: 860px) {
+  .hist-body { grid-template-columns: 1fr; }
+  .hist-detail { position: static; }
+  .hist-head { align-items: flex-start; flex-direction: column; gap: 14px; padding-top: 32px; }
+}

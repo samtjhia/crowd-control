@@ -1,211 +1,232 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useAuth0 } from '@auth0/auth0-react'
-import {
-  RunAnalyticsSchema,
-  RunSummariesSchema,
-  type RunAnalytics,
-  type RunSummary,
-} from '@crowd-control/contract'
+import { ArrowRight, LoaderCircle, Play, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
+import { RunAnalyticsSchema, RunSummariesSchema, type RunAnalytics, type RunSummary } from '@crowd-control/contract'
+import { SiteHeader } from './site/Site.tsx'
+import { useAuthFetch } from './site/useAuthFetch.ts'
+import { formatClock } from './sim/incidents.ts'
+import { readable, runIdentity } from './sim/runNames.ts'
+import './history.css'
 
-function displayName(value: string): string {
-  return value.replace(/_+/g, ' ')
+/**
+ * Past simulations: the signed-in person's saved runs, newest first. Choosing one shows where it
+ * got busiest and what each change did to crowding, from the analytics the server keeps.
+ */
+
+type Load<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; value: T }
+
+/** "Today, 3:42 PM", "Yesterday, 9:05 AM", or "Nov 5, 3:42 PM". */
+function when(iso: string, now = new Date()): string {
+  const date = new Date(iso)
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((day(now) - day(date)) / 86_400_000)
+  if (days === 0) return `Today, ${time}`
+  if (days === 1) return `Yesterday, ${time}`
+  return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() && { year: 'numeric' }) })}, ${time}`
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** The server's reason for a failed request, or its status. */
+async function readJson(response: Response, key: string): Promise<unknown> {
+  const payload: unknown = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail = typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`
+    throw new Error(detail)
+  }
+  return typeof payload === 'object' && payload !== null && key in payload ? (payload as Record<string, unknown>)[key] : undefined
 }
 
 export default function HistoryApp() {
-  const { getAccessTokenSilently } = useAuth0()
-  const [runs, setRuns] = useState<RunSummary[]>([])
-  const [runsLoading, setRunsLoading] = useState(true)
-  const [runsError, setRunsError] = useState('')
-  const [analytics, setAnalytics] = useState<RunAnalytics | null>(null)
-  const [analyticsRun, setAnalyticsRun] = useState<RunSummary | null>(null)
-  const [analyticsLoading, setAnalyticsLoading] = useState(false)
-  const [analyticsError, setAnalyticsError] = useState('')
-  const analyticsRequestId = useRef(0)
+  const authFetch = useAuthFetch()
+  const [runs, setRuns] = useState<Load<RunSummary[]>>({ state: 'loading' })
+  const [refreshing, setRefreshing] = useState(false)
+  const [selected, setSelected] = useState<RunSummary | null>(null)
+  const [analytics, setAnalytics] = useState<Load<RunAnalytics> | null>(null)
+  const latest = useRef(0)
+  const hasRuns = runs.state === 'ready' && runs.value.length > 0
 
-  const authFetch = useCallback(async (input: RequestInfo | URL) => {
-    const token = await getAccessTokenSilently()
-    return fetch(input, { headers: { Authorization: `Bearer ${token}` } })
-  }, [getAccessTokenSilently])
-
-  const refreshRuns = useCallback(async () => {
-    setRunsLoading(true)
+  const loadRuns = useCallback(async () => {
+    setRefreshing(true)
     try {
-      const response = await authFetch('/api/runs')
-      const payload: unknown = await response.json()
-      if (!response.ok) {
-        const detail = typeof payload === 'object' && payload !== null && 'error' in payload
-          && typeof payload.error === 'string'
-          ? payload.error
-          : `HTTP ${response.status}`
-        throw new Error(detail)
-      }
-      const value = typeof payload === 'object' && payload !== null && 'runs' in payload
-        ? payload.runs
-        : undefined
-      const parsed = RunSummariesSchema.safeParse(value)
-      if (!parsed.success) throw new Error('Tiger Data returned an invalid past simulations response.')
-      setRuns(parsed.data)
-      setRunsError('')
+      const parsed = RunSummariesSchema.safeParse(await readJson(await authFetch('/api/runs'), 'runs'))
+      if (!parsed.success) throw new Error('the server sent a list it couldn’t read.')
+      setRuns({ state: 'ready', value: parsed.data })
     } catch (error) {
-      setRunsError(error instanceof Error ? error.message : 'Could not load past simulations.')
+      setRuns({ state: 'error', message: error instanceof Error ? error.message : 'something went wrong.' })
     } finally {
-      setRunsLoading(false)
+      setRefreshing(false)
     }
   }, [authFetch])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void refreshRuns(), 0)
+    const timer = window.setTimeout(() => void loadRuns(), 0)
     return () => window.clearTimeout(timer)
-  }, [refreshRuns])
+  }, [loadRuns])
 
-  const viewAnalytics = async (run: RunSummary) => {
-    const requestId = ++analyticsRequestId.current
-    setAnalyticsRun(run)
-    setAnalytics(null)
-    setAnalyticsError('')
-    setAnalyticsLoading(true)
+  const open = useCallback(async (run: RunSummary) => {
+    const request = ++latest.current
+    setSelected(run)
+    setAnalytics({ state: 'loading' })
     try {
-      const response = await authFetch(`/api/runs/${run.runId}/analytics`)
-      const payload: unknown = await response.json()
-      if (!response.ok) {
-        const detail = typeof payload === 'object' && payload !== null && 'error' in payload
-          && typeof payload.error === 'string'
-          ? payload.error
-          : `HTTP ${response.status}`
-        throw new Error(detail)
-      }
-      const value = typeof payload === 'object' && payload !== null && 'analytics' in payload
-        ? payload.analytics
-        : undefined
-      const parsed = RunAnalyticsSchema.safeParse(value)
-      if (!parsed.success) throw new Error('Tiger Data returned an invalid analytics response.')
-      if (requestId === analyticsRequestId.current) setAnalytics(parsed.data)
+      const parsed = RunAnalyticsSchema.safeParse(await readJson(await authFetch(`/api/runs/${run.runId}/analytics`), 'analytics'))
+      if (!parsed.success) throw new Error('the server sent analytics it couldn’t read.')
+      if (request === latest.current) setAnalytics({ state: 'ready', value: parsed.data })
     } catch (error) {
-      if (requestId === analyticsRequestId.current) {
-        setAnalyticsError(error instanceof Error ? error.message : 'Could not load simulation analytics.')
-      }
-    } finally {
-      if (requestId === analyticsRequestId.current) setAnalyticsLoading(false)
+      if (request === latest.current) setAnalytics({ state: 'error', message: error instanceof Error ? error.message : 'something went wrong.' })
     }
-  }
+  }, [authFetch])
 
   return (
-    <main className="app-shell">
-      <header className="page-heading">
-        <p className="eyebrow">Saved to Tiger Data</p>
-        <h1>Past simulations</h1>
-        <p>Review saved runs from your account. Opening a run shows its analytics; it does not replay the simulation.</p>
-      </header>
-
-      <section className="panel" aria-labelledby="past-runs-heading">
-        <div className="panel-heading">
+    <div className="hist-page">
+      <SiteHeader />
+      <main className="hist">
+        <div className="hist-head">
           <div>
-            <p className="eyebrow">Your account</p>
-            <h2 id="past-runs-heading">Simulation history</h2>
+            <h1>Past simulations</h1>
+            <p>Runs you’ve played in the simulator, newest first. They save on their own as they play.</p>
           </div>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void refreshRuns()}
-            disabled={runsLoading}
-          >
-            {runsLoading ? 'Refreshing…' : 'Refresh list'}
+          <button type="button" className="hist-refresh" onClick={() => void loadRuns()} disabled={refreshing}>
+            <RefreshCw size={15} className={refreshing ? 'hist-spin' : undefined} aria-hidden="true" />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
-        <p className="fine-print">Only simulations saved by your signed-in account appear here. Anonymous and other users’ runs are not shown.</p>
-        {runsError && <p className="error" role="alert">Could not load past simulations: {runsError}</p>}
-        {!runs.length && !runsError && (
-          <p className="muted">{runsLoading ? 'Loading your saved simulations…' : 'No saved simulations yet. Create and run a simulation to get started.'}</p>
-        )}
-        {runs.length > 0 && (
-          <ul className="past-runs-list">
-            {runs.map((run) => (
-              <li key={run.runId}>
-                <div>
-                  <strong>{displayName(run.simulationId)}</strong>
-                  <span className="muted"> · {new Date(run.startedAt).toLocaleString()}</span>
-                  <p className="fine-print">
-                    {run.sampleCount} metric {run.sampleCount === 1 ? 'sample' : 'samples'} · {run.interventionCount} saved {run.interventionCount === 1 ? 'intervention' : 'interventions'}
-                  </p>
-                </div>
-                <button type="button" onClick={() => void viewAnalytics(run)}>
-                  View analytics
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
-      <section className="panel" aria-labelledby="run-analytics-heading">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Saved run data · Tiger Data</p>
-            <h2 id="run-analytics-heading">Simulation analytics</h2>
-          </div>
-          {analyticsRun && (
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void viewAnalytics(analyticsRun)}
-              disabled={analyticsLoading}
-            >
-              {analyticsLoading ? 'Refreshing…' : 'Refresh analytics'}
-            </button>
+        {/* The details column only appears once there are runs to choose from. */}
+        <div className={`hist-body${hasRuns ? '' : ' is-single'}`}>
+          <section className="hist-list" aria-label="Your runs">
+            <RunList runs={runs} selected={selected} onOpen={(run) => void open(run)} onRetry={() => void loadRuns()} />
+          </section>
+          {hasRuns && (
+            <section className="hist-detail" aria-live="polite" aria-label="Run details">
+              <Details run={selected} analytics={analytics} onRetry={() => selected && void open(selected)} />
+            </section>
           )}
         </div>
-        {analyticsRun && (
-          <p className="muted">
-            {displayName(analyticsRun.simulationId)} · {new Date(analyticsRun.startedAt).toLocaleString()}
-          </p>
-        )}
-        {!analyticsRun && <p className="muted">Choose a simulation above to see its saved analytics.</p>}
-        {analyticsLoading && <p className="muted" role="status">Loading analytics…</p>}
-        {analyticsError && <p className="error" role="alert">Analytics unavailable: {analyticsError}</p>}
-        {analytics && (
-          <>
-            <p className="muted">{analytics.sampleCount} metric samples saved for this run.</p>
-            <h3>Peak density by zone</h3>
-            {analytics.peakDensityByZone.length ? (
-              <ul>
-                {analytics.peakDensityByZone.map((zone) => (
-                  <li key={zone.zoneId}>
-                    {displayName(zone.zoneId)}: {zone.peakDensity.toFixed(2)} at {zone.at.toFixed(1)} seconds
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">No zone density samples were saved for this run.</p>
+      </main>
+    </div>
+  )
+}
+
+function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>; selected: RunSummary | null; onOpen: (run: RunSummary) => void; onRetry: () => void }) {
+  if (runs.state === 'loading') return <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading your runs…</p>
+  if (runs.state === 'error') {
+    return (
+      <div className="hist-empty" role="alert">
+        <h2>Couldn’t load your runs</h2>
+        <p>The server said: {runs.message}</p>
+        <button type="button" className="hist-button" onClick={onRetry}>Try again</button>
+      </div>
+    )
+  }
+  if (runs.value.length === 0) {
+    return (
+      <div className="hist-empty">
+        <h2>No runs yet</h2>
+        <p>Open a scenario in the simulator and press Play. Each run saves here as it plays, with every change you make.</p>
+        <a className="hist-button" href="/sim"><Play size={15} aria-hidden="true" /> Open the simulator</a>
+      </div>
+    )
+  }
+  return (
+    <ol className="hist-runs">
+      {runs.value.map((run) => {
+        const identity = runIdentity(run.simulationId)
+        const current = selected?.runId === run.runId
+        return (
+          <li key={run.runId} className={current ? 'is-current' : undefined}>
+            <button type="button" className="hist-run" aria-pressed={current} onClick={() => onOpen(run)}>
+              <span className="hist-run-name">{identity.title}</span>
+              <span className="hist-run-when">{when(run.startedAt)}</span>
+              <span className="hist-run-meta">
+                {plural(run.interventionCount, 'change', 'changes')} · {plural(run.sampleCount, 'measurement', 'measurements')}
+              </span>
+            </button>
+            {identity.scenario && (
+              <a className="hist-open" href={`/sim?scenario=${encodeURIComponent(identity.scenario)}`} title={`Open ${identity.title} in the simulator`}>
+                Open <ArrowRight size={14} aria-hidden="true" />
+              </a>
             )}
-            <h3>Before / after interventions</h3>
-            {analytics.interventions.length ? (
-              <ul className="analytics-interventions">
-                {analytics.interventions.map((intervention) => (
-                  <li key={intervention.requestId}>
-                    <strong>{intervention.prompt}</strong>
-                    <span className="muted"> · applied at {intervention.at.toFixed(1)} seconds</span>
-                    {intervention.comparisons.length ? (
-                      <ul>
-                        {intervention.comparisons.map((comparison) => (
-                          <li key={comparison.zoneId}>
-                            {displayName(comparison.zoneId)}: before {comparison.beforeDensity?.toFixed(2) ?? '—'}
-                            {' '}({comparison.beforeSamples} samples), after {comparison.afterDensity?.toFixed(2) ?? '—'}
-                            {' '}({comparison.afterSamples} samples)
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted">No zone samples were saved in the comparison window.</p>
-                    )}
-                  </li>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function Details({ run, analytics, onRetry }: { run: RunSummary | null; analytics: Load<RunAnalytics> | null; onRetry: () => void }) {
+  if (!run || !analytics) {
+    return <p className="hist-placeholder">Choose a run to see where it got busiest and what each change did.</p>
+  }
+  const identity = runIdentity(run.simulationId)
+  const unit = identity.metres ? 'people/m²' : ''
+  const density = (value: number | null) => (value === null ? '—' : value.toFixed(2))
+  return (
+    <>
+      <header className="hist-detail-head">
+        <h2>{identity.title}</h2>
+        <p>{when(run.startedAt)}</p>
+      </header>
+      {analytics.state === 'loading' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading this run…</p>}
+      {analytics.state === 'error' && (
+        <div role="alert" className="hist-problem">
+          <p>Couldn’t load this run: {analytics.message}</p>
+          <button type="button" className="hist-link" onClick={onRetry}>Try again</button>
+        </div>
+      )}
+      {analytics.state === 'ready' && (
+        <>
+          <h3>Busiest spots</h3>
+          {analytics.value.peakDensityByZone.length > 0 ? (
+            <table className="hist-table">
+              <thead><tr><th scope="col">Area</th><th scope="col" className="num">Peak density{unit && <span> {unit}</span>}</th><th scope="col" className="num">At</th></tr></thead>
+              <tbody>
+                {[...analytics.value.peakDensityByZone].sort((a, b) => b.peakDensity - a.peakDensity).map((zone) => (
+                  <tr key={zone.zoneId}>
+                    <th scope="row">{readable(zone.zoneId)}</th>
+                    <td className="num">{density(zone.peakDensity)}</td>
+                    <td className="num">{formatClock(zone.at, false)}</td>
+                  </tr>
                 ))}
-              </ul>
-            ) : (
-              <p className="muted">No acknowledged interventions were saved for this run.</p>
-            )}
-          </>
-        )}
-      </section>
-    </main>
+              </tbody>
+            </table>
+          ) : <p className="hist-note">Nothing was measured in this run yet.</p>}
+
+          <h3>Changes and what they did</h3>
+          {analytics.value.interventions.length > 0 ? (
+            <ol className="hist-changes">
+              {analytics.value.interventions.map((change) => (
+                <li key={change.requestId}>
+                  <p className="hist-change-what"><time>{formatClock(change.at, false)}</time> {change.prompt}</p>
+                  {change.comparisons.length > 0 ? (
+                    <table className="hist-table is-compact">
+                      <thead><tr><th scope="col">Area</th><th scope="col" className="num">Before</th><th scope="col" className="num">After</th></tr></thead>
+                      <tbody>
+                        {change.comparisons.map((zone) => {
+                          const delta = zone.beforeDensity !== null && zone.afterDensity !== null ? zone.afterDensity - zone.beforeDensity : null
+                          const trend = delta === null || Math.abs(delta) < 0.005 ? null : delta < 0 ? 'down' : 'up'
+                          return (
+                            <tr key={zone.zoneId}>
+                              <th scope="row">{readable(zone.zoneId)}</th>
+                              <td className="num">{density(zone.beforeDensity)}</td>
+                              <td className={`num${trend ? ` is-${trend}` : ''}`}>
+                                {trend === 'down' && <TrendingDown size={13} aria-label="less crowded" />}
+                                {trend === 'up' && <TrendingUp size={13} aria-label="more crowded" />}
+                                {density(zone.afterDensity)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  ) : <p className="hist-note">Not enough was measured around this change to compare.</p>}
+                </li>
+              ))}
+            </ol>
+          ) : <p className="hist-note">No changes were made in this run.</p>}
+          <p className="hist-fine">{plural(analytics.value.sampleCount, 'measurement', 'measurements')} saved. Densities are averages over each area.</p>
+        </>
+      )}
+    </>
   )
 }
