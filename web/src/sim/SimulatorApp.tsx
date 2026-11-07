@@ -3,7 +3,7 @@ import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
-  Pause, Play, Plus, RotateCcw, SendHorizontal, Siren, StepForward,
+  Pause, Play, Plus, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
 } from 'lucide-react'
 import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
@@ -108,13 +108,23 @@ export default function SimulatorApp() {
 
   const [scenarioId, setScenarioId] = useState(initialScenarioId)
   const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId)!
-  // Compiled once per choice; switching scenarios loads a fresh simulation.
-  const compiled = useMemo(() => startScenario(scenario.plan, scenario.model), [scenario])
-  const scenarioDetail = compiled.ok ? describeScenario(compiled.value) : 'This plan could not be built'
+  /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
+  const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
+  const generated = scenario.plan.layout.mode === 'generate'
+  // Compiled once per choice; switching scenarios or layouts loads a fresh simulation.
+  const compiled = useMemo(() => layoutSeed === null
+    ? startScenario(scenario.plan, scenario.model)
+    : startScenario({ ...scenario.plan, seed: layoutSeed }, scenario.model, { varyLayout: true }), [scenario, layoutSeed])
+  const scenarioDetail = compiled.ok
+    ? describeScenario(compiled.value) + (layoutSeed === null ? '' : ` · layout ${layoutSeed}`)
+    : 'This plan could not be built'
   const chooseScenario = (id: string) => {
     setScenarioId(id)
+    setLayoutSeed(null)
     rememberScenario(id)
   }
+  /** Same description, a different building: the plan's seed first, then the next seeds in turn. */
+  const nextLayout = () => setLayoutSeed((seed) => (seed === null ? scenario.plan.seed : (seed + 1) >>> 0))
 
   useEffect(() => {
     // A plan that fails to compile never reaches the worker; its error shows in the event log.
@@ -217,6 +227,12 @@ export default function SimulatorApp() {
             </select>
             <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
           </label>
+          {generated && (
+            <button type="button" className="sim-icon-btn" onClick={nextLayout}
+              aria-label="New layout" title="New layout: same description, a different building">
+              <Shuffle size={14} />
+            </button>
+          )}
           <span className="sim-scenario-detail">{scenarioDetail}</span>
         </div>
         {alarm && (

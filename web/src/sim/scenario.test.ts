@@ -101,3 +101,17 @@ test('two-way alley: people from each end head for the other', () => {
   assert.ok(x(later, 'a1') > x(start, 'a1'), 'an uphill walker moves east')
   assert.ok(x(later, 'a81') < x(start, 'a81'), 'a downhill walker moves west')
 })
+
+test('a varied layout reshapes a generated plan and still plays', () => {
+  const varied = startScenario({ ...plan(), seed: 9001 }, model, { varyLayout: true })
+  const standard = startScenario(plan(), model)
+  assert.ok(varied.ok && standard.ok)
+  assert.equal(varied.value.scene.map.height, 6, 'seed 9001 keeps the 10 × 4 hall')
+  const seed42 = startScenario(plan(), model, { varyLayout: true })
+  assert.ok(seed42.ok)
+  assert.notDeepEqual(seed42.value.scene.map.rooms, standard.value.scene.map.rooms)
+  const sim = new MockSimulation()
+  send(sim, { type: 'load', compiled: seed42.value, history: { historyRevision: 0, records: [], outcomes: [] } })
+  const frame = lastFrame(send(sim, { type: 'run_to', time: 60 }))
+  assert.ok(frame.agents.every((agent) => agent.state === 'departed'), 'everyone still gets out of the reshaped building')
+})

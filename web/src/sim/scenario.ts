@@ -1,4 +1,4 @@
-import { compile, preparedVenues } from '@crowd-control/compiler'
+import { compile, preparedVenues, type CompileOptions } from '@crowd-control/compiler'
 import type { Capabilities, CompileOutput, Limits, ModelPreset, Operation, PreparedMap, Result, ScenarioPlan } from '@crowd-control/contract'
 
 /**
@@ -50,10 +50,11 @@ export function venueAssets(): PreparedMap[] {
 /**
  * Compiles a scenario plan (normally the planner's reply) into the scene the worker loads.
  * The plan is untrusted: the compiler validates it, so a bad plan comes back as an error to
- * show the user, never as a broken simulation.
+ * show the user, never as a broken simulation. `varyLayout` lets the plan's seed reshape a
+ * generated building (Technical PRD §10).
  */
-export function startScenario(plan: unknown, model: ModelPreset, assets: PreparedMap[] = venueAssets()): Result<CompileOutput> {
-  return compile({ plan, assets, model, capabilities: CAPABILITIES, limits: LIMITS })
+export function startScenario(plan: unknown, model: ModelPreset, options: CompileOptions = {}, assets: PreparedMap[] = venueAssets()): Result<CompileOutput> {
+  return compile({ plan, assets, model, capabilities: CAPABILITIES, limits: LIMITS }, options)
 }
 
 /** A one-line summary for the header, e.g. "Hall, foyer and outside · 10 people". */

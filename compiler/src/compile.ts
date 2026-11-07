@@ -1,6 +1,7 @@
 import { parseCompileInput, type CompiledMap, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
 import { compileBehaviour } from './behaviour/compile.ts'
 import { chainLayout, designPopulation } from './layout/chain.ts'
+import { variedChainLayout } from './layout/varied.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
 import { resolveProfiles } from './profiles/catalog.ts'
 import { fail } from './result.ts'
@@ -19,14 +20,19 @@ import { placeInitialAgents, rectArea, type SpawnArea } from './spawn/lattice.ts
  *
  * Input is untrusted (it may come straight from an LLM), so it is validated against the
  * contract, including the capabilities and limits it carries, before anything else runs.
+ *
+ * `varyLayout` turns on seeded layout variation for generated plans (Technical PRD §10): the
+ * plan's seed picks the room proportions and door positions. Without it, generated layouts use
+ * the preset's fixed proportions and centred doors, as in the worked example. Prepared venues
+ * are measured and never vary.
  */
-export function compile(input: unknown): Result<CompileOutput> {
+export function compile(input: unknown, options: CompileOptions = {}): Result<CompileOutput> {
   const parsed = parseCompileInput(input)
   if (!parsed.ok) return parsed
   const valid = parsed.value
   switch (valid.plan.layout.mode) {
     case 'generate':
-      return compileGenerated(valid)
+      return compileGenerated(valid, options.varyLayout ?? false)
     case 'lookup':
       return compileLookup(valid)
     case 'upload':
@@ -34,11 +40,16 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
+export type CompileOptions = { varyLayout?: boolean }
+
 /** Generated chain layouts (§8). Map rows/legend, starting crowd, controllers, jobs and rules. */
-function compileGenerated(input: CompileInput): Result<CompileOutput> {
+function compileGenerated(input: CompileInput, vary: boolean): Result<CompileOutput> {
   const { layout } = input.plan
   if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
-  const sized = chainLayout(layout.spaces, layout.connections, designPopulation(input.plan), input.model)
+  const population = designPopulation(input.plan)
+  const sized = vary
+    ? variedChainLayout(layout.spaces, layout.connections, population, input.model, input.plan.seed)
+    : chainLayout(layout.spaces, layout.connections, population, input.model)
   if (!sized.ok) return sized
   const { rooms, portals, worldWidth, worldHeight, cellSize } = sized.value
   const grid = rasterize([...rooms, ...portals], worldWidth, worldHeight, cellSize)
