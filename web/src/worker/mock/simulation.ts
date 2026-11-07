@@ -2,9 +2,9 @@
  * Mock simulation: a deterministic, deliberately simple stand-in for A's Rust engine.
  *
  * It speaks the real WorkerCommand/WorkerMessage protocol so the renderer, controls,
- * click tools and chat can be built before the engine exists. People move in straight
- * lines toward their goals: there are no walls, avoidance, queues, contact physics or
- * replay. Unsupported requests return explicit UNSUPPORTED_CAPABILITY errors. Its output
+ * click tools and chat can be built before the engine exists. People walk straight lines
+ * from room to room through open doorways (rooms are treated as convex): there is no
+ * avoidance, flow field, queueing, contact physics or replay. Unsupported requests return explicit UNSUPPORTED_CAPABILITY errors. Its output
  * is development data and must never be presented or tested as real simulation results.
  */
 import {
@@ -80,6 +80,11 @@ type MockAgent = {
   target: Vec2 | null
   waitRemaining: number | null
   retargetAt: number | null
+  /** Waypoints (doorway centres, then the target) for the current target, or null when unplanned. */
+  route: Vec2[] | null
+  routeKey: string | null
+  /** No open doorway leads to the target; waits until the topology changes. */
+  blocked: boolean
   random: number
   departedAt: number | null
 }
@@ -353,6 +358,9 @@ export class MockSimulation {
       target: null,
       waitRemaining: null,
       retargetAt: null,
+      route: null,
+      routeKey: null,
+      blocked: false,
       random: streamSeed(world.seed, spec.id),
       departedAt: null,
     }
@@ -396,7 +404,7 @@ export class MockSimulation {
       const step = agent.baseSpeed * agent.speedMultiplier * this.dt
       switch (leaf.kind) {
         case 'reach':
-          if (this.moveToward(agent, leaf.point, step)) this.completeLeaf(agent, time)
+          if (this.travel(agent, leaf.point, step)) this.completeLeaf(agent, time)
           break
         case 'wander': {
           if (leaf.duration !== null && time - agent.leafStartedAt >= leaf.duration - EPS) {
@@ -409,14 +417,14 @@ export class MockSimulation {
             agent.target = drawn.point
             agent.retargetAt = leaf.changeTargetEvery === null ? null : time + leaf.changeTargetEvery
           }
-          if (this.moveToward(agent, agent.target, step)) agent.target = null
+          if (this.travel(agent, agent.target, step)) agent.target = null
           break
         }
         case 'wait': {
           if (agent.waitRemaining === null) {
             const zone = leaf.zoneId === null ? undefined : world.zones.get(leaf.zoneId)
             if (zone && !inZone(zone, agent.position)) {
-              this.moveToward(agent, zone.center, step)
+              this.travel(agent, zone.center, step)
               break
             }
             agent.waitRemaining = leaf.duration
@@ -426,7 +434,7 @@ export class MockSimulation {
           break
         }
         case 'hold':
-          if (leaf.point) this.moveToward(agent, leaf.point, step)
+          if (leaf.point) this.travel(agent, leaf.point, step)
           break
         case 'fail':
           break
@@ -434,7 +442,74 @@ export class MockSimulation {
     }
   }
 
-  /** Straight-line movement; returns true on arrival. Walls and other people are ignored. */
+  /**
+   * Walks toward `target` via the doorways between rooms; returns true on arrival. The
+   * route is replanned when the target or the door layout (topology) changes. With no open
+   * route the agent stays put and reports blocked, as the real engine does.
+   */
+  private travel(agent: MockAgent, target: Vec2, step: number): boolean {
+    const key = `${target.x},${target.y}|${this.world!.state.topologyVersion}`
+    if (agent.routeKey !== key) {
+      agent.route = this.planRoute(agent.position, target)
+      agent.routeKey = key
+    }
+    if (!agent.route) {
+      agent.blocked = true
+      return false
+    }
+    agent.blocked = false
+    let budget = step
+    while (agent.route.length > 0 && budget > EPS) {
+      const next = agent.route[0]!
+      const gap = distance(agent.position, next)
+      if (gap <= budget + EPS) {
+        agent.position = { ...next }
+        budget -= gap
+        agent.route.shift()
+      } else {
+        this.moveToward(agent, next, budget)
+        budget = 0
+      }
+    }
+    if (agent.route.length > 0) return false
+    agent.routeKey = null
+    return true
+  }
+
+  /** Doorway centres from the agent's room to the target's room (breadth-first over open portals). */
+  private planRoute(from: Vec2, to: Vec2): Vec2[] | null {
+    const start = this.zoneOf(from)
+    const goal = this.zoneOf(to)
+    if (!start || !goal || start === goal) return [{ ...to }]
+    const portals = this.world!.state.map.portals.filter((portal) => portal.open)
+    const previous = new Map<string, { zone: string; door: Vec2 }>()
+    const queue = [start]
+    const seen = new Set([start])
+    while (queue.length > 0) {
+      const zone = queue.shift()!
+      if (zone === goal) break
+      for (const portal of portals) {
+        const [a, b] = portal.connects
+        if (a !== zone && b !== zone) continue
+        if (portal.oneWay && a !== zone) continue
+        const other = a === zone ? b : a
+        if (seen.has(other)) continue
+        seen.add(other)
+        previous.set(other, { zone, door: { x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 } })
+        queue.push(other)
+      }
+    }
+    if (!seen.has(goal)) return null
+    const doors: Vec2[] = []
+    for (let zone = goal; zone !== start;) {
+      const hop = previous.get(zone)!
+      doors.unshift(hop.door)
+      zone = hop.zone
+    }
+    return [...doors, { ...to }]
+  }
+
+  /** Straight-line movement toward one waypoint; returns true on arrival. */
   private moveToward(agent: MockAgent, target: Vec2, step: number): boolean {
     const remaining = distance(agent.position, target)
     if (remaining <= step + EPS) {
@@ -481,6 +556,9 @@ export class MockSimulation {
       agent.target = null
       agent.waitRemaining = null
       agent.retargetAt = null
+      agent.route = null
+      agent.routeKey = null
+      agent.blocked = false
     }
     agent.controller = controllerId
   }
@@ -579,6 +657,7 @@ export class MockSimulation {
   private agentState(agent: MockAgent): AgentState {
     if (agent.departedAt !== null) return 'departed'
     if (agent.speedMultiplier === 0) return 'immobile'
+    if (agent.blocked) return 'blocked'
     const leaf = agent.leaves[agent.cursor]
     if (!leaf) return 'idle'
     switch (leaf.kind) {
