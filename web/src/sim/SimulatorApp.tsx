@@ -5,8 +5,9 @@ import {
   ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, SendHorizontal, Siren, StepForward,
 } from 'lucide-react'
-import { CompileOutputSchema, parseContract, type Camera, type CompileOutput } from '@crowd-control/contract'
-import workedExample from '../../../contract/fixtures/compile-output.json'
+import type { Camera, ModelPreset } from '@crowd-control/contract'
+import examplePreset from '../../../contract/fixtures/compile-output.json'
+import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
 import { CrowdRenderer } from '../render/renderer.ts'
 import { createMockEndpoint } from '../worker/mockEndpoint.ts'
@@ -15,6 +16,7 @@ import { PlanSigns } from './PlanSigns.tsx'
 import { StatusIcon } from './StatusIcon.tsx'
 import { Timeline } from './Timeline.tsx'
 import { formatClock, toIncidents, type Incident } from './incidents.ts'
+import { describeScenario, startScenario } from './scenario.ts'
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -35,8 +37,11 @@ function insetsFor(panels: Panels) {
     right: wide && panels.right ? LAYOUT.gap * 2 + LAYOUT.right : 0,
   }
 }
-/** The Technical PRD §8 scenario that the mock worker plays until prepared maps exist. */
-const SCENARIO = { title: 'Worked example', detail: 'Hall, foyer and outside · 10 people' }
+/**
+ * The Technical PRD §8 plan, compiled in the browser on load, until the planner and prepared
+ * venues supply plans. The preset is the fixture's example preset (model units, not metres).
+ */
+const SCENARIO = { title: 'Worked example', plan: workedPlan as unknown, model: examplePreset.resolvedModel as ModelPreset }
 const SUGGESTIONS = ['Close the hall door for 30 seconds', 'Someone trips in the foyer', 'Why did people queue at the exit?']
 
 type Panels = { left: boolean; right: boolean }
@@ -58,12 +63,6 @@ function saveDrawMode(mode: AgentDrawMode) {
   } catch {
     // Not persisted; the toggle still works for this visit.
   }
-}
-
-function workedExampleScene(): CompileOutput {
-  const parsed = parseContract(CompileOutputSchema, workedExample)
-  if (!parsed.ok) throw new Error(`Worked example fixture is invalid: ${parsed.error.message}`)
-  return parsed.value
 }
 
 export default function SimulatorApp() {
@@ -92,11 +91,17 @@ export default function SimulatorApp() {
     return { left: open, right: open }
   })
 
+  // Compiled once per page; the plan is fixed until the planner can replace it.
+  const [compiled] = useState(() => startScenario(SCENARIO.plan, SCENARIO.model))
+  const scenarioDetail = compiled.ok ? describeScenario(compiled.value) : 'This plan could not be built'
+
   useEffect(() => {
-    void client.load(workedExampleScene())
+    // A plan that fails to compile never reaches the worker; its error shows in the event log.
+    if (compiled.ok) void client.load(compiled.value)
+    else client.reportError(compiled.error)
     // Pausing stops the playback timer; the client stays usable if React remounts (StrictMode).
     return () => void client.pause().catch(() => {})
-  }, [client])
+  }, [client, compiled])
 
   useEffect(() => {
     const host = hostRef.current
@@ -183,7 +188,7 @@ export default function SimulatorApp() {
 
       <header className="sim-float sim-topbar">
         <p className="sim-brand"><BrandMark /> Crowd Control</p>
-        <p className="sim-scenario"><span>{SCENARIO.title}</span> · {SCENARIO.detail}</p>
+        <p className="sim-scenario"><span>{SCENARIO.title}</span> · {scenarioDetail}</p>
         {alarm && (
           <p className="sim-tag sim-tag-alarm" role="status">
             <Siren size={13} strokeWidth={2.25} aria-hidden="true" /> Alarm at {formatClock(alarm.time, false)}

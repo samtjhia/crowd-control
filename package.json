@@ -19,7 +19,7 @@
     "dev": "npm run dev --workspace @crowd-control/web",
     "dev:server": "npm run dev --workspace @crowd-control/server",
     "build": "npm run build --workspaces && cargo build --workspace",
-    "check": "npm run build --workspace @crowd-control/contract && npm run typecheck --workspaces && cargo fmt --all --check && cargo check --workspace",
+    "check": "npm run build --workspace @crowd-control/compiler && npm run typecheck --workspaces && cargo fmt --all --check && cargo check --workspace",
     "lint": "npm run lint --workspace @crowd-control/web",
     "test": "npm run test --workspace @crowd-control/contract && npm run test --workspace @crowd-control/compiler && npm run test --workspace @crowd-control/web && cargo test --workspace"
   },
