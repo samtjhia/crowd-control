@@ -77,6 +77,10 @@ fn full_compiler_scenario_runs_arrivals_then_alarm_for_all_ten() {
     assert_eq!(s["agents"].as_array().unwrap().len(), 10);
     for a in s["agents"].as_array().unwrap() {
         assert_eq!(a["currentGoal"]["spec"]["kind"], "reach", "{a}");
+        assert_eq!(
+            a["state"], "departed",
+            "alarm reached agent but it never exited: {a}"
+        );
     }
     assert!(
         s["events"]

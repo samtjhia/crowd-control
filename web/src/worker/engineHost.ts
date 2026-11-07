@@ -2,7 +2,7 @@ import type { WasmEngineBindings, WorkerCommand, WorkerMessage } from '@crowd-co
 import { systemClock, type WorkerClock } from './clock.ts'
 import { commandError, dispatchCommand } from './dispatchCommand.ts'
 
-export const MAX_TICKS_PER_BATCH = 400
+export const MAX_TICKS_PER_BATCH = 8
 
 /** Runs inside the worker; only bounded step commands enter Rust's clock. */
 export function createEngineHost(bindings: WasmEngineBindings, publish: (message: WorkerMessage) => void, clock: WorkerClock = systemClock) {
@@ -16,6 +16,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
   let last = 0
   let owedTicks = 0
   let commandSequence = 0
+  let tickCostMs = 0
   const stop = () => { stopLoop?.(); stopLoop = undefined; playing = false }
   const accrue = () => {
     const now = clock.now()
@@ -25,9 +26,13 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
     if (!Number.isFinite(owedTicks)) throw new Error('Playback rate exceeds clock range')
   }
   const pump = () => {
-    const ticks = Math.min(MAX_TICKS_PER_BATCH, Math.max(0, Math.floor(owedTicks + 1e-9)))
+    const budget = tickCostMs > 0 ? Math.max(1, Math.floor(12 / tickCostMs)) : MAX_TICKS_PER_BATCH
+    const ticks = Math.min(MAX_TICKS_PER_BATCH, budget, Math.max(0, Math.floor(owedTicks + 1e-9)))
     if (ticks === 0) return
+    const started = clock.now()
     const messages = dispatchCommand(bindings, handle, { schemaVersion: 1, simulationId, commandId: `worker-tick-${++commandSequence}`, type: 'step', ticks })
+    const elapsed = clock.now() - started
+    if (Number.isFinite(elapsed) && elapsed > 0) tickCostMs = tickCostMs > 0 ? tickCostMs * 0.8 + elapsed / ticks * 0.2 : elapsed / ticks
     if (messages.some((m) => m.type === 'ack')) owedTicks -= ticks
     else stop()
     for (const message of messages) {
@@ -55,7 +60,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
           case 'load':
           case 'reset':
             if (command.type === 'load') { simulationId = command.simulationId; dt = command.compiled.scene.model.dt }
-            stop(); owedTicks = 0; multiplier = 1; last = clock.now(); break
+            stop(); owedTicks = 0; tickCostMs = 0; multiplier = 1; last = clock.now(); break
           case 'resume':
             if (!playing) { last = clock.now(); playing = true; stopLoop = clock.every(1000 / 60, pulse) }
             break

@@ -1,31 +1,8 @@
 import type { RenderInput } from '@crowd-control/contract'
-
-type Graphics = {
-  rect(x: number, y: number, width: number, height: number): Graphics
-  circle(x: number, y: number, radius: number): Graphics
-  poly(points: number[]): Graphics
-  moveTo(x: number, y: number): Graphics
-  lineTo(x: number, y: number): Graphics
-  fill(color: string): Graphics
-  stroke(style: { color: string; width: number }): Graphics
-  position: { set(x: number, y: number): void }
-  alpha: number
-  visible: boolean
-  destroy(): void
-}
-type Application = {
-  init(options: { width: number; height: number; background: string; antialias: boolean }): Promise<void>
-  canvas: HTMLCanvasElement
-  stage: { addChild(graphic: Graphics): void; removeChildren(): Graphics[] }
-  destroy(removeView: boolean, options: { children: boolean }): void
-}
-type Pixi = { Application: new () => Application; Graphics: new () => Graphics }
+import type { Graphics } from 'pixi.js'
 
 export async function createStaticRenderer(host: HTMLElement) {
-  // shortcut: the smoke-test view pins a CDN bundle; bundle Pixi via npm for the product renderer.
-  const url = 'https://pixijs.download/v8.22.0/pixi.min.mjs'
-  const pixi: Pixi = await import(/* @vite-ignore */ url)
-  if (typeof pixi.Application !== 'function' || typeof pixi.Graphics !== 'function') throw new Error('Invalid PixiJS bundle')
+  const pixi = await import('pixi.js')
   const app = new pixi.Application()
   await app.init({ width: 800, height: 400, background: '#F1F5F9', antialias: true })
   app.canvas.setAttribute('role', 'img')

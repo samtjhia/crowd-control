@@ -235,7 +235,7 @@ Public restore/replay is still part nine. Contact sensors remain null without an
 
 ## Physical contact and compression rules (part eight)
 
-`contact-engine-v8` registers `disc-impulse-v1`. Contact remains opt-in through
+`contact-engine-v8.1` registers `disc-impulse-v1`. Contact remains opt-in through
 resolvedModel.contact; unknown solver versions are rejected. Example model config:
 
 ```json
@@ -393,7 +393,8 @@ Rust DTOs. `wasm.rs` exports a manual UTF-8 ABI, wrapped by wasmBindings.ts. Raw
 pointers stay inside the binding. ABI/schema remain 1; engine is
 `goals-engine-v5`. No wasm-bindgen or new dependencies are required.
 
-Rust time is tick × dt. The worker submits at most 400 automatic ticks/batch and
+Rust time is tick × dt. The worker submits at most 8 automatic ticks/batch,
+shrinking batches toward a 12 ms dispatch budget using measured tick cost. It
 retains fractional ticks/debt; speed never changes dt. Public step/run_to is
 bounded at 100,000 ticks. Reset cancels playback debt and restores paused 1×.
 Seeds use versioned FNV-1a UTF-16 stream keys and a wrapping uint32 LCG; input order
@@ -432,3 +433,56 @@ worked scenario with a labelled movement-only preset (no contact solver). All
 five compiled picker scenarios load, step and accept changes in actual Wasm/client
 tests. /sim?engine=real now receives real metrics/density/events; no mock values
 are substituted. The renderer retains its own Gaussian visual smoothing. Browser rendering/fps has not been verified in this environment.
+
+### Worked-scenario movement (engine v8.1)
+
+Evacuation selectors specify `kind: "agent"`; shared room tags must not turn an
+alarm into a failed agent assignment. School/concert evacuation goals explicitly
+set `departOnArrival: true`. Hackathon arrivals reach the hall then wander; this
+demo does not simulate check-in service.
+
+Flow navigation connects valid wall-tangent positions to nearby reachable cells
+and looks ahead up to eight cells, retaining wall clearance, anchored bodies,
+one-way restrictions and portal delays. Hard movement tests a bounded fan of
+velocities and rejects predicted approaching body collisions over 0.75 seconds
+before packing into a doorway. Swept-disc checks still prevent actual overlap.
+These steering preferences generate no physical contact loads or falls.
+
+Rebuild Wasm after updating (`npm run build:wasm`) and reset/reload the scene.
+Use `/sim?engine=real` for actual Rust behavior; the default mock is a UI stub.
+Native/Wasm regressions check that all ten worked-example attendees depart,
+including late arrivals, rather than only checking that the alarm changed goals.
+
+Regression coverage: actual Wasm clears 10/10 worked-example attendees, 192/192
+school occupants and 430/430 concert attendees; all 40 hackathon arrivals reach
+the hall and begin wandering. Both alley directions make crossings. Venue runs
+use a 600-second completion budget (180 seconds for the continuous alley demo);
+this is a liveness check, not a calibrated evacuation-time claim. Native/Wasm
+parity, closed/one-way doors, traversal delays, anchored bodies, terrain costs,
+wall clearance and compression-fall tests remain required.
+
+Latest v8.1 open-hall benchmark (2,000 moving agents): the 4× worker with a
+pending job/live count rule reaches 81.6 ticks per CPU second (80 required;
+p95 publication pulse 27.29 ms). Contact plus per-agent rules reaches 66.4
+ticks/s and misses that budget; 8× reaches 144.1 ticks/s against 160 required.
+Single-tick validated Wasm reaches 74.9 ticks/s; batching matters. These numbers
+exclude worker transfer/rendering and do not establish browser 60 FPS. Earlier
+v8 timings above are historical; full performance acceptance remains part 10.
+
+### Live rendering and playback responsiveness
+
+- Hide `departed` agents immediately, destroy their sprites/labels, and exclude
+  them from interpolated display positions. Keep runtime records for metrics and
+  replay; live exit views do not show gray ghost occupants. Reset restores agents.
+- Retain figure artwork across poses. After drawing, evict unused textures beyond
+  6,000 entries or 128 MiB; protect textures referenced by visible sprites. The
+  budgets are soft when the visible working set alone exceeds them. Avoid global
+  cache clears and accumulated retired textures during animation/zoom changes.
+- Automatic Rust playback uses at most 8 ticks per dispatch and measured tick cost
+  to target 12 ms of work. Keep unprocessed tick debt and yield between batches;
+  pause must not wait behind a 400-tick catch-up call. A single expensive Rust tick
+  cannot be preempted. Slow hardware may lag the requested speed without skipping
+  simulation time. Public manual step/run_to limits remain unchanged.
+
+Regressions cover departure/reset, sprite destruction, repeated cache churn and
+large zoom textures, preserved playback debt, and expensive-tick batch reduction.

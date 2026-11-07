@@ -91,7 +91,7 @@ export function starterPlan(venue: SavedVenue, count?: number): ScenarioPlan {
     timeline: outside.size > 0 ? [{ op: 'schedule', id: 'alarm', at: 30, operations: [{ op: 'emit', event: { name: 'alarm' } }] }] : [],
     rules: outside.size > 0 ? [{
       op: 'define_rule', id: 'evacuate', when: { kind: 'event', name: 'alarm' }, once: true,
-      operations: [{ op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'reach', target: { ids: [...outside] }, selection: 'lowest-cost' } }],
+      operations: [{ op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'reach', target: { tags: ['outside'] }, selection: 'lowest-cost', departOnArrival: true } }],
     }] : [],
   }
 }

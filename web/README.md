@@ -20,3 +20,26 @@ mock simulation; the simulation itself resets when the page is refreshed.
 Scenario planning and running-simulation follow-ups use separate inputs. The
 offline sample preview remains visible after loading, and the follow-up form is
 shown directly inside the mock simulation panel.
+
+The picker’s school and concert alarms select agents explicitly and depart them
+on reaching assembly/outside zones. “Hackathon arrivals” means entering the hall
+and wandering, without queue/service behavior. Use `/sim?engine=real` for Rust;
+`npm run dev` rebuilds Wasm before serving. Reset after changing engine versions.
+
+### Live rendering and playback responsiveness
+
+- Hide `departed` agents immediately, destroy their sprites/labels, and exclude
+  them from interpolated display positions. Keep runtime records for metrics and
+  replay; live exit views do not show gray ghost occupants. Reset restores agents.
+- Retain figure artwork across poses. After drawing, evict unused textures beyond
+  6,000 entries or 128 MiB; protect textures referenced by visible sprites. The
+  budgets are soft when the visible working set alone exceeds them. Avoid global
+  cache clears and accumulated retired textures during animation/zoom changes.
+- Automatic Rust playback uses at most 8 ticks per dispatch and measured tick cost
+  to target 12 ms of work. Keep unprocessed tick debt and yield between batches;
+  pause must not wait behind a 400-tick catch-up call. A single expensive Rust tick
+  cannot be preempted. Slow hardware may lag the requested speed without skipping
+  simulation time. Public manual step/run_to limits remain unchanged.
+
+Regressions cover departure/reset, sprite destruction, repeated cache churn and
+large zoom textures, preserved playback debt, and expensive-tick batch reduction.

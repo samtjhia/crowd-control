@@ -15,7 +15,9 @@ export type FigureTexture = {
 }
 
 /** Colours × skin × hair × look × pose can reach ~800 figures per size; each is a few KB. */
-const MAX_TEXTURES = 2000
+// Three walking poses for the maximum 2,000-agent crowd.
+const MAX_TEXTURES = 6000
+const MAX_TEXTURE_BYTES = 128 * 1024 * 1024
 /** Figure heights snap to ~12% steps so zooming reuses textures instead of minting new ones. */
 const SIZE_STEP = 1.12
 
@@ -32,11 +34,7 @@ function bucket(heightPx: number): number {
 export class FigureAtlas {
   private readonly renderer: Renderer
   private readonly cache = new Map<string, FigureTexture>()
-  /** Textures from before the last eviction; destroyed only once no sprite can still show them. */
-  private retired: FigureTexture[] = []
-  /** Bumps whenever the cache is emptied, so the renderer knows to re-point every sprite. */
-  generation = 0
-
+  private bytes = 0
   constructor(renderer: Renderer) {
     this.renderer = renderer
   }
@@ -46,27 +44,29 @@ export class FigureAtlas {
     const key = `${body}|${skin}|${hair}|${look.hair}|${look.outfit}|${pose}|${size}`
     const hit = this.cache.get(key)
     if (hit) return hit
-    if (this.cache.size >= MAX_TEXTURES) {
-      // Never destroy a texture a sprite may still be drawing: retire it until every sprite moves on.
-      this.retired.push(...this.cache.values())
-      this.cache.clear()
-      this.generation++
-    }
     const made = this.draw(body, skin, hair, look, pose, size)
     this.cache.set(key, made)
+    this.bytes += made.texture.source.pixelWidth * made.texture.source.pixelHeight * 4
     return made
   }
 
-  /** Destroys retired textures; call only after every sprite has been re-pointed at current ones. */
-  destroyRetired() {
-    for (const entry of this.retired) entry.texture.destroy(true)
-    this.retired = []
+  /** Evict unused artwork after drawing, so a visible sprite never loses its texture. */
+  retain(active: Iterable<Texture>) {
+    if (this.cache.size <= MAX_TEXTURES && this.bytes <= MAX_TEXTURE_BYTES) return
+    const visible = new Set(active)
+    for (const [key, entry] of this.cache) {
+      if (this.cache.size <= MAX_TEXTURES && this.bytes <= MAX_TEXTURE_BYTES) break
+      if (visible.has(entry.texture)) continue
+      this.cache.delete(key)
+      this.bytes -= entry.texture.source.pixelWidth * entry.texture.source.pixelHeight * 4
+      entry.texture.destroy(true)
+    }
   }
 
   clear() {
-    this.destroyRetired()
     for (const entry of this.cache.values()) entry.texture.destroy(true)
     this.cache.clear()
+    this.bytes = 0
   }
 
   private draw(body: string, skin: string, hair: string, look: FigureLook, pose: FigurePose, size: number): FigureTexture {

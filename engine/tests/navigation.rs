@@ -46,9 +46,9 @@ fn navigates_around_wall_without_cutting_corners_or_inventing_departures() {
         let x = a["position"]["x"].as_f64().unwrap();
         let y = a["position"]["y"].as_f64().unwrap();
         assert!((1.2..=6.8).contains(&x) && (1.2..=2.8).contains(&y));
-        if x > 2.8 && x < 4.2 {
-            assert!(y >= 2.2, "corner cut: {x},{y}");
-        }
+        let dx = (3.0 - x).max(0.0).max(x - 4.0);
+        let dy = (1.0 - y).max(0.0).max(y - 2.0);
+        assert!(dx.hypot(dy) >= 0.2 - 1e-8, "corner cut: {x},{y}");
         assert_eq!(a["currentGoal"]["id"], goal);
     }
     let s = snapshot(&mut e);

@@ -165,5 +165,5 @@ Part eight registers disc-impulse-v1 config/state schemas in contact.ts. Non-nul
 solver state validates by default for that version; custom schemas remain available
 for other registered integrations. PendingJob.subjectId is an optional runtime
 eligibility guard. Entity-rule progress remains in RuleRuntime.subjects; captured
-schedule children use stable IDs. Engine version is contact-engine-v8, schema/ABI
+schedule children use stable IDs. Engine version is contact-engine-v8.1, schema/ABI
 stay 1. engine-contact-load.json is the complete compression/recovery example.

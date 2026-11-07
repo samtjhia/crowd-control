@@ -110,7 +110,6 @@ export class CrowdRenderer {
   private readonly atlas: FigureAtlas
   private insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 }
   private tween: { from: Camera; start: number } | null = null
-  private atlasGeneration = 0
   private readonly font: string
   /** World positions drawn on the last frame, so clicks hit what the user sees. */
   private positions = new Map<string, Vec2>()
@@ -603,14 +602,12 @@ export class CrowdRenderer {
 
   private drawAgents(previous: Parameters<typeof displayPositions>[0], current: Parameters<typeof displayPositions>[1]) {
     const now = performance.now()
-    // The figure cache was emptied: re-point every sprite this frame, then free the old textures.
-    const generation = this.atlas.generation
-    if (generation !== this.atlasGeneration) for (const view of this.agentViews.values()) view.mode = null
     const positions = displayPositions(previous, current, now)
     this.positions = positions
     const ppu = this.camera.pixelsPerUnit
     const seen = new Set<string>()
     for (const agent of current.frame.agents) {
+      if (!positions.has(agent.id)) continue
       seen.add(agent.id)
       const metadata = this.metadata.get(agent.id) ?? null
       let view = this.agentViews.get(agent.id)
@@ -651,10 +648,10 @@ export class CrowdRenderer {
       this.destroyAgentView(view)
       this.agentViews.delete(id)
     }
-    if (generation !== this.atlasGeneration && this.atlas.generation === generation) {
-      this.atlas.destroyRetired()
-      this.atlasGeneration = generation
+    const activeTextures = function* (views: Iterable<AgentView>) {
+      for (const view of views) if (view.figure?.visible) yield view.figure.texture
     }
+    this.atlas.retain(activeTextures(this.agentViews.values()))
   }
 
   private restyleAgent(view: AgentView, id: string, state: AgentState, metadata: RenderAgentMetadata | null, ppu: number) {

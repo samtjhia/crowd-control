@@ -129,3 +129,14 @@ test('a scenario the assistant wrote gets a simulation ID of its own, once', asy
   assert.match(own.plan.simulationId, /^assistant-3-/)
   assert.equal(ownSimulationId(own), own, 'an ID it already has is kept')
 })
+
+test('evacuation demos select agents despite shared room tags and explicitly depart', () => {
+  for (const id of ['school-wing', 'concert-floor']) {
+    const scenario = all.find((s) => s.id === id)!
+    const operation = scenario.plan.rules[0]!.operations[0]!
+    assert.equal(operation.op, 'assign_goal')
+    if (operation.op !== 'assign_goal') throw new Error('expected evacuation')
+    assert.equal('kind' in operation.targets && operation.targets.kind, 'agent')
+    assert.equal(operation.goal.kind === 'reach' && operation.goal.departOnArrival, true)
+  }
+})

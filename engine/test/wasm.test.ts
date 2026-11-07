@@ -75,9 +75,10 @@ test('real Wasm plus worker host retains tick debt and applies pause/speed with 
   host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'resume', type: 'resume' })
   now += 1000; callback?.()
   const frame = () => messages.filter((m) => m.type === 'frame').at(-1)!
-  assert.equal(frame().frame.tick, 80); assert.equal(frame().frame.time, 4)
-  now += 10_000; callback?.(); assert.equal(frame().frame.tick, 480)
-  callback?.(); assert.equal(frame().frame.tick, 880, 'The remaining 400 ticks were retained')
+  const drain = (target: number) => { for (let i = 0; frame().frame.tick < target && i < 1000; i++) callback?.(); assert.equal(frame().frame.tick, target) }
+  drain(80); assert.equal(frame().frame.time, 4)
+  now += 10_000; callback?.(); assert.equal(frame().frame.tick, 88)
+  drain(880)
   host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'pause', type: 'pause' })
   assert.equal(callback, undefined)
   host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'inspect', type: 'snapshot', snapshotId: 'paced' })
@@ -338,4 +339,56 @@ test('registered contact presets advertise sensors to the compiler and real fron
     if (reply.type === 'query_result' && reply.result.kind === 'agents') assert.ok(reply.result.agents.every((a) => a.sensors !== null && a.sensors.contactLoadRatio === 0 && a.state !== 'immobile'))
     assert.equal(client.getView().lastError, null)
   } finally { client.dispose(); host.dispose() }
+})
+
+test('worked fire drill clears every agent in actual Wasm', async () => {
+  const compiled = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8'))
+  delete compiled.resolvedModel.contact
+  const simulationId = compiled.scene.simulationId
+  const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId, commandId: type, type, ...extra })
+  const commands = [h('load', { compiled, history: { historyRevision: 0, records: [], outcomes: [] } }), h('run_to', { time: 90 }), h('snapshot', { snapshotId: 'evacuated' })]
+  const bindings = await engine(), handle = bindings.create_engine()
+  try {
+    const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+    for (const batch of wasm) for (const message of batch) assert.equal(parseWorkerMessage(message).ok, true)
+    const agents: EngineSnapshot['agents'] = wasm[2][0].snapshot.agents
+    assert.equal(agents.length, 10)
+    assert.ok(agents.every((a) => a.state === 'departed'), JSON.stringify(agents))
+    const executable = fileURLToPath(new URL('../../target/debug/examples/protocol', import.meta.url))
+    const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8', maxBuffer: 10_000_000 }).trim().split('\n').map((v) => JSON.parse(v))
+    assert.deepEqual(wasm, native)
+  } finally { bindings.destroy_engine(handle) }
+})
+
+test('prepared fire drill, concert and hackathon demos finish their advertised behavior', async () => {
+  const { scenarios, startScenario, movementPreset } = await import('../../web/src/sim/scenario.ts')
+  const worked = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
+  const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
+  const bindings = await engine()
+  for (const scenario of scenarios(worked, movementPreset(preset)).filter((s) => ['school-wing', 'concert-floor', 'hackathon-hall', 'hillside-alley'].includes(s.id))) {
+    const compiled = startScenario(scenario.plan, scenario.model)
+    assert.equal(compiled.ok, true)
+    if (!compiled.ok) throw new Error(scenario.id)
+    const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: scenario.plan.simulationId, commandId: type, type, ...extra })
+    const handle = bindings.create_engine()
+    try {
+      for (const command of [h('load', { compiled: compiled.value, history: { historyRevision: 0, records: [], outcomes: [] } }), h('run_to', { time: scenario.id === 'hillside-alley' ? 180 : 600 })]) {
+        const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(command)))
+        assert.ok(messages.every((m) => m.type !== 'error'), `${scenario.id}: ${JSON.stringify(messages.find((m) => m.type === 'error'))}`)
+      }
+      const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'finished' }))))
+      const snapshot = messages.find((m) => m.type === 'snapshot')
+      assert.ok(snapshot?.type === 'snapshot')
+      assert.ok(snapshot.snapshot.events.every((event) => event.name !== 'rule_failed' && event.name !== 'job_failed'), scenario.id)
+      const agents = snapshot.snapshot.agents
+      assert.equal(agents.length, compiled.value.scene.agents.length)
+      if (scenario.id === 'hackathon-hall') {
+        assert.ok(agents.filter((a) => a.tags.includes('arrival')).every((a) => a.zoneId === 'hall' && a.currentGoal?.cursor[0]?.childIndex === 1), `all arrivals reach the hall and start wandering: ${JSON.stringify(agents.filter((a) => a.tags.includes('arrival') && (a.zoneId !== 'hall' || a.currentGoal?.cursor[0]?.childIndex !== 1)).map((a) => ({ id: a.id, position: a.position, zone: a.zoneId, cursor: a.currentGoal?.cursor })))}`)
+      } else if (scenario.id === 'hillside-alley') {
+        for (const direction of ['uphill', 'downhill']) assert.ok(agents.some((a) => a.tags.includes(direction) && a.currentGoal?.cursor[0]?.childIndex === 1), `${direction} traffic crosses the alley`)
+      } else {
+        assert.ok(agents.every((a) => a.state === 'departed'), `${scenario.id}: ${agents.filter((a) => a.state !== 'departed').length} never exited`)
+      }
+    } finally { bindings.destroy_engine(handle) }
+  }
 })

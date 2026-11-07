@@ -145,11 +145,11 @@ export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: M
 const inside = (id: string) => ({ ids: [id] })
 const spawn = (count: number, zone: string, tags: string[], fill: string, symbol: 'circle' | 'square' | 'triangle' = 'circle'): Operation =>
   ({ op: 'spawn', template: { kind: 'agent', tags, appearance: { fill, symbol } }, count, placement: { inside: inside(zone) } })
-const assign = (tag: string, goal: Extract<Operation, { op: 'assign_goal' }>['goal']): Operation => ({ op: 'assign_goal', targets: { kind: 'agent', tags: [tag] }, goal })
+const assign = (tag: string, goal: Extract<Operation, { op: 'assign_goal' }>['goal']): Operation => ({ op: 'assign_goal', targets: { kind: 'agent' as const, tags: [tag] }, goal })
 const alarmAt = (at: number) => [{ op: 'schedule' as const, id: 'alarm', at, operations: [{ op: 'emit' as const, event: { name: 'alarm' } }] }]
 const evacuate = (tag: string, target: { ids: string[] }) => [{
   op: 'define_rule' as const, id: 'evacuate', when: { kind: 'event' as const, name: 'alarm' }, once: true,
-  operations: [{ op: 'assign_goal' as const, targets: { kind: 'agent' as const, tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const } }],
+  operations: [{ op: 'assign_goal' as const, targets: { kind: 'agent' as const, tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const, departOnArrival: true } }],
 }]
 const lookup = (venue: string, floor: string) => ({ mode: 'lookup' as const, venue, floor })
 const header = (simulationId: string) => ({ schemaVersion: 1 as const, simulationId, seed: 42 })
@@ -200,7 +200,7 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
       },
     },
     {
-      id: 'hackathon-hall', title: 'Hackathon check-in', model: PEDESTRIAN_PRESET,
+      id: 'hackathon-hall', title: 'Hackathon arrivals', model: PEDESTRIAN_PRESET,
       plan: {
         ...header('hackathon-hall-demo'), layout: lookup('Hackathon Hall', 'Main hall'),
         initialOperations: [

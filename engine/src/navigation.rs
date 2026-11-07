@@ -42,6 +42,8 @@ pub struct Navigator {
     work: usize,
     portal_info: Vec<Option<(u32, u32, bool, f64)>>,
     intents: Vec<Option<Intent>>,
+    bodies: Vec<Body>,
+    visible: Vec<Option<(Point, Point)>>,
 }
 #[derive(Debug, Clone)]
 pub struct Intent {
@@ -297,6 +299,64 @@ fn allowed(
         } else {
             zone == portal.1
         })
+}
+
+// Continuous positions at wall tangencies can lie in a cell whose centre lacks clearance.
+fn entry(
+    grid: &GridData,
+    field: &Field,
+    p: &Point,
+    radius: f64,
+    bodies: &[Body],
+    portals: &[Option<(u32, u32, bool, f64)>],
+    work: &mut usize,
+) -> Result<Option<usize>, Failure> {
+    let cell = index(grid, p);
+    let x = cell % grid.width;
+    let y = cell / grid.width;
+    let mut best: Option<(f64, usize)> = None;
+    for cy in y.saturating_sub(1)..=(y + 1).min(grid.height - 1) {
+        for cx in x.saturating_sub(1)..=(x + 1).min(grid.width - 1) {
+            let i = cy * grid.width + cx;
+            if field.distance[i].is_finite()
+                && allowed(grid, portals, cell, i).unwrap_or(false)
+                && geometry::clear(grid, bodies, p, &center(grid, i), radius, work)?
+            {
+                let cost = distance(p, &center(grid, i)) + field.distance[i];
+                if best.is_none_or(|b| cost < b.0) {
+                    best = Some((cost, i));
+                }
+            }
+        }
+    }
+    Ok(best.map(|b| b.1))
+}
+
+fn same_terrain(
+    grid: &GridData,
+    from: usize,
+    to: usize,
+    work: &mut usize,
+) -> Result<bool, Failure> {
+    let x = from % grid.width;
+    let y = from / grid.width;
+    let nx = to % grid.width;
+    let ny = to / grid.width;
+    let same = (y.min(ny)..=y.max(ny)).all(|cy| {
+        (x.min(nx)..=x.max(nx)).all(|cx| {
+            *work += 1;
+            let i = cy * grid.width + cx;
+            grid.traversal_cost[i] == grid.traversal_cost[from]
+                && grid.terrain_speed_multiplier[i] == grid.terrain_speed_multiplier[from]
+        })
+    });
+    if *work > 64_000_000 {
+        return Err((
+            "RESOURCE_LIMIT",
+            "Navigation lookahead work budget exceeded".into(),
+        ));
+    }
+    Ok(same)
 }
 
 impl Navigator {
@@ -618,7 +678,9 @@ impl Navigator {
                 radius: a.components.physical.radius.0,
             })
             .collect();
+        self.bodies = bodies.clone();
         self.routes = vec![None; agents.len()];
+        self.visible = vec![None; agents.len()];
         for (i, a) in agents.iter_mut().enumerate() {
             let old_version = a.navigation.map_version.0 as u64;
             a.navigation.map_version = Counter(version as f64);
@@ -757,8 +819,18 @@ impl Navigator {
             );
             let field = &self.fields[&key];
             let cell = index(grid, &a.position);
-            let mut blocked = !field.distance[cell].is_finite();
-            if !blocked {
+            let mut blocked = !field.distance[cell].is_finite()
+                && entry(
+                    grid,
+                    field,
+                    &a.position,
+                    radius,
+                    &bodies,
+                    &self.portal_info,
+                    &mut self.work,
+                )?
+                .is_none();
+            if !blocked && field.distance[cell].is_finite() {
                 let saved = a.navigation.target_point.as_ref();
                 let keep = if let Some(p) = saved {
                     let to = index(grid, p);
@@ -855,7 +927,7 @@ impl Navigator {
         Ok(())
     }
     pub fn step(
-        &self,
+        &mut self,
         grid: &GridData,
         agents: &mut [AgentRuntime],
         dt: f64,
@@ -908,7 +980,7 @@ impl Navigator {
         }
     }
     pub fn waypoint(
-        &self,
+        &mut self,
         grid: &GridData,
         a: &mut AgentRuntime,
         i: usize,
@@ -928,6 +1000,106 @@ impl Navigator {
         let field = &self.fields[route.key.as_ref().unwrap()];
         let epsilon = grid.cell_size * 1e-7;
         let cell = index(grid, &a.position);
+        if !field.distance[cell].is_finite() {
+            if let Some(i) = entry(
+                grid,
+                field,
+                &a.position,
+                a.components.physical.radius.0,
+                &self.bodies,
+                &self.portal_info,
+                work,
+            )? {
+                let target = center(grid, i);
+                let remaining =
+                    distance(&a.position, &target) + f64::from(field.hops[i]) * grid.cell_size;
+                a.navigation.target_point = Some(target.clone());
+                return Ok(Some((target, remaining)));
+            }
+            return Ok(None);
+        }
+        // Keep a visible lookahead until approached instead of rebuilding it every substep.
+        if let Some(target) = &a.navigation.target_point {
+            let to = index(grid, target);
+            // A point remaining on a previously checked ray needs no new geometry scan.
+            let certified = self.visible[i].as_ref().is_some_and(|(from, end)| {
+                end.x.0 == target.x.0
+                    && end.y.0 == target.y.0
+                    && geometry::point_segment(a.position.x.0, a.position.y.0, from, end)
+                        <= grid.cell_size * 1e-12
+            });
+            if field.distance[to] < field.distance[cell]
+                && distance(&a.position, target) > grid.cell_size * 2.0
+                && (certified
+                    || same_terrain(grid, cell, to, work)?
+                        && geometry::clear(
+                            grid,
+                            &self.bodies,
+                            &a.position,
+                            target,
+                            a.components.physical.radius.0,
+                            work,
+                        )?)
+            {
+                let remaining = distance(&a.position, target)
+                    + f64::from(field.hops[to]) * grid.cell_size
+                    - route.stop;
+                if remaining <= epsilon {
+                    complete(a);
+                    return Ok(None);
+                }
+                return Ok(Some((target.clone(), remaining)));
+            }
+        }
+        // Look ahead along the field so crowds do not compete for every cell centre.
+        let mut ahead = cell;
+        let mut visible = None;
+        for _ in 0..8 {
+            let next = field.next[ahead];
+            if next == NONE || next == ahead as u32 {
+                break;
+            }
+            let next = next as usize;
+            let portal = grid.portal_index[next];
+            if portal != 0
+                && portal != grid.portal_index[ahead]
+                && self.portal_info[portal as usize].unwrap().3 > 0.0
+            {
+                break;
+            }
+            let point = center(grid, next);
+            if same_terrain(grid, cell, next, work)?
+                && geometry::clear(
+                    grid,
+                    &self.bodies,
+                    &a.position,
+                    &point,
+                    a.components.physical.radius.0,
+                    work,
+                )?
+            {
+                visible = Some((point, next));
+            }
+            ahead = next;
+        }
+        if let Some((point, next)) = visible {
+            let remaining = distance(&a.position, &point)
+                + f64::from(field.hops[next]) * grid.cell_size
+                - route.stop;
+            if remaining <= epsilon {
+                complete(a);
+                return Ok(None);
+            }
+            self.visible[i] = Some((a.position.clone(), point.clone()));
+            a.navigation.target_point = Some(point.clone());
+            return Ok(Some((point, remaining)));
+        }
+        if a.navigation.target_point.as_ref().is_some_and(|target| {
+            let to = index(grid, target);
+            to != cell && field.next[cell] != to as u32
+        }) {
+            a.navigation.target_point = None;
+        }
         if let Some(target) = a.navigation.target_point.as_ref() {
             let to = index(grid, target);
             let next = field.next[cell];

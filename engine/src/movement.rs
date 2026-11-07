@@ -126,7 +126,7 @@ impl Neighbors {
 }
 
 pub fn advance(
-    nav: &Navigator,
+    nav: &mut Navigator,
     grid: &GridData,
     agents: &mut [AgentRuntime],
     dt: f64,
@@ -280,6 +280,11 @@ pub fn advance(
             if !desired.x.is_finite() || !desired.y.is_finite() {
                 return Err(("RESOURCE_LIMIT", "Steering numeric range exceeded".into()));
             }
+            // Personal-space preferences must not reverse progress along the route.
+            let forward = desired.dot(direction);
+            if forward < speed * 0.25 {
+                desired = desired.add(direction.mul(speed * 0.25 - forward));
+            }
             desired = desired.limit(speed);
             let hard_max =
                 a.components.navigation.maximum_speed.0 * a.components.mobility.speed_multiplier.0;
@@ -302,9 +307,46 @@ pub fn advance(
                 }
                 continue;
             }
-            let candidates = [v, V { x: v.x, y: 0.0 }, V { x: 0.0, y: v.y }, V::default()];
+            let direct =
+                me.v.add(direction.mul(speed).sub(me.v).limit(acceleration * h))
+                    .limit(hard_max)
+                    .limit(d / h)
+                    .limit(remaining / h);
+            // Fixed samples keep steering identical in native Rust and Wasm.
+            let turns = [
+                (0.8660254037844386, 0.5),
+                (0.8660254037844386, -0.5),
+                (0.5, 0.8660254037844386),
+                (0.5, -0.8660254037844386),
+                (0.0, 1.0),
+                (0.0, -1.0),
+                (-0.5, 0.8660254037844386),
+                (-0.5, -0.8660254037844386),
+                (-0.8660254037844386, 0.5),
+                (-0.8660254037844386, -0.5),
+                (-1.0, 0.0),
+            ];
             let mut accepted = V::default();
-            for v in candidates {
+            for candidate in 0..16 {
+                let v = match candidate {
+                    0 => direct,
+                    1 => v,
+                    2..=12 => {
+                        let (cos, sin) = turns[candidate - 2];
+                        let detour = V {
+                            x: direction.x * cos - direction.y * sin,
+                            y: direction.x * sin + direction.y * cos,
+                        }
+                        .mul(speed);
+                        me.v.add(detour.sub(me.v).limit(acceleration * h))
+                            .limit(hard_max)
+                            .limit(d / h)
+                            .limit(remaining / h)
+                    }
+                    13 => V { x: v.x, y: 0.0 },
+                    14 => V { x: 0.0, y: v.y },
+                    _ => V::default(),
+                };
                 let end = me.p.add(v.mul(h));
                 if !geometry::clear(grid, &[], &me.p.point(), &end.point(), me.radius, &mut work)?
                     || !nav.permits_agent(grid, &me.p.point(), &end.point(), i)
@@ -320,6 +362,19 @@ pub fn advance(
                     let start = me.p.sub(old[j].p);
                     let finish = end.sub(V::of(&agents[j].position));
                     let sum = me.radius + old[j].radius;
+                    let offset = old[j].p.sub(me.p);
+                    let relative = old[j].v.sub(v);
+                    let vv = relative.dot(relative);
+                    let closest_time = if vv > 0.0 {
+                        (-offset.dot(relative) / vv).clamp(0.0, 0.75)
+                    } else {
+                        0.0
+                    };
+                    let predicted = offset.add(relative.mul(closest_time)).len();
+                    if predicted < sum && predicted < offset.len() - sum * 1e-10 {
+                        clear = false;
+                        break;
+                    }
                     if sum - geometry::point_segment(0.0, 0.0, &start.point(), &finish.point())
                         > sum * 1e-10
                     {
