@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  getRunAnalytics,
   initializeDatabase,
   saveIntervention,
   saveMetricBatch,
@@ -105,4 +106,80 @@ test('stores an intervention only when it matches the worker acknowledgement', a
     acknowledgement: { ...input.acknowledgement, requestId: 'different-request' },
   }), 'invalid')
   assert.match(pool.calls[1].text, /ON CONFLICT \(run_id, request_id\) DO NOTHING/)
+})
+
+test('returns peak zone density and intervention comparisons for a run', async () => {
+  const runId = '37c6729d-9e21-4c8f-a414-fdbf8c56d66c'
+  const calls = []
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values })
+      if (text.includes('SELECT 1 FROM crowd_runs')) {
+        return { rowCount: 1, rows: [{ '?column?': 1 }] }
+      }
+      if (text.includes('COUNT(*)::integer')) {
+        return { rowCount: 1, rows: [{ sample_count: 21 }] }
+      }
+      if (text.includes('DISTINCT ON (zone_id)')) {
+        return { rowCount: 1, rows: [{ zone_id: 'hall', peak_density: 2.5, at: 12 }] }
+      }
+      if (text.includes('FROM crowd_interventions')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            requestId: 'request-close-door',
+            prompt: 'Close the hall door.',
+            at: 10,
+            comparisons: [{
+              zoneId: 'hall',
+              beforeDensity: 1.2,
+              afterDensity: 0.8,
+              beforeSamples: 10,
+              afterSamples: 10,
+            }],
+          }],
+        }
+      }
+      throw new Error('Unexpected analytics query')
+    },
+  }
+
+  assert.deepEqual(await getRunAnalytics(pool, runId), {
+    runId,
+    sampleCount: 21,
+    peakDensityByZone: [{ zoneId: 'hall', peakDensity: 2.5, at: 12 }],
+    interventions: [{
+      requestId: 'request-close-door',
+      prompt: 'Close the hall door.',
+      at: 10,
+      comparisons: [{
+        zoneId: 'hall',
+        beforeDensity: 1.2,
+        afterDensity: 0.8,
+        beforeSamples: 10,
+        afterSamples: 10,
+      }],
+    }],
+  })
+  assert.equal(calls.length, 4)
+  assert.ok(calls.every((call) => call.values[0] === runId))
+  assert.match(calls[2].text, /DISTINCT ON \(zone_id\)/)
+  assert.match(calls[2].text, /jsonb_array_elements/)
+  assert.match(calls[3].text, /GREATEST\(intervention\.at - 10, 0\)/)
+  assert.match(calls[3].text, /intervention\.at \+ 10/)
+})
+
+test('rejects invalid analytics run IDs and returns null for missing runs', async () => {
+  const calls = []
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values })
+      return { rowCount: 0, rows: [] }
+    },
+  }
+
+  assert.equal(await getRunAnalytics(pool, 'not-a-uuid'), 'invalid')
+  assert.equal(calls.length, 0)
+  assert.equal(await getRunAnalytics(pool, '37c6729d-9e21-4c8f-a414-fdbf8c56d66c'), null)
+  assert.equal(calls.length, 1)
 })

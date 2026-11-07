@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
-import { initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
+import { getRunAnalytics, initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
 
 const port = Number(process.env.PORT ?? 3001);
@@ -110,6 +110,31 @@ const server = createServer((request, response) => {
   }
 
   const telemetryPath = request.url?.split('?')[0] ?? '';
+  const analyticsRoute = /^\/api\/runs\/([^/]+)\/analytics$/.exec(telemetryPath);
+  if (request.method === 'GET' && analyticsRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const analytics = await getRunAnalytics(database, analyticsRoute[1]!);
+      if (analytics === 'invalid') {
+        sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' });
+      } else if (analytics === null) {
+        sendJson(response, 404, { ok: false, error: 'Run was not found.' });
+      } else {
+        sendJson(response, 200, { ok: true, analytics });
+      }
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : 'UNKNOWN';
+      console.error(`Tiger Data analytics query failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not load analytics from Tiger Data.' });
+    });
+    return;
+  }
+
   const metricsRoute = /^\/api\/runs\/([^/]+)\/metrics$/.exec(telemetryPath);
   const interventionRoute = /^\/api\/runs\/([^/]+)\/interventions$/.exec(telemetryPath);
   if (request.method === 'POST' && (metricsRoute || interventionRoute)) {

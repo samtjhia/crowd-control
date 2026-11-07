@@ -4,17 +4,20 @@ import {
   CreateInterventionRequestSchema,
   PlannerReplySchema,
   PlannerRequestSchema,
+  RunAnalyticsSchema,
   SCHEMA_VERSION,
   parseContract,
   parseScenarioPlan,
   serviceResultSchema,
   type Frame,
   type Capabilities,
+  type EventRecord,
   type InterventionSummary,
   type InventoryItem,
   type MetricSample,
   type Operation,
   type PlannerReply,
+  type RunAnalytics,
   type ScenarioPlan,
   type WorkerCommand,
 } from '@crowd-control/contract'
@@ -118,6 +121,7 @@ function describeOperation(operation: Operation, inventory: InventoryItem[]): st
 function App() {
   const [prompt, setPrompt] = useState('')
   const [followupPrompt, setFollowupPrompt] = useState('')
+  const [whyPrompt, setWhyPrompt] = useState('')
   const [initialHistory] = useState(() => {
     try {
       return readChatHistory(window.localStorage, simulationId)
@@ -131,11 +135,17 @@ function App() {
   const [previewFollowupPrompt, setPreviewFollowupPrompt] = useState('')
   const [otherReply, setOtherReply] = useState<PlannerReply | null>(null)
   const [followupReply, setFollowupReply] = useState<PlannerReply | null>(null)
+  const [whyReply, setWhyReply] = useState<Extract<PlannerReply, { kind: 'answer' }> | null>(null)
   const [error, setError] = useState(initialHistory.ok ? '' : initialHistory.error)
   const [scenarioStatus, setScenarioStatus] = useState('')
   const [reviewStatus, setReviewStatus] = useState('')
   const [followupStatus, setFollowupStatus] = useState('')
+  const [whyStatus, setWhyStatus] = useState('')
+  const [advancing, setAdvancing] = useState(false)
   const [databaseStatus, setDatabaseStatus] = useState('')
+  const [runAnalytics, setRunAnalytics] = useState<RunAnalytics | null>(null)
+  const [analyticsError, setAnalyticsError] = useState('')
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [requesting, setRequesting] = useState(false)
   const [frame, setFrame] = useState<Frame | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -143,6 +153,8 @@ function App() {
   const [historyEntries, setHistoryEntries] = useState<ChatHistoryEntry[]>(initialHistory.ok ? initialHistory.value.entries : [])
   const [currentInterventions, setCurrentInterventions] = useState<InterventionSummary[]>([])
   const [latestMetrics, setLatestMetrics] = useState<MetricSample | undefined>()
+  const [recentMetricSamples, setRecentMetricSamples] = useState<MetricSample[]>([])
+  const [recentEvents, setRecentEvents] = useState<EventRecord[]>([])
   const pendingRequests = useRef(new Map<string, { request: CreateFollowupRequest; prompt: string }>())
   const activeRunId = useRef<string | null>(null)
   const runStartedAt = useRef<string | null>(null)
@@ -157,11 +169,45 @@ function App() {
     recordedAt: string
   }>>([])
   const telemetryFlushPending = useRef(false)
+  const analyticsRefreshPending = useRef(false)
   const telemetryHasSaved = useRef(false)
   const loadCommandId = useRef<string | null>(null)
+  const advanceCommandId = useRef<string | null>(null)
   const inventoryQueryCommandId = useRef<string | null>(null)
   const initialInventoryQuery = useRef(false)
   const endpoint = useRef<MockEndpoint | null>(null)
+
+  async function refreshAnalytics() {
+    const runId = activeRunId.current
+    if (!runId || analyticsRefreshPending.current) return
+    analyticsRefreshPending.current = true
+    setAnalyticsLoading(true)
+    try {
+      const response = await fetch(`/api/runs/${runId}/analytics`)
+      const payload: unknown = await response.json()
+      if (!response.ok) {
+        const detail = typeof payload === 'object' && payload !== null && 'error' in payload
+          && typeof payload.error === 'string'
+          ? payload.error
+          : `HTTP ${response.status}`
+        throw new Error(detail)
+      }
+      const value = typeof payload === 'object' && payload !== null && 'analytics' in payload
+        ? payload.analytics
+        : undefined
+      const parsed = RunAnalyticsSchema.safeParse(value)
+      if (!parsed.success) throw new Error('Tiger Data returned an invalid analytics response.')
+      setRunAnalytics(parsed.data)
+      setAnalyticsError('')
+    } catch (requestError) {
+      setAnalyticsError(requestError instanceof Error
+        ? requestError.message
+        : 'The analytics request failed.')
+    } finally {
+      analyticsRefreshPending.current = false
+      setAnalyticsLoading(false)
+    }
+  }
 
   useEffect(() => {
     const worker = createMockEndpoint()
@@ -234,7 +280,9 @@ function App() {
         telemetryFlushPending.current = false
       }
     }
-    const telemetryTimer = window.setInterval(() => { void flushTelemetry() }, 5000)
+    const telemetryTimer = window.setInterval(() => {
+      void flushTelemetry().then(() => refreshAnalytics())
+    }, 5000)
     const queryInventory = (initial = false) => {
       const commandId = crypto.randomUUID()
       inventoryQueryCommandId.current = commandId
@@ -252,8 +300,14 @@ function App() {
         setFrame(message.frame)
       } else if (message.type === 'metrics') {
         setLatestMetrics(message.sample)
+        setRecentMetricSamples((current) => [...current.slice(-39), message.sample])
         pendingMetricSamples.current.push(message.sample)
         if (pendingMetricSamples.current.length >= 20) void flushTelemetry()
+      } else if (message.type === 'events') {
+        setRecentEvents((current) => {
+          const knownIds = new Set(current.map((event) => event.id))
+          return [...current, ...message.events.filter((event) => !knownIds.has(event.id))].slice(-100)
+        })
       } else if (message.type === 'query_result' && message.commandId === inventoryQueryCommandId.current) {
         if (message.result.kind === 'inventory') {
           setInventory(message.result.items)
@@ -267,8 +321,11 @@ function App() {
         if (message.commandId === loadCommandId.current) {
           setReviewStatus('Sample loaded. Reading the mock worker inventory…')
           loadCommandId.current = null
-          void flushTelemetry()
+          void flushTelemetry().then(() => refreshAnalytics())
           queryInventory(true)
+        } else if (message.commandId === advanceCommandId.current) {
+          advanceCommandId.current = null
+          setAdvancing(false)
         } else if (message.applied) {
           const applied = message.applied
           const pendingRequest = pendingRequests.current.get(applied.requestId)
@@ -309,11 +366,15 @@ function App() {
             pendingRequests.current.delete(applied.requestId)
             setFollowupStatus(`Applied successfully at ${applied.at.toFixed(1)} seconds (history revision ${applied.historyRevision}).`)
             setPreviewFollowup(null)
-            void flushTelemetry()
+            void flushTelemetry().then(() => refreshAnalytics())
             queryInventory()
           }
         }
       } else if (message.type === 'error') {
+        if (message.commandId === advanceCommandId.current) {
+          advanceCommandId.current = null
+          setAdvancing(false)
+        }
         if (message.error.requestId && pendingRequests.current.has(message.error.requestId)) {
           setFollowupStatus(message.error.message)
           pendingRequests.current.delete(message.error.requestId)
@@ -446,6 +507,78 @@ function App() {
     }
   }
 
+  async function askWhy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setWhyReply(null)
+    setWhyStatus('Preparing recent simulation evidence…')
+    const request = parseContract(PlannerRequestSchema, {
+      schemaVersion: SCHEMA_VERSION,
+      simulationId,
+      requestId: crypto.randomUUID(),
+      prompt: whyPrompt.trim(),
+      context: {
+        capabilities: followupCapabilities,
+        inventory,
+        ...(latestMetrics ? { summary: latestMetrics } : {}),
+        metricSamples: recentMetricSamples,
+        events: recentEvents,
+        interventions: currentInterventions,
+        askWhy: true,
+      },
+    })
+    if (!request.ok) {
+      setError(`Could not prepare the explanation request: ${request.error.message}`)
+      setWhyStatus('')
+      return
+    }
+
+    setRequesting(true)
+    try {
+      setWhyStatus('Asking Gemini to explain the observed evidence…')
+      const response = await fetch('/api/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request.value),
+        signal: AbortSignal.timeout(50_000),
+      })
+      const payload: unknown = await response.json()
+      const result = parseContract(serviceResultSchema(PlannerReplySchema), payload)
+      if (!result.ok) {
+        setError(`The planner server returned an invalid response: ${result.error.message}`)
+        setWhyStatus('')
+        return
+      }
+      if (!result.value.ok) {
+        setError(result.value.error.message)
+        setWhyStatus('')
+        return
+      }
+      const reply = result.value.value
+      if (reply.kind !== 'answer') {
+        setError(`The planner returned ${reply.kind} instead of an evidence-based answer.`)
+        setWhyStatus('')
+        return
+      }
+      const availableEventIds = new Set(request.value.context.events?.map((record) => record.id) ?? [])
+      if (reply.evidenceEventIds.some((id) => !availableEventIds.has(id))) {
+        setError('The answer cited an event that was not included in the run evidence.')
+        setWhyStatus('')
+        return
+      }
+      setWhyReply(reply)
+      setWhyStatus('')
+    } catch (requestError) {
+      const timedOut = requestError instanceof DOMException && requestError.name === 'TimeoutError'
+      setError(timedOut
+        ? 'The explanation request timed out. Please retry.'
+        : 'Could not reach the planner server. Confirm it is running and try again.')
+      setWhyStatus('')
+    } finally {
+      setRequesting(false)
+    }
+  }
+
   function applyFollowup() {
     if (!previewFollowup) return
     const checked = parseContract(
@@ -472,6 +605,20 @@ function App() {
       type: 'apply_request',
       request: checked.value,
     } satisfies WorkerCommand)
+  }
+
+  function advanceSimulation() {
+    if (!frame || !endpoint.current || advanceCommandId.current) return
+    const commandId = crypto.randomUUID()
+    advanceCommandId.current = commandId
+    setAdvancing(true)
+    endpoint.current.send({
+      schemaVersion: SCHEMA_VERSION,
+      simulationId,
+      commandId,
+      type: 'run_to',
+      time: frame.time + 10,
+    })
   }
 
   function showSamplePreview() {
@@ -510,10 +657,16 @@ function App() {
     setLoaded(false)
     const runId = crypto.randomUUID()
     activeRunId.current = runId
+    setRunAnalytics(null)
+    setAnalyticsError('')
     runStartedAt.current = new Date().toISOString()
     storedRunId.current = null
     runCreationPending.current = false
     pendingMetricSamples.current = []
+    setRecentMetricSamples([])
+    setRecentEvents([])
+    advanceCommandId.current = null
+    setAdvancing(false)
     pendingDatabaseInterventions.current = []
     telemetryHasSaved.current = false
     setDatabaseStatus('Starting run record in Tiger Data…')
@@ -663,6 +816,12 @@ function App() {
         {databaseStatus && <p className="message" role="status">{databaseStatus}</p>}
         {loaded && (
           <>
+            <div className="button-row simulation-controls">
+              <button type="button" onClick={advanceSimulation} disabled={advancing || !frame}>
+                {advancing ? 'Advancing…' : 'Advance 10 seconds'}
+              </button>
+              <span className="fine-print">Collect more metrics and trigger scheduled events for evidence-based explanations.</span>
+            </div>
             <section className="followup-panel" aria-labelledby="followup-heading">
               <p className="eyebrow">Step 4 · Follow-up</p>
               <h3 id="followup-heading">Change the running sample</h3>
@@ -721,6 +880,55 @@ function App() {
               )}
             </section>
 
+            <section className="followup-panel" aria-labelledby="why-heading">
+              <p className="eyebrow">Ask about this run</p>
+              <h3 id="why-heading">Why did that happen?</h3>
+              <p className="muted">
+                Ask about observed behavior. Gemini receives up to 40 recent metric samples,
+                100 recent events, and the applied interventions. It should say when those
+                observations are not enough to establish a cause.
+              </p>
+              <form onSubmit={askWhy}>
+                <label htmlFor="why-prompt">What would you like explained?</label>
+                <textarea
+                  id="why-prompt"
+                  value={whyPrompt}
+                  onChange={(event) => setWhyPrompt(event.target.value)}
+                  placeholder="For example: Why did the queue at the desk grow?"
+                  required
+                  rows={2}
+                />
+                <button type="submit" disabled={requesting}>
+                  {requesting ? 'Checking evidence…' : 'Ask why'}
+                </button>
+              </form>
+              {whyStatus && <p className="message" role="status">{whyStatus}</p>}
+              {whyReply && (
+                <section className="preview-card" aria-labelledby="why-answer-heading">
+                  <p className="eyebrow">Evidence-based explanation</p>
+                  <h4 id="why-answer-heading">Answer</h4>
+                  <p>{whyReply.text}</p>
+                  <p className="fine-print">
+                    Context supplied: {recentMetricSamples.length} metric samples and {recentEvents.length} events.
+                  </p>
+                  {whyReply.evidenceEventIds.length > 0 && (
+                    <>
+                      <p className="eyebrow">Cited events</p>
+                      <ul>
+                        {whyReply.evidenceEventIds.map((id) => {
+                          const record = recentEvents.find((eventRecord) => eventRecord.id === id)
+                          return <li key={id}>{record ? `${record.name} at ${record.time.toFixed(1)} seconds` : id}</li>
+                        })}
+                      </ul>
+                    </>
+                  )}
+                  {whyReply.evidenceEventIds.length === 0 && (
+                    <p className="fine-print">No event records were cited; the answer may be based on metric samples only.</p>
+                  )}
+                </section>
+              )}
+            </section>
+
             <section aria-labelledby="history-heading">
               <h3 id="history-heading">Applied interventions · mock history</h3>
               <p className="fine-print">
@@ -743,6 +951,73 @@ function App() {
                 </ul>
               ) : (
                 <p className="muted">No follow-up interventions have been applied yet.</p>
+              )}
+            </section>
+
+            <section className="analytics-panel" aria-labelledby="analytics-heading">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Saved run data · Tiger Data</p>
+                  <h3 id="analytics-heading">Historical analytics</h3>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void refreshAnalytics()}
+                  disabled={analyticsLoading}
+                >
+                  {analyticsLoading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+              <p className="fine-print">
+                Peak density is calculated across recorded samples. Intervention comparisons use mean zone density in the 10 simulated seconds before and after each acknowledged change; unavailable sides are shown as —.
+              </p>
+              {analyticsError && <p className="error" role="alert">Analytics unavailable: {analyticsError}</p>}
+              {!runAnalytics && !analyticsError && (
+                <p className="muted">{analyticsLoading ? 'Loading saved analytics…' : 'Analytics will appear after run data is saved.'}</p>
+              )}
+              {runAnalytics && (
+                <>
+                  <p className="muted">{runAnalytics.sampleCount} metric samples saved for this run.</p>
+                  <h4>Peak density by zone</h4>
+                  {runAnalytics.peakDensityByZone.length ? (
+                    <ul>
+                      {runAnalytics.peakDensityByZone.map((zone) => (
+                        <li key={zone.zoneId}>
+                          {displayName(zone.zoneId)}: {zone.peakDensity.toFixed(2)} at {zone.at.toFixed(1)} seconds
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">No zone density samples are saved yet. Advance the mock timeline to collect data.</p>
+                  )}
+                  <h4>Before / after interventions</h4>
+                  {runAnalytics.interventions.length ? (
+                    <ul className="analytics-interventions">
+                      {runAnalytics.interventions.map((intervention) => (
+                        <li key={intervention.requestId}>
+                          <strong>{intervention.prompt}</strong>
+                          <span className="muted"> · applied at {intervention.at.toFixed(1)} seconds</span>
+                          {intervention.comparisons.length ? (
+                            <ul>
+                              {intervention.comparisons.map((comparison) => (
+                                <li key={comparison.zoneId}>
+                                  {displayName(comparison.zoneId)}: before {comparison.beforeDensity?.toFixed(2) ?? '—'}
+                                  {' '}({comparison.beforeSamples} samples), after {comparison.afterDensity?.toFixed(2) ?? '—'}
+                                  {' '}({comparison.afterSamples} samples)
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="muted">No zone samples are saved in the comparison window yet.</p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">No acknowledged interventions have been saved for this run.</p>
+                  )}
+                </>
               )}
             </section>
           </>

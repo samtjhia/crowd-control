@@ -4,7 +4,9 @@ import {
   CreateInterventionRequestSchema,
   IdSchema,
   MetricSampleSchema,
+  RunAnalyticsSchema,
 } from '@crowd-control/contract'
+import type { RunAnalytics } from '@crowd-control/contract'
 import type { Pool } from 'pg'
 
 const RunSchema = z.strictObject({
@@ -36,6 +38,90 @@ export const persistenceSchemas = {
   run: RunSchema,
   metrics: MetricsBatchSchema,
   intervention: InterventionSchema,
+}
+
+export async function getRunAnalytics(pool: Pool, runId: string): Promise<'invalid' | null | RunAnalytics> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+
+  const run = await pool.query(
+    'SELECT 1 FROM crowd_runs WHERE run_id = $1',
+    [runId],
+  )
+  if (run.rowCount === 0) return null
+
+  const [sampleResult, peakResult, interventionResult] = await Promise.all([
+    pool.query<{ sample_count: number }>(
+      'SELECT COUNT(*)::integer AS sample_count FROM crowd_metric_samples WHERE run_id = $1',
+      [runId],
+    ),
+    pool.query<{ zone_id: string; peak_density: number; at: number }>(
+      `SELECT DISTINCT ON (zone_id)
+         zone_id, density AS peak_density, simulation_time AS at
+       FROM (
+         SELECT metric.simulation_time,
+                zone->>'zoneId' AS zone_id,
+                (zone->>'density')::double precision AS density
+         FROM crowd_metric_samples AS metric
+         CROSS JOIN LATERAL jsonb_array_elements(metric.zones) AS zone
+         WHERE metric.run_id = $1
+       ) AS samples
+       WHERE zone_id IS NOT NULL AND density IS NOT NULL
+       ORDER BY zone_id, density DESC, simulation_time ASC`,
+      [runId],
+    ),
+    pool.query<RunAnalytics['interventions'][number]>(
+      `SELECT intervention.request_id AS "requestId",
+              intervention.prompt,
+              intervention.at,
+              COALESCE(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'zoneId', comparison.zone_id,
+                    'beforeDensity', comparison.before_density,
+                    'afterDensity', comparison.after_density,
+                    'beforeSamples', comparison.before_samples,
+                    'afterSamples', comparison.after_samples
+                  ) ORDER BY comparison.zone_id
+                ) FILTER (WHERE comparison.zone_id IS NOT NULL),
+                '[]'::jsonb
+              ) AS comparisons
+       FROM (
+         SELECT run_id, request_id, prompt,
+                (acknowledgement->>'at')::double precision AS at
+         FROM crowd_interventions
+         WHERE run_id = $1
+       ) AS intervention
+       LEFT JOIN LATERAL (
+         SELECT zone->>'zoneId' AS zone_id,
+                AVG((zone->>'density')::double precision)
+                  FILTER (WHERE metric.simulation_time < intervention.at) AS before_density,
+                AVG((zone->>'density')::double precision)
+                  FILTER (WHERE metric.simulation_time >= intervention.at) AS after_density,
+                COUNT(*) FILTER (WHERE metric.simulation_time < intervention.at)::integer AS before_samples,
+                COUNT(*) FILTER (WHERE metric.simulation_time >= intervention.at)::integer AS after_samples
+         FROM crowd_metric_samples AS metric
+         CROSS JOIN LATERAL jsonb_array_elements(metric.zones) AS zone
+         WHERE metric.run_id = intervention.run_id
+           AND metric.simulation_time >= GREATEST(intervention.at - 10, 0)
+           AND metric.simulation_time <= intervention.at + 10
+         GROUP BY zone->>'zoneId'
+       ) AS comparison ON TRUE
+       GROUP BY intervention.run_id, intervention.request_id, intervention.prompt, intervention.at
+       ORDER BY intervention.at, intervention.request_id`,
+      [runId],
+    ),
+  ])
+
+  return RunAnalyticsSchema.parse({
+    runId,
+    sampleCount: sampleResult.rows[0]?.sample_count ?? 0,
+    peakDensityByZone: peakResult.rows.map((row) => ({
+      zoneId: row.zone_id,
+      peakDensity: row.peak_density,
+      at: row.at,
+    })),
+    interventions: interventionResult.rows,
+  })
 }
 
 export async function initializeDatabase(pool: Pool): Promise<void> {

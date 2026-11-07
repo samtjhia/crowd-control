@@ -36,15 +36,27 @@ npm run dev:server
 ```
 
 The API exposes `GET http://127.0.0.1:3001/health`, `GET /health/database`,
-and `POST /api/plan`. Vite proxies `/api` requests to the local Node server.
+and `POST /api/plan`. With Tiger Data enabled, it also accepts run records at
+`POST /api/runs`, metric batches at `POST /api/runs/:runId/metrics`, and
+acknowledged interventions at `POST /api/runs/:runId/interventions`.
+`GET /api/runs/:runId/analytics` returns peak density by zone and mean zone
+density before and after each acknowledged intervention. It compares recorded
+samples in the 10 simulated seconds before and after the intervention; missing
+sides remain unavailable rather than being inferred. Vite proxies `/api`
+requests to the local Node server.
 To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
 `GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
 in chat. Set `DATABASE_URL` in the same root `.env` to enable Tiger Data.
 On startup, the server creates the run, intervention, and metric tables and
 turns the metric table into a Timescale hypertable. The offline mock writes
 run metadata, batches metric samples, and records worker-acknowledged
-interventions in the background. Generated scenario plans are previews only:
-the compiler handoff is not connected yet. Auth0 is not implemented.
+interventions in the background. On `/planner`, the Historical analytics panel
+queries the saved run from Tiger Data. Ask why sends recent in-memory
+metrics, events, and applied interventions to Gemini; answers are instructed to
+stay within that evidence and cite only supplied event IDs. This is a
+current-session mock feature. Generated
+scenario plans are previews only: the compiler handoff is not connected yet.
+Auth0 is not implemented.
 
 ## Checks
 
