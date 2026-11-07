@@ -37,6 +37,20 @@ export const RunSummarySchema = z.strictObject({
   interventionCount: CounterSchema,
 });
 export const RunSummariesSchema = z.array(RunSummarySchema);
+export const SafetyReportSchema = z.strictObject({
+  runId: z.uuid(),
+  generatedAt: z.iso.datetime(),
+  executiveSummary: z.string().min(1).max(2000),
+  findings: z.array(z.strictObject({
+    title: z.string().min(1).max(160),
+    observation: z.string().min(1).max(1000),
+    at: SimTimeSchema.nullable(),
+    zoneId: IdSchema.nullable(),
+    recommendation: z.string().min(1).max(1000),
+  })).max(12),
+  limitations: z.array(z.string().min(1).max(500)).min(1).max(12),
+  disclaimer: z.literal('AI-generated planning observations only; not a certified safety or egress assessment.'),
+});
 export const DensityGridSchema = z.strictObject({ width: PositiveIntegerSchema, height: PositiveIntegerSchema, cellSize: PositiveSchema, origin: Vec2Schema, units: z.enum(['people/m2', 'people/model-unit2']), values: z.array(NonnegativeSchema) }).refine((v) => v.values.length === v.width * v.height, 'Density buffer length must equal width × height');
 export const DepartureRecordSchema = z.strictObject({ agentId: IdSchema, at: SimTimeSchema, travelTime: SimTimeSchema });
 export const ClearanceCohortSchema = z.strictObject({ cohortIds: z.array(IdSchema).min(1).max(20_000), startedAt: SimTimeSchema }).refine((v) => new Set(v.cohortIds).size === v.cohortIds.length, 'Duplicate clearance cohort ID');
@@ -55,6 +69,7 @@ export type QueueMetrics = z.infer<typeof QueueMetricsSchema>;
 export type MetricSample = z.infer<typeof MetricSampleSchema>;
 export type RunAnalytics = z.infer<typeof RunAnalyticsSchema>;
 export type RunSummary = z.infer<typeof RunSummarySchema>;
+export type SafetyReport = z.infer<typeof SafetyReportSchema>;
 export type DensityGrid = z.infer<typeof DensityGridSchema>;
 export type DepartureRecord = z.infer<typeof DepartureRecordSchema>;
 export type MetricsState = z.infer<typeof MetricsStateSchema>;

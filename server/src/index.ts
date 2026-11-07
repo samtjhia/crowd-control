@@ -2,8 +2,9 @@ import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
 import { createAuth0TokenVerifier } from './auth.ts';
-import { getOwnedRuns, getRunAnalytics, initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
+import { getOwnedRuns, getRunAnalytics, getSafetyReportEvidence, initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
+import { createGeminiSafetyReporter } from './safetyReport.ts';
 
 const port = Number(process.env.PORT ?? 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -16,6 +17,10 @@ const verifyAccessToken = createAuth0TokenVerifier(
   process.env.AUTH0_AUDIENCE,
 );
 const plan = createGeminiPlanner({
+  apiKey: process.env.GEMINI_API_KEY,
+  model: process.env.GEMINI_MODEL,
+});
+const generateSafetyReport = createGeminiSafetyReporter({
   apiKey: process.env.GEMINI_API_KEY,
   model: process.env.GEMINI_MODEL,
 });
@@ -186,6 +191,38 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
         : 'UNKNOWN';
       console.error(`Tiger Data analytics query failed (${code}).`);
       sendJson(response, 503, { ok: false, error: 'Could not load analytics from Tiger Data.' });
+    });
+    return;
+  }
+
+  const reportRoute = /^\/api\/runs\/([^/]+)\/report$/.exec(telemetryPath);
+  if (request.method === 'POST' && reportRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const evidence = await getSafetyReportEvidence(database, ownerSub, reportRoute[1]!);
+      if (evidence === 'invalid') {
+        sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' });
+        return;
+      }
+      if (evidence === null) {
+        sendJson(response, 404, { ok: false, error: 'Run was not found.' });
+        return;
+      }
+      const result = await generateSafetyReport({ runId: reportRoute[1]!, ...evidence });
+      if (!result.ok) {
+        sendJson(response, result.status, { ok: false, error: result.error });
+        return;
+      }
+      sendJson(response, 200, { ok: true, report: result.report });
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : 'UNKNOWN';
+      console.error(`Safety report generation failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not generate the safety report.' });
     });
     return;
   }

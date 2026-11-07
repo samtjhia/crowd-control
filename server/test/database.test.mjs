@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   getOwnedRuns,
   getRunAnalytics,
+  getSafetyReportEvidence,
   initializeDatabase,
   saveIntervention,
   saveMetricBatch,
@@ -82,6 +83,54 @@ test('lists only the authenticated owner’s simulations with saved-data counts'
   assert.match(pool.calls[0].text, /WHERE run\.owner_sub = \$1/)
   assert.match(pool.calls[0].text, /ORDER BY run\.started_at DESC/)
   assert.match(pool.calls[0].text, /LIMIT 50/)
+})
+
+test('builds safety-report evidence only for the run owner', async () => {
+  const ownerSub = 'auth0|organizer-1'
+  const runId = '37c6729d-9e21-4c8f-a414-fdbf8c56d66c'
+  const calls = []
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values })
+      if (text.includes('SELECT simulation_id, started_at')) {
+        return { rowCount: 1, rows: [{ simulation_id: 'worked-demo', started_at: new Date('2026-01-01T00:00:00Z') }] }
+      }
+      if (text.includes('SELECT 1 FROM crowd_runs')) {
+        return { rowCount: 1, rows: [{ '?column?': 1 }] }
+      }
+      if (text.includes('COUNT(*)::integer')) return { rowCount: 1, rows: [{ sample_count: 21 }] }
+      if (text.includes('DISTINCT ON (zone_id)')) {
+        return { rowCount: 1, rows: [{ zone_id: 'hall', peak_density: 2.5, at: 12 }] }
+      }
+      if (text.includes('FROM crowd_interventions')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            requestId: 'request-close-door',
+            prompt: 'Close the hall door.',
+            at: 10,
+            comparisons: [],
+          }],
+        }
+      }
+      throw new Error('Unexpected safety report evidence query')
+    },
+  }
+
+  assert.deepEqual(await getSafetyReportEvidence(pool, ownerSub, runId), {
+    simulationId: 'worked-demo',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    sampleCount: 21,
+    peakDensityByZone: [{ zoneId: 'hall', peakDensity: 2.5, at: 12 }],
+    interventions: [{
+      requestId: 'request-close-door',
+      prompt: 'Close the hall door.',
+      at: 10,
+      comparisons: [],
+    }],
+  })
+  assert.deepEqual(calls[0].values, [runId, ownerSub])
+  assert.deepEqual(calls[1].values, [runId, ownerSub])
 })
 
 test('validates and stores run records with their authenticated owner', async () => {

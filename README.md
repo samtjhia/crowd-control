@@ -46,7 +46,12 @@ sides remain unavailable rather than being inferred. Vite proxies `/api`
 requests to the local Node server. Authenticated `GET /api/runs` lists up to 50
 recent runs owned by the signed-in user, with metric and intervention counts;
 the `/history` page displays that list and selected-run analytics without
-replaying simulations.
+replaying simulations. `POST /api/runs/:runId/report` generates a Gemini report
+from that owner’s persisted density peaks and acknowledged interventions. The
+`/planner` flow can generate a report for its active run after the run is saved;
+`/history` can generate or regenerate reports for past runs. Both pages can
+print or save a report as a PDF. Reports state evidence limitations and are
+not certified safety or egress assessments.
 To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
 `GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
 in chat. Set `DATABASE_URL` in the same root `.env` to enable Tiger Data.

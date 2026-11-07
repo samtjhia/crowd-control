@@ -6,6 +6,7 @@ import {
   PlannerReplySchema,
   PlannerRequestSchema,
   RunAnalyticsSchema,
+  SafetyReportSchema,
   SCHEMA_VERSION,
   parseContract,
   parseScenarioPlan,
@@ -19,6 +20,7 @@ import {
   type Operation,
   type PlannerReply,
   type RunAnalytics,
+  type SafetyReport,
   type ScenarioPlan,
   type WorkerCommand,
 } from '@crowd-control/contract'
@@ -154,6 +156,11 @@ function App() {
   const [runAnalytics, setRunAnalytics] = useState<RunAnalytics | null>(null)
   const [analyticsError, setAnalyticsError] = useState('')
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [safetyReport, setSafetyReport] = useState<SafetyReport | null>(null)
+  const [reportError, setReportError] = useState('')
+  const [reportLoading, setReportLoading] = useState(false)
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null)
+  const [runStored, setRunStored] = useState(false)
   const [requesting, setRequesting] = useState(false)
   const [frame, setFrame] = useState<Frame | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -165,6 +172,7 @@ function App() {
   const [recentEvents, setRecentEvents] = useState<EventRecord[]>([])
   const pendingRequests = useRef(new Map<string, { request: CreateFollowupRequest; prompt: string }>())
   const activeRunId = useRef<string | null>(null)
+  const reportRequestId = useRef(0)
   const runStartedAt = useRef<string | null>(null)
   const storedRunId = useRef<string | null>(null)
   const runCreationPending = useRef(false)
@@ -234,7 +242,10 @@ function App() {
         })
         if (!response.ok) throw new Error(`Run save failed with HTTP ${response.status}.`)
         storedRunId.current = runId
-        if (!disposed) setDatabaseStatus('Run saved to Tiger Data. Metrics and applied changes will upload in the background.')
+        if (!disposed) {
+          setRunStored(true)
+          setDatabaseStatus('Run saved to Tiger Data. Metrics and applied changes will upload in the background.')
+        }
         return true
       } catch (error) {
         console.warn('[Tiger Data] Could not save run; queued data will retry.', error)
@@ -584,6 +595,40 @@ function App() {
     }
   }
 
+  async function generateReport() {
+    const runId = activeRunId.current
+    if (!runId) return
+    const requestId = ++reportRequestId.current
+    setReportLoading(true)
+    setReportError('')
+    setSafetyReport(null)
+    try {
+      const response = await authFetch(`/api/runs/${runId}/report`, { method: 'POST' })
+      const payload: unknown = await response.json()
+      if (!response.ok) {
+        const detail = typeof payload === 'object' && payload !== null && 'error' in payload
+          && typeof payload.error === 'string'
+          ? payload.error
+          : `HTTP ${response.status}`
+        throw new Error(detail)
+      }
+      const value = typeof payload === 'object' && payload !== null && 'report' in payload
+        ? payload.report
+        : undefined
+      const parsed = SafetyReportSchema.safeParse(value)
+      if (!parsed.success) throw new Error('The server returned an invalid safety report.')
+      if (requestId === reportRequestId.current && activeRunId.current === runId) {
+        setSafetyReport(parsed.data)
+      }
+    } catch (requestError) {
+      if (requestId === reportRequestId.current) {
+        setReportError(requestError instanceof Error ? requestError.message : 'Could not generate the safety report.')
+      }
+    } finally {
+      if (requestId === reportRequestId.current) setReportLoading(false)
+    }
+  }
+
   function applyFollowup() {
     if (!previewFollowup) return
     const checked = parseContract(
@@ -662,6 +707,12 @@ function App() {
     setLoaded(false)
     const runId = crypto.randomUUID()
     activeRunId.current = runId
+    setCurrentRunId(runId)
+    setRunStored(false)
+    reportRequestId.current += 1
+    setSafetyReport(null)
+    setReportError('')
+    setReportLoading(false)
     setRunAnalytics(null)
     setAnalyticsError('')
     runStartedAt.current = new Date().toISOString()
@@ -1028,6 +1079,62 @@ function App() {
               )}
             </section>
       </section>
+      {currentRunId && (
+        <section className="panel safety-report-card" aria-labelledby="safety-report-heading">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">AI-generated · Gemini</p>
+                  <h3 id="safety-report-heading">Safety planning report</h3>
+                </div>
+                <div className="button-row">
+                  {safetyReport && (
+                    <button type="button" className="secondary-button" onClick={() => window.print()}>
+                      Print / Save as PDF
+                    </button>
+                  )}
+                  <button type="button" onClick={() => void generateReport()} disabled={!currentRunId || !runStored || reportLoading}>
+                    {reportLoading ? 'Generating…' : safetyReport ? 'Regenerate report' : 'Generate report'}
+                  </button>
+                </div>
+              </div>
+              <p className="fine-print">
+                The report uses density peaks and acknowledged interventions currently saved for this run. It is a planning aid, not a certified safety or egress assessment.
+              </p>
+              {!runStored && <p className="muted">The report becomes available when the run has been saved.</p>}
+              {reportError && <p className="error" role="alert">Could not generate the report: {reportError}</p>}
+              {reportLoading && <p className="muted" role="status">Gemini is reviewing the saved run evidence…</p>}
+              {safetyReport && (
+                <article>
+                  <p className="fine-print">Generated {new Date(safetyReport.generatedAt).toLocaleString()}</p>
+                  <h4>Summary</h4>
+                  <p>{safetyReport.executiveSummary}</p>
+                  <h4>Findings and recommendations</h4>
+                  {safetyReport.findings.length ? (
+                    <ol className="report-findings">
+                      {safetyReport.findings.map((finding, index) => (
+                        <li key={`${finding.title}-${index}`}>
+                          <h4>{finding.title}</h4>
+                          <p className="muted">
+                            {finding.zoneId ? `${displayName(finding.zoneId)} · ` : ''}
+                            {finding.at === null ? 'No specific time recorded' : `Simulation time ${finding.at.toFixed(1)} seconds`}
+                          </p>
+                          <p>{finding.observation}</p>
+                          <p><strong>Recommendation:</strong> {finding.recommendation}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="muted">No findings could be drawn from the available saved evidence.</p>
+                  )}
+                  <h4>Limitations</h4>
+                  <ul>
+                    {safetyReport.limitations.map((limitation, index) => <li key={`${index}-${limitation}`}>{limitation}</li>)}
+                  </ul>
+                  <p className="report-disclaimer">{safetyReport.disclaimer}</p>
+                </article>
+              )}
+        </section>
+      )}
 
       <footer>Schema version {SCHEMA_VERSION} · Generated plans are previews until compiler integration is complete.</footer>
     </main>

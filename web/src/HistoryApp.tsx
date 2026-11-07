@@ -3,7 +3,9 @@ import { useAuth0 } from '@auth0/auth0-react'
 import {
   RunAnalyticsSchema,
   RunSummariesSchema,
+  SafetyReportSchema,
   type RunAnalytics,
+  type SafetyReport,
   type RunSummary,
 } from '@crowd-control/contract'
 
@@ -20,11 +22,17 @@ export default function HistoryApp() {
   const [analyticsRun, setAnalyticsRun] = useState<RunSummary | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [analyticsError, setAnalyticsError] = useState('')
+  const [safetyReport, setSafetyReport] = useState<SafetyReport | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState('')
   const analyticsRequestId = useRef(0)
+  const reportRequestId = useRef(0)
 
-  const authFetch = useCallback(async (input: RequestInfo | URL) => {
+  const authFetch = useCallback(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const token = await getAccessTokenSilently()
-    return fetch(input, { headers: { Authorization: `Bearer ${token}` } })
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return fetch(input, { ...init, headers })
   }, [getAccessTokenSilently])
 
   const refreshRuns = useCallback(async () => {
@@ -60,9 +68,13 @@ export default function HistoryApp() {
 
   const viewAnalytics = async (run: RunSummary) => {
     const requestId = ++analyticsRequestId.current
+    reportRequestId.current += 1
     setAnalyticsRun(run)
     setAnalytics(null)
     setAnalyticsError('')
+    setSafetyReport(null)
+    setReportLoading(false)
+    setReportError('')
     setAnalyticsLoading(true)
     try {
       const response = await authFetch(`/api/runs/${run.runId}/analytics`)
@@ -86,6 +98,38 @@ export default function HistoryApp() {
       }
     } finally {
       if (requestId === analyticsRequestId.current) setAnalyticsLoading(false)
+    }
+  }
+
+  const generateReport = async () => {
+    if (!analyticsRun) return
+    const requestId = ++reportRequestId.current
+    const runId = analyticsRun.runId
+    setReportLoading(true)
+    setReportError('')
+    setSafetyReport(null)
+    try {
+      const response = await authFetch(`/api/runs/${analyticsRun.runId}/report`, { method: 'POST' })
+      const payload: unknown = await response.json()
+      if (!response.ok) {
+        const detail = typeof payload === 'object' && payload !== null && 'error' in payload
+          && typeof payload.error === 'string'
+          ? payload.error
+          : `HTTP ${response.status}`
+        throw new Error(detail)
+      }
+      const value = typeof payload === 'object' && payload !== null && 'report' in payload
+        ? payload.report
+        : undefined
+      const parsed = SafetyReportSchema.safeParse(value)
+      if (!parsed.success) throw new Error('The server returned an invalid safety report.')
+      if (requestId === reportRequestId.current && analyticsRun?.runId === runId) setSafetyReport(parsed.data)
+    } catch (error) {
+      if (requestId === reportRequestId.current) {
+        setReportError(error instanceof Error ? error.message : 'Could not generate the safety report.')
+      }
+    } finally {
+      if (requestId === reportRequestId.current) setReportLoading(false)
     }
   }
 
@@ -204,6 +248,63 @@ export default function HistoryApp() {
               <p className="muted">No acknowledged interventions were saved for this run.</p>
             )}
           </>
+        )}
+      </section>
+
+      <section className="panel safety-report-card" aria-labelledby="safety-report-heading">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">AI-generated · Gemini</p>
+            <h2 id="safety-report-heading">Safety planning report</h2>
+          </div>
+          <div className="button-row">
+            {safetyReport && (
+              <button type="button" className="secondary-button" onClick={() => window.print()}>
+                Print / Save as PDF
+              </button>
+            )}
+            <button type="button" onClick={() => void generateReport()} disabled={!analyticsRun || reportLoading}>
+              {reportLoading ? 'Generating…' : safetyReport ? 'Regenerate report' : 'Generate report'}
+            </button>
+          </div>
+        </div>
+        <p className="fine-print">
+          The report uses saved density peaks and acknowledged interventions for the selected run. It is a planning aid, not a certified safety or egress assessment.
+        </p>
+        {!analyticsRun && <p className="muted">Select a saved simulation above before generating its report.</p>}
+        {reportError && <p className="error" role="alert">Could not generate the report: {reportError}</p>}
+        {reportLoading && <p className="muted" role="status">Gemini is reviewing the saved run evidence…</p>}
+        {safetyReport && (
+          <article>
+            <p className="fine-print">
+              {analyticsRun ? displayName(analyticsRun.simulationId) : 'Saved simulation'} · Generated {new Date(safetyReport.generatedAt).toLocaleString()}
+            </p>
+            <h3>Summary</h3>
+            <p>{safetyReport.executiveSummary}</p>
+            <h3>Findings and recommendations</h3>
+            {safetyReport.findings.length ? (
+              <ol className="report-findings">
+                {safetyReport.findings.map((finding, index) => (
+                  <li key={`${finding.title}-${index}`}>
+                    <h4>{finding.title}</h4>
+                    <p className="muted">
+                      {finding.zoneId ? `${displayName(finding.zoneId)} · ` : ''}
+                      {finding.at === null ? 'No specific time recorded' : `Simulation time ${finding.at.toFixed(1)} seconds`}
+                    </p>
+                    <p>{finding.observation}</p>
+                    <p><strong>Recommendation:</strong> {finding.recommendation}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="muted">No findings could be drawn from the available saved evidence.</p>
+            )}
+            <h3>Limitations</h3>
+            <ul>
+              {safetyReport.limitations.map((limitation, index) => <li key={`${index}-${limitation}`}>{limitation}</li>)}
+            </ul>
+            <p className="report-disclaimer">{safetyReport.disclaimer}</p>
+          </article>
         )}
       </section>
     </main>

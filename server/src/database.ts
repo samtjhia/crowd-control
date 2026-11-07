@@ -77,6 +77,36 @@ export async function getOwnedRuns(pool: Pool, ownerSub: string): Promise<RunSum
   })))
 }
 
+export async function getSafetyReportEvidence(
+  pool: Pool,
+  ownerSub: string,
+  runId: string,
+): Promise<'invalid' | null | {
+  simulationId: string
+  startedAt: string
+  sampleCount: number
+  peakDensityByZone: RunAnalytics['peakDensityByZone']
+  interventions: RunAnalytics['interventions']
+}> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+  const run = await pool.query<{ simulation_id: string; started_at: Date | string }>(
+    'SELECT simulation_id, started_at FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2',
+    [runId, ownerSub],
+  )
+  if (run.rowCount === 0) return null
+
+  const analytics = await getRunAnalytics(pool, ownerSub, runId)
+  if (analytics === 'invalid' || analytics === null) return null
+  const startedAt = run.rows[0]!.started_at
+  return {
+    simulationId: run.rows[0]!.simulation_id,
+    startedAt: startedAt instanceof Date ? startedAt.toISOString() : startedAt,
+    sampleCount: analytics.sampleCount,
+    peakDensityByZone: analytics.peakDensityByZone,
+    interventions: analytics.interventions,
+  }
+}
+
 export async function getRunAnalytics(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | null | RunAnalytics> {
   if (!z.uuid().safeParse(runId).success) return 'invalid'
 

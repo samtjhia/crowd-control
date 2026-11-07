@@ -93,6 +93,10 @@ form button { justify-self: start; }
   padding: 0.9rem 0;
 }
 .past-runs-list .fine-print { margin-top: 0.25rem; }
+.report-findings > li + li { margin-top: 1rem; }
+.report-findings h4 { margin: 0.5rem 0; }
+.report-findings p { line-height: 1.5; }
+.report-disclaimer { border-top: 1px solid #e4e7ec; font-size: 0.9rem; font-weight: 700; margin-top: 1.5rem; padding-top: 1rem; }
 .history-list { line-height: 1.5; }
 .history-entry + .history-entry { margin-top: 0.85rem; }
 .history-entry > .eyebrow { margin: 0.2rem 0 0.25rem; }
@@ -143,6 +147,14 @@ footer { padding: 0.75rem 0; }
 @media (max-width: 480px) {
   .app-shell { padding-top: 2rem; }
   .panel-heading { align-items: flex-start; flex-direction: column; }
+}
+
+@media print {
+  body { background: white; }
+  .auth-header, .app-shell > :not(.safety-report-card), .safety-report-card > .panel-heading button,
+  .safety-report-card > .fine-print:first-of-type { display: none !important; }
+  .app-shell { margin: 0; max-width: none; padding: 0; width: 100%; }
+  .safety-report-card { border: 0; box-shadow: none; margin: 0; padding: 0; }
 }
 
 .simulation-view { margin-top: 1.5rem; overflow: auto; }
