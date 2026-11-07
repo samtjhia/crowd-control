@@ -1,0 +1,220 @@
+.sim {
+  --sim-bg: #f8fafc;
+  --sim-surface: #ffffff;
+  --sim-border: #cbd5e1;
+  --sim-text: #0f172a;
+  --sim-muted: #475569;
+  --sim-accent: #2563eb;
+  --sim-warn-bg: #fef3c7;
+  --sim-warn-text: #78350f;
+  --sim-error: #b91c1c;
+
+  min-height: 100vh;
+  background: var(--sim-bg);
+  color: var(--sim-text);
+  font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  text-align: left;
+}
+
+.sim-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--sim-border);
+  background: var(--sim-surface);
+}
+
+.sim-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.sim-header h1 span {
+  color: var(--sim-muted);
+  font-weight: 450;
+}
+
+.sim-mock {
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--sim-warn-bg);
+  color: var(--sim-warn-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sim-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: calc(100vh - 57px);
+}
+
+.sim-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* Override the landing page's global `main` sizing and centring. */
+  max-width: none;
+  margin: 0;
+  padding: 16px 20px;
+  min-width: 0;
+}
+
+.sim-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-controls button,
+.sim-controls select {
+  font: inherit;
+  color: var(--sim-text);
+  background: var(--sim-surface);
+  border: 1px solid var(--sim-border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.sim-controls button[aria-pressed='true'] {
+  background: var(--sim-accent);
+  border-color: var(--sim-accent);
+  color: #ffffff;
+}
+
+.sim-controls button:disabled,
+.sim-controls select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sim-controls :focus-visible {
+  outline: 2px solid var(--sim-accent);
+  outline-offset: 2px;
+}
+
+.sim-controls kbd {
+  margin-left: 4px;
+  font-size: 11px;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.sim-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sim-zoom {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.sim-clock {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sim-clock small {
+  color: var(--sim-muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.sim-canvas {
+  overflow: hidden;
+  min-height: 120px;
+}
+
+.sim-canvas canvas {
+  display: block;
+  border: 1px solid var(--sim-border);
+  border-radius: 4px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.sim-canvas canvas:active {
+  cursor: grabbing;
+}
+
+.sim-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  align-items: flex-start;
+}
+
+.sim-status dl {
+  display: flex;
+  gap: 24px;
+  margin: 0;
+}
+
+.sim-status dt {
+  color: var(--sim-muted);
+  font-size: 12px;
+}
+
+.sim-status dd {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--sim-muted);
+}
+
+.sim-events time {
+  font-variant-numeric: tabular-nums;
+  color: var(--sim-text);
+}
+
+.sim-error {
+  margin: 0;
+  color: var(--sim-error);
+  font-weight: 600;
+}
+
+.sim-legend {
+  font-size: 12px;
+  color: var(--sim-muted);
+}
+
+.sim-legend ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.sim-chat {
+  border-left: 1px solid var(--sim-border);
+  background: var(--sim-surface);
+  padding: 16px;
+  color: var(--sim-muted);
+}
+
+@media (max-width: 860px) {
+  .sim-body {
+    grid-template-columns: 1fr;
+  }
+
+  .sim-chat {
+    border-left: 0;
+    border-top: 1px solid var(--sim-border);
+  }
+}
