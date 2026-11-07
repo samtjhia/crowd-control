@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { CompiledGoal, CompiledScene, Operation, Result, ScenarioPlan } from '@crowd-control/contract'
+import type { CompiledScene, Operation, Result, ScenarioPlan } from '@crowd-control/contract'
 import { chainLayout, designPopulation } from '../layout/chain.ts'
 import { resolveProfiles } from '../profiles/catalog.ts'
 import { placeInitialAgents } from '../spawn/lattice.ts'
-import { fixture, workedExample } from '../testing.ts'
+import { fixture, inline, workedExample } from '../testing.ts'
 import { compileBehaviour, type Behaviour } from './compile.ts'
 import { ControllerTable } from './controllers.ts'
 
@@ -23,16 +23,6 @@ function behaviour(edit: (plan: ScenarioPlan) => void = () => {}): Result<Behavi
   const profiles = value(resolveProfiles(plan, model))
   const agents = value(placeInitialAgents(plan.initialOperations, rooms, profiles, model))
   return compileBehaviour(plan, { rooms, portals, agents })
-}
-
-/** Replaces controller names with the goals they stand for, so tests compare structure, not names. */
-function inline(scene: Pick<CompiledScene, 'agents' | 'jobs' | 'rules' | 'controllers'>) {
-  const goal = (name: string | undefined): CompiledGoal | undefined => (name === undefined ? undefined : scene.controllers[name])
-  return {
-    agents: scene.agents.map(({ controller, ...agent }) => ({ ...agent, goal: goal(controller) })),
-    jobs: scene.jobs.map((job) => ({ ...job, operations: job.operations.map((op) => ('controller' in op ? (({ controller, ...rest }) => ({ ...rest, goal: goal(controller) }))(op) : op)) })),
-    rules: scene.rules.map((rule) => ('controller' in rule ? (({ controller, ...rest }) => ({ ...rest, goal: goal(controller) }))(rule) : rule)),
-  }
 }
 
 const spawn = (count: number, tags: string[], room = 'hall'): Operation => ({ op: 'spawn', template: { kind: 'agent', tags }, count, placement: { inside: { ids: [room] } } })

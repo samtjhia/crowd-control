@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import type { Capabilities, CompileInput, CompileOutput, Limits, ScenarioPlan } from '@crowd-control/contract'
+import type { Capabilities, CompiledGoal, CompiledScene, CompileInput, CompileOutput, Limits, ScenarioPlan } from '@crowd-control/contract'
 
 /** Test helpers only; not exported from the package. */
 export const fixture = <T>(name: string) =>
@@ -28,5 +28,15 @@ export function workedExample(): CompileInput {
     model: fixture<CompileOutput>('compile-output').resolvedModel,
     capabilities,
     limits,
+  }
+}
+
+/** Replaces controller names with the goals they stand for, so tests compare structure, not names. */
+export function inline(scene: Pick<CompiledScene, 'agents' | 'jobs' | 'rules' | 'controllers'>) {
+  const goal = (name: string | undefined): CompiledGoal | undefined => (name === undefined ? undefined : scene.controllers[name])
+  return {
+    agents: scene.agents.map(({ controller, ...agent }) => ({ ...agent, goal: goal(controller) })),
+    jobs: scene.jobs.map((job) => ({ ...job, operations: job.operations.map((op) => ('controller' in op ? (({ controller, ...rest }) => ({ ...rest, goal: goal(controller) }))(op) : op)) })),
+    rules: scene.rules.map((rule) => ('controller' in rule ? (({ controller, ...rest }) => ({ ...rest, goal: goal(controller) }))(rule) : rule)),
   }
 }

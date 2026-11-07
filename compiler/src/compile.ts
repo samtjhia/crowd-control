@@ -4,6 +4,7 @@ import { chainLayout, designPopulation } from './layout/chain.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
 import { resolveProfiles } from './profiles/catalog.ts'
 import { fail } from './result.ts'
+import { finish } from './scene/finish.ts'
 import { placeInitialAgents } from './spawn/lattice.ts'
 
 /**
@@ -32,7 +33,7 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
-/** Generated chain layouts (§8). Everything is compiled; assembling and self-validating the scene is step 6. */
+/** Generated chain layouts (§8). Map rows/legend, starting crowd, controllers, jobs and rules. */
 function compileGenerated(input: CompileInput): Result<CompileOutput> {
   const { layout } = input.plan
   if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
@@ -51,7 +52,11 @@ function compileGenerated(input: CompileInput): Result<CompileOutput> {
   if (!agents.ok) return agents
   const behaviour = compileBehaviour(input.plan, { rooms, portals, agents: agents.value })
   if (!behaviour.ok) return behaviour
-  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are compiled but the scene is not assembled yet', { path: 'plan.layout' })
+  const map = {
+    units: input.model.units, cellSize, width: worldWidth, height: worldHeight, rooms, portals,
+    rows: grid.value.rows, legend: grid.value.legend, source: { mode: 'generate' as const, accuracy: 'approximate' as const },
+  }
+  return finish(input, map, profiles.value, behaviour.value)
 }
 
 /** Prepared venue lookup: built in step 8. */
