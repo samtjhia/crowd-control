@@ -6,6 +6,8 @@ HackTrent 2026 browser crowd-simulation project. Users describe venues and scena
 
 Audience: hackathon judges, non-expert event organizers, and curious visitors. Explain crowd simulation quickly and make the natural-language approach approachable across skill levels.
 
+Approved headline: “Ask ‘what if?’ Before it becomes ‘what now?’” Emphasize planning ahead, exploring risks, and prevention.
+
 Approved direction: a white/off-white page with green as the main accent, blue and rose as supporting colors, a full-viewport angular pastel SVG campus opening with a centered headline above the Crowd Control/demo bar and people walking only on paved paths, a scrolling story about accessible planning, and clickable scenario choices. The crowd visually travels from the campus through the narrative and falls into the scenario area. Replace the prior dark blueprint and sequential staggered-departure experiment.
 
 Four scenarios come from the Product PRD:

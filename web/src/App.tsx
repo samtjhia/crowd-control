@@ -24,7 +24,7 @@ function App() {
       <section className="hero" id="top" aria-labelledby="hero-title">
         <header className="navigation"><Brand /><a className="button button-green nav-cta" href="#scenarios">Explore the demo <Icon name="diagonal" size={16} /></a></header>
         <SkyCorners />
-        <div className="hero-copy"><h1 id="hero-title">Every crowd has a story.<br /><span>Explore what happens next.</span></h1></div>
+        <div className="hero-copy"><h1 id="hero-title">Ask “what if?”<br /><span>Before it becomes “what now?”</span></h1></div>
         <div className="campus-scene"><CampusScene /><CampusCrowd reduced={reduced} playing /></div>
 
       </section>
