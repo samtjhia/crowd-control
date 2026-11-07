@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "demo",
+  "type": "ack",
+  "commandId": "command-17",
+  "stamp": {
+    "streamId": "stream-1",
+    "tick": 120,
+    "time": 12,
+    "topologyVersion": 1,
+    "sceneVersion": 1,
+    "historyRevision": 1
+  },
+  "applied": {
+    "requestId": "close-east-1",
+    "interventionId": "door-hold",
+    "revision": 1,
+    "at": 12,
+    "historyRevision": 1
+  }
+}

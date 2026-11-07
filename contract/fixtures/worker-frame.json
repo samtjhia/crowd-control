@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "demo",
+  "type": "frame",
+  "frame": {
+    "streamId": "stream-1",
+    "tick": 120,
+    "time": 12,
+    "topologyVersion": 1,
+    "sceneVersion": 1,
+    "historyRevision": 1,
+    "agents": [
+      {
+        "id": "a1",
+        "x": 1.5,
+        "y": 1.5,
+        "profile": "person",
+        "controller": "leave",
+        "state": "blocked"
+      }
+    ]
+  }
+}

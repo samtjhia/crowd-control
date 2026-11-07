@@ -1,0 +1,78 @@
+{
+  "id": "a1",
+  "kind": "agent",
+  "tags": [
+    "attendee"
+  ],
+  "profile": "person",
+  "components": {
+    "physical": {
+      "radius": 0.5,
+      "blocksMovement": true,
+      "movable": true
+    },
+    "navigation": {
+      "preferredSpeed": 1,
+      "maximumSpeed": 1.5,
+      "acceleration": 2,
+      "personalSpace": 1
+    },
+    "behavior": {
+      "reactionDelay": 0,
+      "routeCompliance": 1,
+      "avoidanceStrength": 1,
+      "groupCohesion": 0,
+      "goalPersistence": 1
+    },
+    "mobility": {
+      "speedMultiplier": 1
+    }
+  },
+  "sensors": null,
+  "state": "moving",
+  "stateReason": null,
+  "position": {
+    "x": 1.5,
+    "y": 1.5
+  },
+  "velocity": {
+    "x": 0,
+    "y": 0
+  },
+  "zoneId": "hall",
+  "controller": "mingle",
+  "currentGoal": {
+    "id": "g-wander-a1",
+    "spec": {
+      "kind": "wander",
+      "insideZone": "hall"
+    },
+    "status": "active",
+    "cursor": [],
+    "startedAt": 0,
+    "failure": null
+  },
+  "goalQueue": [],
+  "navigation": {
+    "targetEntityId": "hall",
+    "targetPoint": {
+      "x": 4.5,
+      "y": 2.5
+    },
+    "flowFieldId": null,
+    "mapVersion": 0
+  },
+  "timers": {
+    "reactionRemaining": 0,
+    "waitRemaining": 0,
+    "wanderRefreshRemaining": null
+  },
+  "queueRef": null,
+  "interactionRef": null,
+  "randomState": 1083814273,
+  "departedAt": null,
+  "appearance": {
+    "symbol": "triangle",
+    "fill": "#2563EB"
+  }
+}

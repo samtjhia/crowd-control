@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "worked-demo",
+  "requestId": "extend-door-hold",
+  "action": "edit_intervention",
+  "interventionId": "door-hold",
+  "expectedRevision": 1,
+  "replacement": {
+    "label": "Hold hall door for ten seconds",
+    "at": 12,
+    "operations": [
+      {
+        "op": "set",
+        "targets": {
+          "ids": [
+            "hall_door"
+          ]
+        },
+        "values": {
+          "components": {
+            "portal": {
+              "open": false
+            }
+          }
+        }
+      },
+      {
+        "op": "schedule",
+        "id": "reopen-door",
+        "after": 10,
+        "operations": [
+          {
+            "op": "set",
+            "targets": {
+              "ids": [
+                "hall_door"
+              ]
+            },
+            "values": {
+              "components": {
+                "portal": {
+                  "open": true
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

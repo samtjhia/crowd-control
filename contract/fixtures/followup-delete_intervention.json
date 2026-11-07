@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "worked-demo",
+  "requestId": "undo-door-hold",
+  "action": "delete_intervention",
+  "interventionId": "door-hold",
+  "expectedRevision": 2
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "worked-demo",
+  "requestId": "pause-door",
+  "operations": [
+    {
+      "op": "set",
+      "targets": {
+        "ids": [
+          "hall_door"
+        ]
+      },
+      "values": {
+        "components": {
+          "portal": {
+            "open": false
+          }
+        }
+      }
+    },
+    {
+      "op": "schedule",
+      "id": "reopen-door",
+      "after": 5,
+      "operations": [
+        {
+          "op": "set",
+          "targets": {
+            "ids": [
+              "hall_door"
+            ]
+          },
+          "values": {
+            "components": {
+              "portal": {
+                "open": true
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

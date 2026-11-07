@@ -6,7 +6,7 @@ An npm workspace for the TypeScript app and a Cargo workspace for the Rust engin
 Use Node 24+, npm 10+, and Rust with edition 2024 support.
 
 ```text
-contract/   Shared schemas/types and JSON fixtures — C leads, everyone reviews
+contract/   Strict Zod schemas, shared types and JSON fixtures — C leads, everyone reviews
 compiler/   Layout generation, maps, rasterization, placement — B
 engine/     Rust library; future simulation core and Wasm bridge — A
 history/    Intervention revisions and replay planning — C
@@ -47,6 +47,9 @@ npm test
 ```
 
 `check` runs TypeScript checks, Rust formatting and Cargo checking. `build`
-builds all npm workspaces and the native Rust library. `test` runs Cargo's test
-harness; simulation tests have not been written yet. Commit both package-lock.json
-and Cargo.lock.
+builds all npm workspaces and the native Rust library. `test` runs the shared
+contract tests and Cargo's test harness. Simulation physics/replay tests remain
+pending. Commit both package-lock.json and Cargo.lock.
+
+See [contract/README.md](contract/README.md) for contract imports, validation
+boundaries and remaining engine/adapter work.

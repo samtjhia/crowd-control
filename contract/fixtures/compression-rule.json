@@ -1,0 +1,33 @@
+{
+  "op": "define_rule",
+  "id": "fall-under-sustained-contact",
+  "when": {
+    "kind": "entity_metric",
+    "targets": {
+      "kind": "agent"
+    },
+    "metric": "contactLoadRatio",
+    "comparison": "gte",
+    "value": 1,
+    "for": 1
+  },
+  "once": true,
+  "operations": [
+    {
+      "op": "set",
+      "targets": {
+        "binding": "subject"
+      },
+      "values": {
+        "components": {
+          "mobility": {
+            "speedMultiplier": 0
+          }
+        },
+        "appearance": {
+          "pose": "fallen"
+        }
+      }
+    }
+  ]
+}
