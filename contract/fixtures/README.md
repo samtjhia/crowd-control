@@ -17,6 +17,11 @@ development: two initial attendees, one future arrival, and an alarm-driven exit
 It has no contact model. Its model parameters are illustrative, not calibrated.
 
 `engine-static-load.json` removes controllers, controller references, jobs and
-rules from engine-load.json. It is the supported part-one input. Native Rust
-integration tests validate its output with the shared worker schemas. This does
-not establish browser/Wasm acceptance, which needs the installed Rust target.
+rules from engine-load.json. It is supported by parts one/two. Native and actual
+Wasm integration tests validate its output with the shared worker schemas; browser
+rendering is a separate acceptance check.
+
+`engine-grid-load.json` represents the same initialized scene using GridData.
+Part-two tests compare its normalized grid with the rows/legend fixture, validate
+full runtime snapshots, check native/Wasm parity and test fixed-clock pacing.
+The actual Wasm checks now pass; browser rendering remains unverified.

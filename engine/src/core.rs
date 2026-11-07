@@ -1,21 +1,21 @@
-use crate::protocol::*;
+use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
 
-pub const ENGINE_VERSION: &str = "static-engine-v1";
+pub const ENGINE_VERSION: &str = "world-engine-v2";
 pub const ABI_VERSION: u32 = 1;
+pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct Engine {
-    loaded: Option<(Compiled, Value)>,
+    loaded: Option<World>,
     stream: u64,
 }
-type Failure = (&'static str, String);
-fn invalid(message: impl Into<String>) -> Failure {
+pub(crate) type Failure = (&'static str, String);
+pub(crate) fn invalid(message: impl Into<String>) -> Failure {
     ("INVALID_SCHEMA", message.into())
 }
-fn unsupported(message: impl Into<String>) -> Failure {
+pub(crate) fn unsupported(message: impl Into<String>) -> Failure {
     ("UNSUPPORTED_CAPABILITY", message.into())
 }
 
@@ -54,13 +54,18 @@ impl Engine {
     }
 
     fn handle(&mut self, raw: &Value) -> Result<Vec<Value>, Failure> {
-        preflight(raw).map_err(invalid)?;
-        let command: Command =
-            serde_json::from_value(raw.clone()).map_err(|e| invalid(e.to_string()))?;
-        if command.schema_version.0 != 1.0 {
+        preflight(raw).map_err(|message| {
+            if message == "JSON resource budget exceeded" {
+                ("RESOURCE_LIMIT", message.into())
+            } else {
+                invalid(message)
+            }
+        })?;
+        let c: Command = serde_json::from_value(raw.clone()).map_err(|e| invalid(e.to_string()))?;
+        if c.schema_version.0 != 1.0 {
             return Err(invalid("Unsupported schema version"));
         }
-        let allowed: &[&str] = match command.r#type.as_str() {
+        let allowed: &[&str] = match c.r#type.as_str() {
             "load" => &["compiled", "history"],
             "pause" | "reset" | "resume" => &[],
             "step" => &["ticks"],
@@ -81,238 +86,108 @@ impl Engine {
         if allowed.iter().any(|key| raw.get(key).is_none()) {
             return Err(invalid("Missing command field"));
         }
-        if command.r#type == "step" && command.ticks.is_some_and(|t| t.0 == 0.0) {
-            return Err(invalid("Step ticks must be positive"));
-        }
-        if command.r#type == "load" {
-            let compiled = command
-                .compiled
-                .ok_or_else(|| invalid("Missing compiled"))?;
-            let history = command.history.ok_or_else(|| invalid("Missing history"))?;
-            validate(&compiled, &command.simulation_id)?;
+        if c.r#type == "load" {
+            let compiled = c.compiled.ok_or_else(|| invalid("Missing compiled"))?;
+            let history = c.history.ok_or_else(|| invalid("Missing history"))?;
             if history.history_revision.0 != 0.0
                 || !history.records.is_empty()
                 || !history.outcomes.is_empty()
             {
-                return Err(unsupported("Part one only accepts empty initial history"));
+                return Err(unsupported("Only empty initial history is supported"));
             }
-            self.stream = self
-                .stream
-                .checked_add(1)
-                .ok_or_else(|| invalid("Stream counter exhausted"))?;
-            self.loaded = Some((compiled, raw["compiled"]["scene"]["map"].clone()));
-            return Ok(self.publication(&command.command_id));
+            let world = World::load(compiled, &c.simulation_id)?;
+            let stream = self.next_stream()?;
+            self.loaded = Some(world);
+            self.stream = stream;
+            return Ok(self.publication(&c.command_id, true));
         }
-        let (compiled, _) = self
+        let world = self
             .loaded
             .as_ref()
             .ok_or_else(|| ("NOT_FOUND", "No simulation loaded".into()))?;
-        if command.simulation_id != compiled.scene.simulation_id {
+        if c.simulation_id != world.initial.scene.simulation_id {
             return Err(invalid("Simulation ID mismatch"));
         }
-        match command.r#type.as_str() {
+        match c.r#type.as_str() {
             "reset" => {
-                self.stream = self
-                    .stream
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("Stream counter exhausted"))?;
-                Ok(self.publication(&command.command_id))
+                let world = World::load(world.initial.clone(), &c.simulation_id)?;
+                let stream = self.next_stream()?;
+                self.loaded = Some(world);
+                self.stream = stream;
+                Ok(self.publication(&c.command_id, true))
             }
-            "pause" => Ok(vec![self.ack(&command.command_id)]),
+            "pause" | "resume" | "speed" => Ok(vec![self.ack(&c.command_id)]),
+            "step" => {
+                let ticks = c.ticks.unwrap().0 as u64;
+                if ticks == 0 {
+                    return Err(invalid("Step ticks must be positive"));
+                }
+                self.advance(ticks)?;
+                Ok(self.publication(&c.command_id, false))
+            }
+            "run_to" => {
+                let requested = c.time.unwrap().0;
+                let dt = world.initial.scene.model.dt.0;
+                let quotient = (requested / dt).ceil();
+                if !quotient.is_finite() || quotient > 9_007_199_254_740_991.0 {
+                    return Err(("RESOURCE_LIMIT", "Requested time exceeds tick range".into()));
+                }
+                let mut target = quotient as u64;
+                if target > 0 && (target - 1) as f64 * dt >= requested {
+                    target -= 1;
+                }
+                if (target as f64) * dt < requested {
+                    target = target
+                        .checked_add(1)
+                        .ok_or_else(|| invalid("Requested tick overflow"))?;
+                }
+                if target < world.tick {
+                    return Err(invalid("run_to cannot go backward without a valid restore"));
+                }
+                self.advance(target - world.tick)?;
+                Ok(self.publication(&c.command_id, false))
+            }
+            "snapshot" => Ok(vec![
+                json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"snapshot","commandId":c.command_id,"snapshot":world.snapshot(c.snapshot_id.as_ref().unwrap())}),
+                self.ack(&c.command_id),
+            ]),
             _ => Err(unsupported(format!(
-                "{} is not implemented in part one",
-                command.r#type
+                "{} is not enabled in part two",
+                c.r#type
             ))),
         }
     }
-
+    fn next_stream(&self) -> Result<u64, Failure> {
+        self.stream
+            .checked_add(1)
+            .ok_or_else(|| invalid("Stream counter exhausted"))
+    }
+    fn advance(&mut self, ticks: u64) -> Result<(), Failure> {
+        if ticks > MAX_TICKS_PER_COMMAND {
+            return Err((
+                "RESOURCE_LIMIT",
+                format!("Tick batch exceeds {MAX_TICKS_PER_COMMAND}"),
+            ));
+        }
+        self.loaded.as_mut().unwrap().advance(ticks)
+    }
     fn stamp(&self) -> Value {
-        json!({"streamId":format!("rust-stream-{}",self.stream),"tick":0,"time":0,"topologyVersion":0,"sceneVersion":1,"historyRevision":0})
+        let world = self.loaded.as_ref().unwrap();
+        json!({"streamId":format!("rust-stream-{}",self.stream),"tick":world.tick,"time":world.time(),"topologyVersion":0,"sceneVersion":1,"historyRevision":0})
     }
-    fn ack(&self, command_id: &Id) -> Value {
-        json!({"schemaVersion":1,"simulationId":self.loaded.as_ref().unwrap().0.scene.simulation_id,"type":"ack","commandId":command_id,"stamp":self.stamp()})
+    fn ack(&self, id: &Id) -> Value {
+        json!({"schemaVersion":1,"simulationId":self.loaded.as_ref().unwrap().initial.scene.simulation_id,"type":"ack","commandId":id,"stamp":self.stamp()})
     }
-    fn publication(&self, command_id: &Id) -> Vec<Value> {
-        let (compiled, map) = self.loaded.as_ref().unwrap();
-        let scene = &compiled.scene;
-        let metadata: Vec<Value> = scene
-            .agents
-            .iter()
-            .map(|a| {
-                let profile = &scene.profiles[&a.profile];
-                let radius = a
-                    .components
-                    .as_ref()
-                    .and_then(|c| c.physical.as_ref())
-                    .and_then(|p| p.radius)
-                    .unwrap_or(profile.radius)
-                    .0;
-                let mut appearance = json!({"symbol":"circle","fill":"#2563EB","opacity":1});
-                for layer in [&profile.appearance, &a.appearance].into_iter().flatten() {
-                    for (k, v) in serde_json::to_value(layer).unwrap().as_object().unwrap() {
-                        if !v.is_null() {
-                            appearance[k] = v.clone();
-                        }
-                    }
-                }
-                let mut item = json!({"id":a.id,"radius":radius,"appearance":appearance});
-                if let Some(label) = &a.label {
-                    item["label"] = json!(label);
-                }
-                item
-            })
-            .collect();
-        let agents: Vec<Value> = scene.agents.iter().map(|a| {
-            let speed = a.components.as_ref().and_then(|c|c.mobility.as_ref()).and_then(|m|m.speed_multiplier).or_else(||scene.profiles[&a.profile].mobility.as_ref().and_then(|m|m.speed_multiplier)).unwrap_or(compiled.resolved_model.default_agent.mobility.speed_multiplier).0;
-            json!({"id":a.id,"x":a.x,"y":a.y,"profile":a.profile,"controller":null,"state":if speed==0.0 {"immobile"} else {"idle"}})
-        }).collect();
+    fn publication(&self, id: &Id, scene: bool) -> Vec<Value> {
+        let world = self.loaded.as_ref().unwrap();
+        let simulation = &world.initial.scene.simulation_id;
+        let mut out = vec![self.ack(id)];
+        if scene {
+            out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"scene","stamp":self.stamp(),"scene":world.render_scene()}));
+        }
         let mut frame = self.stamp();
-        frame["agents"] = json!(agents);
-        vec![
-            self.ack(command_id),
-            json!({"schemaVersion":1,"simulationId":scene.simulation_id,"type":"scene","stamp":self.stamp(),"scene":{"map":map,"entities":[],"agents":metadata}}),
-            json!({"schemaVersion":1,"simulationId":scene.simulation_id,"type":"frame","frame":frame}),
-        ]
-    }
-}
-
-fn validate(c: &Compiled, simulation_id: &Id) -> Result<(), Failure> {
-    let s = &c.scene;
-    let m = &s.map;
-    let model = &c.resolved_model;
-    if s.schema_version.0 != 1.0 || &s.simulation_id != simulation_id || s.seed.0 > u32::MAX as f64
-    {
-        return Err(invalid("Invalid scene header or seed"));
-    }
-    if s.versions.model != model.version
-        || s.model.units != model.units
-        || m.units != model.units
-        || s.model.dt.0 != model.dt.0
-    {
-        return Err(invalid("Model version, units or timestep mismatch"));
-    }
-    if s.versions.random.0 != "lcg32-v1"
-        || s.versions
-            .engine
-            .as_ref()
-            .is_some_and(|v| v.0 != ENGINE_VERSION)
-    {
-        return Err(unsupported("Unsupported random or engine version"));
-    }
-    if !s.controllers.is_empty()
-        || !s.jobs.is_empty()
-        || !s.rules.is_empty()
-        || s.agents.iter().any(|a| a.controller.is_some())
-        || model.contact.is_some()
-    {
-        return Err(unsupported(
-            "Static scenes only: goals, jobs, rules and contact physics are not implemented",
-        ));
-    }
-    if m.grid.is_some() || m.entities.as_ref().is_some_and(|e| !e.is_empty()) {
-        return Err(unsupported(
-            "Part one supports rectangular rooms/portals with rows/legend",
-        ));
-    }
-    if let Some(source) = &m.source {
-        if source != &json!({"mode":"generate","accuracy":"approximate"}) {
-            return Err(unsupported("Part one supports generated example maps only"));
-        }
-    }
-    let cols = m.width.0 / m.cell_size.0;
-    let height = m.height.0 / m.cell_size.0;
-    if cols.fract() != 0.0
-        || height.fract() != 0.0
-        || cols * height > 1_000_000.0
-        || s.agents.len() > 2000
-    {
-        return Err(("RESOURCE_LIMIT", "Map or agent budget exceeded".into()));
-    }
-    let rows = m.rows.as_ref().ok_or_else(|| invalid("Missing rows"))?;
-    let legend = m.legend.as_ref().ok_or_else(|| invalid("Missing legend"))?;
-    if rows.len() != height as usize
-        || rows.iter().any(|r| r.chars().count() != cols as usize)
-        || legend.keys().any(|k| k.chars().count() != 1)
-    {
-        return Err(invalid("Invalid row dimensions or legend keys"));
-    }
-    let mut ids = BTreeSet::new();
-    let mut zones = BTreeSet::new();
-    for room in &m.rooms {
-        if !ids.insert(&room.id) {
-            return Err(invalid("Duplicate map ID"));
-        }
-        zones.insert(&room.id);
-        bounds(room.x.0, room.y.0, room.width.0, room.height.0, m)?;
-    }
-    for p in &m.portals {
-        if !ids.insert(&p.id)
-            || p.connects[0] == p.connects[1]
-            || p.connects.iter().any(|id| !zones.contains(id))
-        {
-            return Err(invalid("Duplicate portal or invalid connections"));
-        }
-        bounds(p.x.0, p.y.0, p.width.0, p.height.0, m)?;
-    }
-    if legend.values().any(|id| !ids.contains(id))
-        || rows
-            .iter()
-            .flat_map(|r| r.chars())
-            .any(|ch| ch != '#' && !legend.contains_key(&ch.to_string()))
-    {
-        return Err(invalid("Unknown legend glyph or ID"));
-    }
-    let base = &model.default_agent.navigation;
-    if base.maximum_speed.0 < base.preferred_speed.0 {
-        return Err(invalid("Invalid default speed range"));
-    }
-    for p in s.profiles.values() {
-        if p.maximum_speed.is_some_and(|v| v.0 < p.preferred_speed.0) {
-            return Err(invalid("Invalid profile speed range"));
-        }
-    }
-    for a in &s.agents {
-        if !ids.insert(&a.id) {
-            return Err(invalid("Duplicate entity ID"));
-        }
-        let p = s
-            .profiles
-            .get(&a.profile)
-            .ok_or_else(|| invalid("Unknown agent profile"))?;
-        let radius = a
-            .components
-            .as_ref()
-            .and_then(|c| c.physical.as_ref())
-            .and_then(|p| p.radius)
-            .unwrap_or(p.radius)
-            .0;
-        bounds(
-            a.x.0 - radius,
-            a.y.0 - radius,
-            radius * 2.0,
-            radius * 2.0,
-            m,
-        )?;
-        let nav = a.components.as_ref().and_then(|c| c.navigation.as_ref());
-        let preferred = nav
-            .and_then(|n| n.preferred_speed)
-            .unwrap_or(p.preferred_speed)
-            .0;
-        let maximum = nav
-            .and_then(|n| n.maximum_speed)
-            .or(p.maximum_speed)
-            .unwrap_or(base.maximum_speed)
-            .0;
-        if maximum < preferred {
-            return Err(invalid("Invalid resolved speed range"));
-        }
-    }
-    Ok(())
-}
-fn bounds(x: f64, y: f64, w: f64, h: f64, m: &Map) -> Result<(), Failure> {
-    if x < 0.0 || y < 0.0 || x + w > m.width.0 || y + h > m.height.0 {
-        Err(invalid("Geometry outside map bounds"))
-    } else {
-        Ok(())
+        frame["agents"] = world.frame_agents();
+        out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"frame","frame":frame}));
+        out
     }
 }

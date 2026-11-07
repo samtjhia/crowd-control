@@ -56,9 +56,10 @@ npm run typecheck --workspace @crowd-control/contract
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits and the performance target
-remain implementation work. Part-one static Rust DTOs, ABI binding, real worker
-and a PixiJS smoke-test view exist. The actual Node/Wasm test passed November 7;
-browser worker/PixiJS acceptance remains pending.
+remain implementation work. Parts one/two now provide Rust world initialization,
+full runtime agents, both grid encodings, seeded streams, fixed-clock playback and
+snapshot export. Actual Wasm tests include native parity and host pacing. Browser
+worker/PixiJS acceptance remains pending; restore and replay remain unimplemented.
 
 ## Engine input example
 
@@ -92,8 +93,9 @@ exposes the declared WasmEngineBindings API and handles strings across that
 boundary. Part one now has handwritten Rust exports, a JS memory/string binding
 and a real worker; no wasm-bindgen CLI is required. The worker loads the module
 once, validates TypeScript inputs, then calls Rust. Static loads/reset are
-implemented; fixed-step simulation is not. Native protocol checks and the actual
-Node/Wasm test pass. The target is installed; browser rendering remains unverified.
+implemented along with clock stepping, speed, pause/resume, forward run_to and
+snapshot export. Agents do not move yet. Native and actual Node/Wasm checks pass;
+the target is installed and browser rendering remains unverified.
 
 ```text
 Compiler returns CompileOutput

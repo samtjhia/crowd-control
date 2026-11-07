@@ -95,14 +95,15 @@ fn strict_nested_fields_ranges_and_references_are_checked() {
 }
 
 #[test]
-fn playback_rejects_unimplemented_ticks_and_correlates_errors() {
+fn playback_advances_clock_and_correlates_errors() {
     let mut e = Engine::default();
     dispatch(&mut e, &load());
     let out = dispatch(
         &mut e,
         &json!({"schemaVersion":1,"simulationId":"engine-demo","commandId":"step","type":"step","ticks":1}),
     );
-    assert_eq!(out[0]["error"]["code"], "UNSUPPORTED_CAPABILITY");
+    assert_eq!(out[0]["type"], "ack");
+    assert_eq!(out[0]["stamp"]["tick"], 1);
     let malformed: Value = serde_json::from_str(&e.dispatch("not json")).unwrap();
     assert_eq!(malformed[0]["error"]["code"], "INVALID_SCHEMA");
 }

@@ -80,10 +80,10 @@ impl<'de> Deserialize<'de> for Color {
     }
 }
 macro_rules! dto {
-    ($name:ident { $($field:ident : $ty:ty),* $(,)? }) => {
+    ($name:ident { $($(#[$attr:meta])* $field:ident : $ty:ty),* $(,)? }) => {
         #[derive(Debug, Clone, Serialize, Deserialize)]
         #[serde(rename_all="camelCase", deny_unknown_fields)]
-        pub struct $name { $(pub $field: $ty),* }
+        pub struct $name { $($(#[$attr])* pub $field: $ty),* }
     };
 }
 dto!(Appearance { fill: Option<Color>, stroke: Option<Color>, stroke_width_px: Option<Nonnegative>, opacity: Option<Strength>, label_visible: Option<bool>, symbol: Option<Symbol>, pose: Option<Pose> });
@@ -125,7 +125,41 @@ dto!(Agent { id: Id, label: Option<String>, tags: Vec<Id>, profile: Id, x: Numbe
 dto!(Room { id: Id, label: Option<String>, tags: Option<Vec<Id>>, x: Number, y: Number, width: Positive, height: Positive, appearance: Option<MapAppearance> });
 dto!(Portal { id: Id, label: Option<String>, tags: Option<Vec<Id>>, x: Number, y: Number, width: Positive, height: Positive, connects: [Id;2], open: bool, one_way: Option<bool>, traversal_time: Option<Nonnegative>, appearance: Option<MapAppearance> });
 dto!(Grid { width: Counter, height: Counter, cell_size: Positive, units: Units, blocked: Vec<Counter>, traversal_cost: Vec<Nonnegative>, zone_index: Vec<Counter>, portal_index: Vec<Counter>, zone_ids: Vec<Option<Id>>, portal_ids: Vec<Option<Id>> });
-dto!(Map { width: Positive, height: Positive, cell_size: Positive, units: Units, rooms: Vec<Room>, portals: Vec<Portal>, source: Option<Value>, entities: Option<Vec<Value>>, grid: Option<Grid>, rows: Option<Vec<String>>, legend: Option<BTreeMap<String,Id>> });
+dto!(Calibration {
+    points_px: [[Number; 2]; 2],
+    distance_metres: Positive,
+    metres_per_pixel: Positive
+});
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "mode",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum MapSource {
+    Generate {
+        accuracy: String,
+    },
+    Upload {
+        asset_id: Id,
+        revision: Id,
+        page: Counter,
+        #[serde(deserialize_with = "required_calibration")]
+        calibration: Option<Calibration>,
+        source_to_world: [Number; 6],
+    },
+    Lookup {
+        asset_id: Id,
+        revision: Id,
+        venue: String,
+        floor: String,
+    },
+}
+fn required_calibration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Calibration>, D::Error> {
+    Option::deserialize(d)
+}
+dto!(Map { width: Positive, height: Positive, cell_size: Positive, units: Units, rooms: Vec<Room>, portals: Vec<Portal>, source: Option<MapSource>, entities: Option<Vec<Value>>, grid: Option<Grid>, rows: Option<Vec<String>>, legend: Option<BTreeMap<String,Id>> });
 dto!(Versions { compiler: Id, model: Id, random: Id, engine: Option<Id> });
 dto!(SceneModel {
     units: Units,
@@ -153,6 +187,22 @@ dto!(Compiled { scene: Scene, resolved_model: Model, inventory: Vec<Inventory> }
 dto!(History { history_revision: Counter, records: Vec<Value>, outcomes: Vec<Value> });
 dto!(Command { schema_version: Counter, simulation_id: Id, command_id: Id, r#type: String, compiled: Option<Compiled>, history: Option<History>, ticks: Option<Counter>, multiplier: Option<Positive>, time: Option<Nonnegative>, request: Option<Value>, query: Option<Value>, snapshot: Option<Value>, snapshot_id: Option<Id> });
 
+dto!(Point {
+    x: Number,
+    y: Number
+});
+dto!(AgentNavigation { target_entity_id: Option<Id>, target_point: Option<Point>, flow_field_id: Option<Id>, map_version: Counter });
+dto!(Timers { reaction_remaining: Nonnegative, wait_remaining: Nonnegative, wander_refresh_remaining: Option<Nonnegative> });
+dto!(AgentRuntime {
+    id: Id, kind: String, #[serde(skip_serializing_if="Option::is_none")] label: Option<String>, tags: Vec<Id>, profile: Id,
+    components: Components, appearance: Value, sensors: Option<Value>, state: String, state_reason: Option<String>,
+    position: Point, velocity: Point, zone_id: Option<Id>, controller: Option<Id>, current_goal: Option<Value>, goal_queue: Vec<Value>,
+    navigation: AgentNavigation, timers: Timers, queue_ref: Option<Value>, interaction_ref: Option<Value>, random_state: u32, departed_at: Option<Nonnegative>
+});
+dto!(Allocation { next_entity: Counter, next_goal: Counter, next_job: Counter, next_ticket: Counter, next_event: Counter, reserved: Vec<Reservation> });
+dto!(Reservation { key: Id, ids: Vec<Id> });
+dto!(RandomStreams { layout: u32, placement: u32, rule_sampling: BTreeMap<Id,u32> });
+
 pub fn preflight(value: &Value) -> Result<(), &'static str> {
     fn visit(
         value: &Value,
@@ -170,7 +220,16 @@ pub fn preflight(value: &Value) -> Result<(), &'static str> {
                     if ["__proto__", "prototype", "constructor"].contains(&k.as_str()) {
                         return Err("Reserved property name");
                     }
-                    visit(v, depth + 1, nodes, k == "zoneIds" || k == "portalIds")?;
+                    visit(
+                        v,
+                        depth + 1,
+                        nodes,
+                        nullable
+                            || k == "zoneIds"
+                            || k == "portalIds"
+                            || k == "calibration"
+                            || k == "snapshot",
+                    )?;
                 }
             }
             Value::Array(items) => {

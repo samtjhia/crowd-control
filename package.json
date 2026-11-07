@@ -19,11 +19,11 @@
     "dev": "npm run build:wasm && npm run dev --workspace @crowd-control/web",
     "dev:server": "npm run dev --workspace @crowd-control/server",
     "build": "npm run build:wasm && npm run build --workspaces && cargo build --workspace",
+    "build:wasm": "node engine/scripts/build-wasm.mjs",
+    "test:wasm": "npm run build --workspace @crowd-control/contract && npm run build:wasm && cargo build -p crowd-control-engine --example protocol && node --test engine/test/wasm.test.ts",
     "check": "npm run build --workspace @crowd-control/compiler && npm run typecheck --workspaces && cargo fmt --all --check && cargo check --workspace",
     "lint": "npm run lint --workspace @crowd-control/web",
-    "test": "npm run test --workspace @crowd-control/contract && npm run test --workspace @crowd-control/history && npm run test --workspace @crowd-control/server && npm run test --workspace @crowd-control/compiler && npm run test --workspace @crowd-control/web && cargo test --workspace && node --test engine/test/native.test.mjs",
-    "build:wasm": "node engine/scripts/build-wasm.mjs",
-    "test:wasm": "npm run build --workspace @crowd-control/contract && npm run build:wasm && node --test engine/test/wasm.test.ts"
+    "test": "npm run test --workspace @crowd-control/contract && npm run test --workspace @crowd-control/history && npm run test --workspace @crowd-control/server && npm run test --workspace @crowd-control/compiler && npm run test --workspace @crowd-control/web && cargo test --workspace && node --test engine/test/native.test.mjs"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

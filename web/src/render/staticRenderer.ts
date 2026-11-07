@@ -27,7 +27,7 @@ export async function createStaticRenderer(host: HTMLElement) {
   const app = new pixi.Application()
   await app.init({ width: 800, height: 400, background: '#F1F5F9', antialias: true })
   app.canvas.setAttribute('role', 'img')
-  app.canvas.setAttribute('aria-label', 'Stationary crowd scene loaded from the Rust engine')
+  app.canvas.setAttribute('aria-label', 'Initialized crowd scene from the Rust engine')
   host.appendChild(app.canvas)
   let currentScene: RenderInput['scene'] | undefined
   let currentScale = 0
@@ -41,17 +41,19 @@ export async function createStaticRenderer(host: HTMLElement) {
         for (const graphic of app.stage.removeChildren()) graphic.destroy()
         agents.clear()
         const map = scene.map
-        if (!('rows' in map)) throw new Error('Static renderer requires a rows/legend map')
         const drawCell = (x: number, y: number, color: string) => {
           const graphic = new pixi.Graphics().rect((x * map.cellSize - camera.pan.x) * scale, (y * map.cellSize - camera.pan.y) * scale, map.cellSize * scale, map.cellSize * scale).fill(color)
           app.stage.addChild(graphic)
         }
-        map.rows.forEach((row, y) => [...row].forEach((glyph, x) => {
-          const id = map.legend[glyph]
+        const paint = (x: number, y: number, blocked: boolean, id: string | null | undefined) => {
           const room = map.rooms.find((r) => r.id === id)
           const portal = map.portals.find((p) => p.id === id)
-          drawCell(x, y, glyph === '#' ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? '#E2E8F0')
-        }))
+          drawCell(x, y, blocked ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? '#E2E8F0')
+        }
+        if ('grid' in map) {
+          const grid = map.grid
+          grid.blocked.forEach((blocked, i) => paint(i % grid.width, Math.floor(i / grid.width), blocked === 1, grid.portalIds[grid.portalIndex[i]!] ?? grid.zoneIds[grid.zoneIndex[i]!]))
+        } else map.rows.forEach((row, y) => [...row].forEach((glyph, x) => paint(x, y, glyph === '#', map.legend[glyph])))
         for (const agent of scene.agents) {
           const r = agent.radius * scale
           const graphic = new pixi.Graphics()
