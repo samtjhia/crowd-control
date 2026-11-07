@@ -1,5 +1,6 @@
 import { parseCompileInput, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
 import { chainLayout, designPopulation } from './layout/chain.ts'
+import { rasterize, unreachable } from './rasterize/rows.ts'
 import { fail } from './result.ts'
 
 /**
@@ -28,13 +29,20 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
-/** Generated chain layouts (§8). Sizing is built; rasterizing and agents follow in steps 2–6. */
+/** Generated chain layouts (§8). Sizing and the glyph map are built; people follow in steps 3–6. */
 function compileGenerated(input: CompileInput): Result<CompileOutput> {
   const { layout } = input.plan
   if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
   const sized = chainLayout(layout.spaces, layout.connections, designPopulation(input.plan), input.model)
   if (!sized.ok) return sized
-  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are sized but not yet rasterized', { path: 'plan.layout' })
+  const { rooms, portals, worldWidth, worldHeight, cellSize } = sized.value
+  const grid = rasterize([...rooms, ...portals], worldWidth, worldHeight, cellSize)
+  if (!grid.ok) return grid
+  const cutOff = unreachable(grid.value, rooms[0]!.id)
+  if (cutOff.length > 0) {
+    return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Not every space connects: ${cutOff.join(', ')} cannot be reached`, { affectedIds: cutOff })
+  }
+  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are rasterized but people are not placed yet', { path: 'plan.layout' })
 }
 
 /** Prepared venue lookup: built in step 8. */
