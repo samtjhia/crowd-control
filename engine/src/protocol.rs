@@ -159,7 +159,7 @@ pub enum MapSource {
 fn required_calibration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Calibration>, D::Error> {
     Option::deserialize(d)
 }
-dto!(Map { width: Positive, height: Positive, cell_size: Positive, units: Units, rooms: Vec<Room>, portals: Vec<Portal>, source: Option<MapSource>, entities: Option<Vec<Value>>, grid: Option<Grid>, rows: Option<Vec<String>>, legend: Option<BTreeMap<String,Id>> });
+dto!(Map { width: Positive, height: Positive, cell_size: Positive, units: Units, rooms: Vec<Room>, portals: Vec<Portal>, source: Option<MapSource>, entities: Option<Vec<Entity>>, grid: Option<Grid>, rows: Option<Vec<String>>, legend: Option<BTreeMap<String,Id>> });
 dto!(Versions { compiler: Id, model: Id, random: Id, engine: Option<Id> });
 dto!(SceneModel {
     units: Units,
@@ -183,6 +183,14 @@ pub enum EntityKind {
     Portal,
     Object,
 }
+dto!(Capacity { maximum_occupants: Counter, service_rate: Option<Positive> });
+dto!(Interaction {
+    duration: Nonnegative,
+    slots: Counter
+});
+dto!(EntityPortal { connects: [Id;2], open: bool, one_way: Option<bool>, traversal_time: Option<Nonnegative> });
+dto!(EntityComponents { physical: Option<PhysicalOverride>, capacity: Option<Capacity>, interaction: Option<Interaction>, portal: Option<EntityPortal> });
+dto!(Entity { id: Id, kind: EntityKind, label: Option<String>, tags: Option<Vec<Id>>, components: Option<EntityComponents>, appearance: Option<MapAppearance>, shape: Option<crate::shapes::Shape> });
 dto!(Compiled { scene: Scene, resolved_model: Model, inventory: Vec<Inventory> });
 dto!(History { history_revision: Counter, records: Vec<Value>, outcomes: Vec<Value> });
 dto!(Command { schema_version: Counter, simulation_id: Id, command_id: Id, r#type: String, compiled: Option<Compiled>, history: Option<History>, ticks: Option<Counter>, multiplier: Option<Positive>, time: Option<Nonnegative>, request: Option<Value>, query: Option<Value>, snapshot: Option<Value>, snapshot_id: Option<Id> });
@@ -194,9 +202,23 @@ dto!(Point {
 dto!(AgentNavigation { target_entity_id: Option<Id>, target_point: Option<Point>, flow_field_id: Option<Id>, map_version: Counter });
 dto!(Timers { reaction_remaining: Nonnegative, wait_remaining: Nonnegative, wander_refresh_remaining: Option<Nonnegative> });
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ReachKind {
+pub enum GoalKind {
     #[serde(rename = "reach")]
     Reach,
+    #[serde(rename = "avoid")]
+    Avoid,
+    #[serde(rename = "wait")]
+    Wait,
+    #[serde(rename = "wander")]
+    Wander,
+    #[serde(rename = "follow")]
+    Follow,
+    #[serde(rename = "queue")]
+    Queue,
+    #[serde(rename = "interact")]
+    Interact,
+    #[serde(rename = "sequence")]
+    Sequence,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum Selection {
@@ -208,14 +230,22 @@ pub enum Selection {
     #[serde(rename = "random")]
     Random,
 }
-dto!(ReachGoal {
-    kind: ReachKind,
+dto!(GoalSpec {
+    kind: GoalKind,
     #[serde(skip_serializing_if = "Option::is_none")] target_zone: Option<Id>,
     #[serde(skip_serializing_if = "Option::is_none")] target_entity_id: Option<Id>,
     #[serde(skip_serializing_if = "Option::is_none")] target_ids: Option<Vec<Id>>,
     #[serde(skip_serializing_if = "Option::is_none")] selection: Option<Selection>,
     #[serde(skip_serializing_if = "Option::is_none")] stop_distance: Option<Nonnegative>,
-    #[serde(skip_serializing_if = "Option::is_none")] urgency: Option<Nonnegative>
+    #[serde(skip_serializing_if = "Option::is_none")] urgency: Option<Nonnegative>,
+    #[serde(skip_serializing_if = "Option::is_none")] duration: Option<Nonnegative>,
+    #[serde(skip_serializing_if = "Option::is_none")] inside_zone: Option<Id>,
+    #[serde(skip_serializing_if = "Option::is_none")] change_target_every: Option<Positive>,
+    #[serde(skip_serializing_if = "Option::is_none")] distance: Option<Nonnegative>,
+    #[serde(skip_serializing_if = "Option::is_none")] maximum_wait: Option<Nonnegative>,
+    #[serde(skip_serializing_if = "Option::is_none")] goals: Option<Vec<GoalSpec>>,
+    #[serde(skip_serializing_if = "Option::is_none")] repeat: Option<Counter>,
+    #[serde(skip_serializing_if = "Option::is_none")] depart_on_arrival: Option<bool>
 });
 dto!(GoalCursor {
     child_index: Counter,
@@ -225,12 +255,31 @@ dto!(GoalFailure {
     code: String,
     message: String
 });
-dto!(GoalRuntime { id: Id, spec: ReachGoal, status: String, cursor: Vec<GoalCursor>, started_at: Option<Nonnegative>, failure: Option<GoalFailure> });
+dto!(GoalExecution { phase: String, elapsed: Nonnegative, target_point: Option<Point> });
+dto!(GoalRuntime { id: Id, spec: GoalSpec, status: String, cursor: Vec<GoalCursor>, started_at: Option<Nonnegative>, failure: Option<GoalFailure>, #[serde(default,skip_serializing_if="Option::is_none")] execution: Option<GoalExecution> });
+dto!(QueueRef {
+    target_id: Id,
+    ticket_id: Id,
+    joined_at: Nonnegative
+});
+dto!(InteractionRef {
+    target_id: Id,
+    slot_id: Id,
+    ends_at: Nonnegative
+});
+dto!(QueueEntry {
+    ticket_id: Id,
+    agent_id: Id,
+    joined_at: Nonnegative
+});
+dto!(QueueRuntime { target_id: Id, service_credit: Nonnegative, entries: Vec<QueueEntry> });
+dto!(InteractionSlot { id: Id, agent_id: Option<Id>, ends_at: Option<Nonnegative> });
+dto!(SlotsRuntime { target_id: Id, slots: Vec<InteractionSlot> });
 dto!(AgentRuntime {
     id: Id, kind: String, #[serde(skip_serializing_if="Option::is_none")] label: Option<String>, tags: Vec<Id>, profile: Id,
     components: Components, appearance: Value, sensors: Option<Value>, state: String, state_reason: Option<String>,
     position: Point, velocity: Point, zone_id: Option<Id>, controller: Option<Id>, current_goal: Option<GoalRuntime>, goal_queue: Vec<GoalRuntime>,
-    navigation: AgentNavigation, timers: Timers, queue_ref: Option<Value>, interaction_ref: Option<Value>, random_state: u32, departed_at: Option<Nonnegative>
+    navigation: AgentNavigation, timers: Timers, queue_ref: Option<QueueRef>, interaction_ref: Option<InteractionRef>, random_state: u32, departed_at: Option<Nonnegative>
 });
 dto!(Allocation { next_entity: Counter, next_goal: Counter, next_job: Counter, next_ticket: Counter, next_event: Counter, reserved: Vec<Reservation> });
 dto!(Reservation { key: Id, ids: Vec<Id> });
@@ -255,6 +304,16 @@ dto!(ChangeOperation {
     op: SetKind,
     targets: PortalSelector,
     values: ChangeValues
+});
+dto!(GoalChange { op: String, targets: PortalSelector, goal: Option<Value>, mode: Option<String>, scope: Option<String> });
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RemoveKind {
+    #[serde(rename = "remove")]
+    Remove,
+}
+dto!(RemoveOperation {
+    op: RemoveKind,
+    targets: PortalSelector
 });
 
 pub fn preflight(value: &Value) -> Result<(), &'static str> {

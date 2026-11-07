@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { parseWorkerCommand, type Frame, type RenderScene, type Stamp, type WorkerCommand } from '@crowd-control/contract'
-import movementLoad from '../../contract/fixtures/engine-movement-load.json'
+import movementLoad from '../../contract/fixtures/engine-services-load.json'
 import { createRealEndpoint, type RealEndpoint } from './worker/realEndpoint.ts'
 import { createStaticRenderer } from './render/staticRenderer.ts'
 
@@ -33,7 +33,7 @@ function App() {
     const draw = () => {
       if (!renderer || !scene || !frame || frame.streamId !== scene.stamp.streamId || frame.sceneVersion !== scene.stamp.sceneVersion || frame.historyRevision !== scene.stamp.historyRevision || frame.topologyVersion !== scene.stamp.topologyVersion) return
       try {
-        renderer.render({ scene: scene.data, frame, camera: { pan: { x: -1, y: -1 }, pixelsPerUnit: 60 }, selectedIds: [] })
+        renderer.render({ scene: scene.data, frame, camera: { pan: { x: -1, y: -1 }, pixelsPerUnit: 40 }, selectedIds: [] })
         setReady(true)
         setImmobile(frame.agents[0]?.state === 'immobile')
         setStatus(`${frame.agents.map((a) => `${a.id}: ${a.state}`).join(', ')} · ${frame.time.toFixed(2)} simulation seconds · tick ${frame.tick}`)
@@ -78,7 +78,7 @@ function App() {
     <main>
       <p>HackTrent 2026</p>
       <h1>Crowd Control</h1>
-      <p>Rust movement, terrain slowdown and recovery</p>
+      <p>Rust goals, queues, interactions and recovery</p>
       <p role="status">{status}</p>
       {error && <p role="alert">{error}</p>}
       <div className="playback-controls">
@@ -94,7 +94,7 @@ function App() {
           send({ ...h, type: 'apply_request', request: { schemaVersion: 1, simulationId: h.simulationId, requestId: h.commandId, action: 'create_intervention', label: immobile ? 'Recover agent' : 'Stop agent', operations: [{ op: 'set', targets: { ids: [movementLoad.compiled.scene.agents[0]!.id], kind: 'agent' }, values: { components: { mobility: { speedMultiplier: immobile ? 1 : 0 } }, appearance: { pose: immobile ? 'upright' : 'fallen' } } }] } })
         }}>{immobile ? 'Recover agent' : 'Stop agent'}</button>
         <label>Speed <select disabled={!ready} value={speed} onChange={(event) => send({ ...header(), type: 'speed', multiplier: Number(event.target.value) })}>
-          <option value="0.25">0.25×</option><option value="1">1×</option><option value="4">4×</option>
+          <option value="0.25">0.25×</option><option value="1">1×</option><option value="4">4×</option><option value="8">8×</option>
         </select></label>
       </div>
       <form onSubmit={(event) => { event.preventDefault(); send({ ...header(), type: 'run_to', time: Number(targetTime) }) }}>
@@ -102,8 +102,8 @@ function App() {
         <button disabled={!ready || playing}>Run to time</button>
       </form>
       <div ref={host} className="simulation-view" />
-      <p>The agent routes through the doorway to the green zone. Close the door before arrival to block its route, then reopen it to continue. Reset to try again. Closing an occupied doorway is rejected.</p>
-      <p>Amber outlines mark half-speed terrain. Movement accelerates, avoids neighboring bodies and preserves the goal when stopped. Recover the agent to continue. Scheduling and service goals follow in later milestones.</p>
+      <p>Two attendees queue at the brown desk, interact one at a time, then leave through the door. A third wanders in the hall. Close/Open door blocks and resumes routes; Reset starts again.</p>
+      <p>Stop/Recover preserves the first attendee’s goal and restarts interrupted service. Scheduling and live arrivals follow in part six.</p>
     </main>
   )
 }

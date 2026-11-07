@@ -24,7 +24,7 @@
       "profiles":{"person":{"radius":0.2,"preferredSpeed":1,"appearance":{"symbol":"circle","fill":"#2563EB"}}},
       "controllers":{
         "mingle":{"kind":"wander","insideZone":"hall"},
-        "leave":{"kind":"reach","targetZone":"outside","selection":"lowest-cost"}
+        "leave":{"kind":"reach","targetZone":"outside","selection":"lowest-cost","departOnArrival":true}
       },
       "agents":[
         {"id":"a1","tags":["attendee"],"profile":"person","x":1.5,"y":1.5,"controller":"mingle"},

@@ -171,7 +171,7 @@ pub fn advance(
                 p: V::of(&a.position),
                 v: V::of(&a.velocity),
                 radius: a.components.physical.radius.0,
-                blocking: a.components.physical.blocks_movement,
+                blocking: a.components.physical.blocks_movement && a.departed_at.is_none(),
             })
             .collect();
         let neighbors = Neighbors::new(&old, bucket_size, grid);
@@ -268,7 +268,7 @@ pub fn advance(
             for v in candidates {
                 let end = me.p.add(v.mul(h));
                 if !geometry::clear(grid, &[], &me.p.point(), &end.point(), me.radius, &mut work)?
-                    || !nav.permits(grid, &me.p.point(), &end.point())
+                    || !nav.permits_agent(grid, &me.p.point(), &end.point(), i)
                 {
                     continue;
                 }

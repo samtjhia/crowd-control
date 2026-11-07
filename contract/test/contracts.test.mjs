@@ -36,6 +36,7 @@ test('PRD and worker fixtures pass strict contracts without normalization', () =
     'engine-navigation-load': c.WorkerCommandSchema,
     'engine-movement-load': c.WorkerCommandSchema,
     'engine-crossing-load': c.WorkerCommandSchema,
+    'engine-services-load': c.WorkerCommandSchema,
   };
   for (const [name, schema] of Object.entries(fixtures)) {
     const original = fixture(name);
@@ -221,6 +222,17 @@ test('terrain speed is a separate optional copied Float32 grid buffer', () => {
     assert.equal(c.gridToBuffers({ ...grid, terrainSpeedMultiplier: values }).ok, false);
   }
   assert.equal(c.gridFromBuffers(c.gridToBuffers(grid).value).value.terrainSpeedMultiplier, undefined);
+});
+
+test('explicit departures and leaf execution are typed separately from writable goals', () => {
+  check(c.GoalSchema, { kind: 'reach', target: { ids: ['outside'] }, departOnArrival: true });
+  check(c.CompiledGoalSchema, { kind: 'reach', targetZone: 'outside', departOnArrival: true });
+  rejects(c.GoalSchema, { kind: 'wait', duration: 1, departOnArrival: true });
+  const runtime = fixture('runtime-agent');
+  runtime.currentGoal.execution = { phase: 'travel', elapsed: 0.2, targetPoint: null };
+  check(c.AgentRuntimeSchema, runtime);
+  rejects(c.AgentRuntimeSchema, { ...runtime, currentGoal: { ...runtime.currentGoal, execution: { phase: 'flying', elapsed: 0, targetPoint: null } } });
+  rejects(c.GoalSchema, { kind: 'wait', duration: 1, execution: runtime.currentGoal.execution });
 });
 
 test('saved runs and storage updates validate their complete envelopes', () => {

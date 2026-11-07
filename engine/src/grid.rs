@@ -1,4 +1,4 @@
-use crate::core::{Failure, invalid, unsupported};
+use crate::core::{Failure, invalid};
 use crate::protocol::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,6 +17,8 @@ pub struct GridData {
     pub portal_index: Vec<u32>,
     pub zone_ids: Vec<Option<Id>>,
     pub portal_ids: Vec<Option<Id>>,
+    #[serde(skip)]
+    pub target_cells: BTreeMap<Id, Vec<usize>>,
 }
 
 impl GridData {
@@ -30,11 +32,8 @@ impl GridData {
                     .into(),
             ));
         }
-        if map.entities.as_ref().is_some_and(|v| !v.is_empty()) {
-            return Err(unsupported(
-                "General entity geometry is not enabled; compile geometry into a reviewed grid with room/portal metadata",
-            ));
-        }
+        crate::shapes::validate(map)?;
+        let portals = map.all_portals()?;
         validate_source(map)?;
         let size = (width * height) as usize;
         let mut data = if let Some(grid) = &map.grid {
@@ -111,6 +110,7 @@ impl GridData {
                 portal_index: grid.portal_index.iter().map(|v| v.0 as u32).collect(),
                 zone_ids: grid.zone_ids.clone(),
                 portal_ids: grid.portal_ids.clone(),
+                target_cells: BTreeMap::new(),
             }
         } else {
             let rows = map
@@ -141,19 +141,32 @@ impl GridData {
                 portal_index: vec![0; size],
                 zone_ids: vec![None],
                 portal_ids: vec![None],
+                target_cells: BTreeMap::new(),
             };
             let mut zones = BTreeMap::new();
-            let mut portals = BTreeMap::new();
+            let mut portal_indices = BTreeMap::new();
+            for entity in map
+                .entities()
+                .iter()
+                .filter(|e| matches!(e.kind, EntityKind::Zone))
+            {
+                result.zone_ids.push(Some(entity.id.clone()));
+                zones.insert(&entity.id, result.zone_ids.len() as u32 - 1);
+            }
             for room in &map.rooms {
                 result.zone_ids.push(Some(room.id.clone()));
                 zones.insert(&room.id, result.zone_ids.len() as u32 - 1);
             }
-            for portal in &map.portals {
+            for portal in &portals {
                 result.portal_ids.push(Some(portal.id.clone()));
-                portals.insert(&portal.id, result.portal_ids.len() as u32 - 1);
+                portal_indices.insert(&portal.id, result.portal_ids.len() as u32 - 1);
             }
             for (key, id) in legend {
-                if key == "#" || (!zones.contains_key(id) && !portals.contains_key(id)) {
+                if key == "#"
+                    || (!zones.contains_key(id)
+                        && !portal_indices.contains_key(id)
+                        && !map.entities().iter().any(|e| &e.id == id))
+                {
                     return Err(invalid("Unknown legend entity or reserved wall glyph"));
                 }
             }
@@ -171,7 +184,7 @@ impl GridData {
                     if let Some(index) = zones.get(id) {
                         result.zone_index[i] = *index;
                     }
-                    if let Some(index) = portals.get(id) {
+                    if let Some(index) = portal_indices.get(id) {
                         result.portal_index[i] = *index;
                     }
                 }
@@ -190,7 +203,27 @@ impl GridData {
                 return Err(invalid("Room missing from zone dictionary"));
             }
         }
-        for p in &map.portals {
+        for e in map.entities() {
+            if (data.zone_ids.iter().flatten().any(|id| id == &e.id)
+                && !matches!(e.kind, EntityKind::Zone))
+                || (data.portal_ids.iter().flatten().any(|id| id == &e.id)
+                    && !matches!(e.kind, EntityKind::Portal))
+            {
+                return Err(invalid(
+                    "Entity kind conflicts with grid membership identity",
+                ));
+            }
+        }
+        for e in map
+            .entities()
+            .iter()
+            .filter(|e| matches!(e.kind, EntityKind::Zone))
+        {
+            if !data.zone_ids.contains(&Some(e.id.clone())) {
+                return Err(invalid("Zone entity missing from zone dictionary"));
+            }
+        }
+        for p in &portals {
             bounds(p.x.0, p.y.0, p.width.0, p.height.0, map)?;
             if p.connects[0] == p.connects[1]
                 || p.connects
@@ -213,7 +246,7 @@ impl GridData {
             .portal_ids
             .iter()
             .flatten()
-            .any(|id| !map.portals.iter().any(|p| &p.id == id))
+            .any(|id| !portals.iter().any(|p| &p.id == id))
         {
             return Err(invalid("Portal dictionary needs explicit portal metadata"));
         }
@@ -222,7 +255,13 @@ impl GridData {
             .rooms
             .iter()
             .map(|r| &r.id)
-            .chain(map.portals.iter().map(|p| &p.id))
+            .chain(portals.iter().map(|p| &p.id))
+            .chain(
+                map.entities()
+                    .iter()
+                    .filter(|e| !matches!(e.kind, EntityKind::Portal))
+                    .map(|e| &e.id),
+            )
         {
             if !described.insert(entity) {
                 return Err(invalid("Duplicate map entity ID"));
@@ -247,10 +286,10 @@ impl GridData {
                 }
             }
             if let Some(id) = &data.portal_ids[data.portal_index[i] as usize] {
-                let p =
-                    map.portals.iter().find(|p| &p.id == id).ok_or_else(|| {
-                        invalid("Portal membership needs explicit portal metadata")
-                    })?;
+                let p = portals
+                    .iter()
+                    .find(|p| &p.id == id)
+                    .ok_or_else(|| invalid("Portal membership needs explicit portal metadata"))?;
                 if !contains_cell(x, y, data.cell_size, p.x.0, p.y.0, p.width.0, p.height.0) {
                     return Err(invalid("Portal membership disagrees with opening geometry"));
                 }
@@ -259,6 +298,7 @@ impl GridData {
                 }
             }
         }
+        data.target_cells = crate::shapes::validate_masks(map, &data)?;
         Ok(data)
     }
 

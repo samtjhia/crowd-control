@@ -56,7 +56,7 @@ npm run typecheck --workspace @crowd-control/contract
 
 The fixtures test data interchange. Compiler geometry/placement, live selector
 resolution, physics/fall transitions, replay commits and the performance target
-remain implementation work. Parts one–four now provide Rust world initialization,
+remain implementation work. Parts one–five now provide Rust world initialization,
 full runtime agents, both grid encodings, seeded streams, fixed-clock playback and
 snapshot export, basic reach navigation and recorded immediate portal.open changes.
 Actual Wasm tests include native parity and host pacing. Browser worker/PixiJS
@@ -66,13 +66,22 @@ Optional grid.terrainSpeedMultiplier supplies one Float32 value in (0,1] per cel
 omitting it means all 1. It is separate from traversalCost and survives buffer copies.
 engine-movement-load.json and engine-crossing-load.json exercise these capabilities.
 
+Part five adds static entities, all eight goals, nested cursors and authoritative
+queue/slot claims. Optional GoalRuntime.execution stores leaf phase/elapsed/target;
+it is runtime-only and excluded from planner JSON. reach.departOnArrival is
+optional/default false in writable and compiled goals. Explicit agent removal is
+separate. Recorded assign_goal/clear_goal/remove currently use explicit IDs;
+full selectors, scheduling and rules are later parts. engine-services-load.json
+is the running queue/interact/departure example; it has no jobs/rules.
+
 ## Engine input example
 
 `fixtures/engine-navigation-load.json` is the running part-three example: one reach
 controller routes one agent through a door. Close/open it through an immediate
 create-intervention request with `set` → `values.components.portal.open` and explicit
 portal IDs. Scene metadata precedes changed-topology frames. The engine also accepts
-history queries; broader operations/goals and the full example below remain pending.
+history queries. All goals now run; broader operations and the full scheduled
+example below remain pending.
 
 `fixtures/engine-load.json` is a complete WorkerCommand load payload: CompileOutput
 plus an empty initial history. Two agents wander, one arrives at simulation second

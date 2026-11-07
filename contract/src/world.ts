@@ -14,7 +14,7 @@ const TargetZoneSchema = z.strictObject({ targetZone: IdSchema });
 const TargetEntitySchema = z.strictObject({ targetEntityId: IdSchema });
 const TargetIdsSchema = z.strictObject({ targetIds: z.array(IdSchema).min(1) });
 export const CompiledDestinationSchema = z.union([TargetZoneSchema, TargetEntitySchema, TargetIdsSchema]);
-const reach = { kind: z.literal('reach'), selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() };
+const reach = { kind: z.literal('reach'), departOnArrival: z.boolean().optional(), selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() };
 const avoid = { kind: z.literal('avoid'), distance: NonnegativeSchema, urgency: NonnegativeSchema.optional() };
 const CompiledGoalLeafSchema = z.union([
   TargetZoneSchema.extend(reach), TargetEntitySchema.extend(reach), TargetIdsSchema.extend(reach),

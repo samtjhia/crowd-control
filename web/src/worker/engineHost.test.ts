@@ -15,7 +15,7 @@ function setup() {
   let tick = 0, destroyed = false
   const batches: number[] = [], received: WorkerMessage[] = []
   const bindings: WasmEngineBindings = {
-    abi_version: () => 1, engine_version: () => 'movement-engine-v4', create_engine: () => 1, destroy_engine() { destroyed = true },
+    abi_version: () => 1, engine_version: () => 'goals-engine-v5', create_engine: () => 1, destroy_engine() { destroyed = true },
     dispatch(_handle, json) {
       const command = JSON.parse(json) as WorkerCommand
       if (command.simulationId !== 'engine-demo') return JSON.stringify([{ schemaVersion: 1, simulationId: command.simulationId, type: 'error', commandId: command.commandId, error: { code: 'INVALID_SCHEMA', message: 'wrong simulation' } }])
@@ -50,6 +50,15 @@ test('large backlogs are processed in bounded batches without discarding debt', 
   s.clock.elapse(0); s.clock.elapse(0); assert.equal(s.tick(), 1000)
   assert.ok(s.batches.every((ticks) => ticks <= MAX_TICKS_PER_BATCH))
   assert.equal(s.received.filter((m) => m.type === 'ack').length, 2, 'Paced ticks do not leak internal acknowledgements')
+  s.host.dispose()
+})
+test('8× at 60 pulses advances 160 fixed ticks using two/three-tick batches', () => {
+  const s = setup(); s.send('speed', 8); s.send('resume')
+  for (let i = 0; i < 60; i++) s.clock.elapse(1000 / 60)
+  assert.equal(s.tick(), 160)
+  assert.ok(s.batches.every((n) => n === 2 || n === 3))
+  const frame = s.received.filter((m) => m.type === 'frame').at(-1)!
+  if (frame.type === 'frame') assert.equal(frame.frame.time, 8)
   s.host.dispose()
 })
 test('pause retains backlog; resume and speed changes preserve elapsed old-rate time', () => {

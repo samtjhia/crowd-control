@@ -394,7 +394,7 @@ fn fast_motion_visits_each_waypoint_and_future_or_unknown_goal_work_is_rejected(
     assert_eq!(before["agents"][0]["position"], json!({"x":4.5,"y":2.5}));
     let mut unsupported = load();
     unsupported["compiled"]["scene"]["controllers"]["leave"] =
-        json!({"kind":"wander","insideZone":"hall"});
+        json!({"kind":"teleport","insideZone":"hall"});
     assert_eq!(
         send(&mut e, unsupported)[0]["error"]["code"],
         "UNSUPPORTED_CAPABILITY"

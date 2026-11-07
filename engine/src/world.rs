@@ -1,7 +1,7 @@
 use crate::{
     core::{ENGINE_VERSION, Failure, invalid, unsupported},
     grid::{GridData, bounds},
-    navigation::{self, Navigator},
+    navigation::Navigator,
     protocol::*,
     random::stream_seed,
 };
@@ -19,6 +19,13 @@ pub struct World {
     pub random: RandomStreams,
     pub allocations: Allocation,
     pub map_state: Map,
+    pub queues: Vec<QueueRuntime>,
+    pub slots: Vec<SlotsRuntime>,
+    pub departures: Vec<Value>,
+    pub events: Vec<Value>,
+    pub removed_count: u64,
+    #[serde(skip)]
+    pub wander_cells: Vec<Vec<usize>>,
     pub topology_version: u64,
     pub scene_version: u64,
     pub history: History,
@@ -55,7 +62,7 @@ impl World {
         }
         if !s.jobs.is_empty() || !s.rules.is_empty() || model.contact.is_some() {
             return Err(unsupported(
-                "Jobs, rules and contact physics are not enabled in part four",
+                "Jobs, rules and contact physics are not currently enabled",
             ));
         }
         if s.agents.len() > 2000 {
@@ -63,9 +70,10 @@ impl World {
         }
         let grid = GridData::decode(&s.map)?;
         let mut controllers = std::collections::BTreeMap::new();
+        let agent_ids = s.agents.iter().map(|a| a.id.clone()).collect();
         for (id, value) in &s.controllers {
-            let goal = navigation::parse_goal(value)?;
-            navigation::validate_goal(&goal, &grid, &s.agents)?;
+            let goal = crate::goals::parse(value)?;
+            crate::goals::validate(&goal, &s.map, &grid, &agent_ids)?;
             controllers.insert(id.clone(), goal);
         }
         let mut ids: BTreeSet<Id> = grid
@@ -75,9 +83,15 @@ impl World {
             .flatten()
             .cloned()
             .collect();
+        for entity in s.map.entities() {
+            if !ids.contains(&entity.id) && !ids.insert(entity.id.clone()) {
+                return Err(invalid("Duplicate static ID"));
+            }
+        }
         let mut agents = vec![];
         let mut placement_work = 0usize;
         let mut next_goal = 1u64;
+        let mut goal_nodes = 0usize;
         if model.default_agent.navigation.maximum_speed.0
             < model.default_agent.navigation.preferred_speed.0
         {
@@ -171,20 +185,25 @@ impl World {
                 departed_at: None,
             });
             if let Some(controller) = &a.controller {
-                let goal = controllers
+                let definition = controllers
                     .get(controller)
-                    .ok_or_else(|| invalid("Unknown controller"))?
-                    .clone();
+                    .ok_or_else(|| invalid("Unknown controller"))?;
+                goal_nodes += crate::goals::nodes(definition);
+                if goal_nodes > 64000 {
+                    return Err(("RESOURCE_LIMIT", "Runtime goal node budget exceeded".into()));
+                }
+                let goal = definition.clone();
                 let runtime = agents.last_mut().unwrap();
                 runtime.controller = Some(controller.clone());
-                runtime.current_goal = Some(GoalRuntime {
-                    id: Id(format!("goal-{next_goal}")),
-                    spec: goal,
-                    status: if immobile { "suspended" } else { "active" }.into(),
-                    cursor: vec![],
-                    started_at: Some(Nonnegative(0.0)),
-                    failure: None,
-                });
+                runtime.current_goal = Some(crate::goals::install(
+                    goal,
+                    Id(format!("goal-{next_goal}")),
+                    0.0,
+                    false,
+                ));
+                if immobile {
+                    runtime.current_goal.as_mut().unwrap().status = "suspended".into();
+                }
                 runtime.timers.reaction_remaining = runtime.components.behavior.reaction_delay;
                 next_goal += 1;
             }
@@ -239,6 +258,12 @@ impl World {
             random,
             allocations,
             map_state,
+            queues: vec![],
+            slots: vec![],
+            departures: vec![],
+            events: vec![],
+            removed_count: 0,
+            wander_cells: vec![],
             topology_version: 0,
             scene_version: 1,
             history: History {
@@ -250,6 +275,7 @@ impl World {
             navigator: Navigator::default(),
             initial_scene_hash: format!("fnv1a64-v1:{hash:016x}"),
         };
+        world.initialize_services();
         world.prepare_navigation()?;
         Ok(world)
     }
@@ -266,36 +292,60 @@ impl World {
                     && (*n as f64 * self.initial.scene.model.dt.0).is_finite()
             })
             .ok_or_else(|| ("RESOURCE_LIMIT", "Tick/time range exceeded".into()))?;
-        if !self.navigator.prepared {
-            self.prepare_navigation()?;
-        }
-        let before = self.agents.clone();
-        let before_tick = self.tick;
-        while self.tick < next {
-            if let Err(error) = self.navigator.step(
-                &self.grid,
-                &mut self.agents,
-                self.initial.scene.model.dt.0,
-                self.tick,
-            ) {
-                self.agents = before;
-                self.tick = before_tick;
-                return Err(error);
+        let before = (
+            self.agents.clone(),
+            self.queues.clone(),
+            self.slots.clone(),
+            self.allocations.clone(),
+            self.departures.clone(),
+            self.events.clone(),
+            self.tick,
+        );
+        let result = (|| -> Result<(), Failure> {
+            while self.tick < next {
+                self.before_goals()?;
+                if !self.navigator.prepared {
+                    self.prepare_navigation()?;
+                }
+                self.navigator.step(
+                    &self.grid,
+                    &mut self.agents,
+                    self.initial.scene.model.dt.0,
+                    self.tick,
+                )?;
+                self.after_goals()?;
+                self.tick += 1;
             }
-            self.tick += 1;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            (
+                self.agents,
+                self.queues,
+                self.slots,
+                self.allocations,
+                self.departures,
+                self.events,
+                self.tick,
+            ) = before;
+            self.navigator = Navigator::default();
+            return Err(error);
         }
         Ok(())
     }
     pub fn prepare_navigation(&mut self) -> Result<(), Failure> {
-        let mut agents = self.agents.clone();
+        if self.grid.target_cells.is_empty() {
+            self.grid.target_cells = crate::shapes::validate_masks(&self.map_state, &self.grid)?;
+        }
+        let intents = self.goal_intents();
         self.navigator.prepare(
             &self.grid,
             &self.map_state,
-            &mut agents,
+            &mut self.agents,
             self.topology_version,
             self.initial.scene.model.dt.0,
+            intents,
         )?;
-        self.agents = agents;
         Ok(())
     }
     pub fn map(&self) -> Value {
@@ -310,7 +360,7 @@ impl World {
             let mut metadata=json!({"id":a.id,"radius":a.components.physical.radius,"appearance":a.appearance});
             if let Some(label)=&a.label { metadata["label"]=json!(label); }metadata
         }).collect();
-        json!({"map":self.map(),"entities":[],"agents":agents})
+        json!({"map":self.map(),"entities":self.map_state.entities().iter().map(wire).collect::<Vec<_>>(),"agents":agents})
     }
     pub fn frame_agents(&self) -> Value {
         json!(self.agents.iter().map(|a|json!({"id":a.id,"x":a.position.x,"y":a.position.y,"profile":a.profile,"controller":a.controller,"state":a.state})).collect::<Vec<_>>())
@@ -321,7 +371,8 @@ impl World {
         let mut overlays:Vec<Value>=self.agents.iter().enumerate().filter(|(_,a)|a.state=="immobile"&&a.components.physical.blocks_movement).map(|(i,a)|json!({"id":format!("immobile-{}",i+1),"entityId":a.id,"cells":self.grid.footprint(a.position.x.0,a.position.y.0,a.components.physical.radius.0),"kind":"immobile"})).collect();
         for (i, portal) in self
             .map_state
-            .portals
+            .all_portals()
+            .unwrap()
             .iter()
             .enumerate()
             .filter(|(_, p)| !p.open)
@@ -335,9 +386,9 @@ impl World {
             overlays.push(json!({"id":format!("portal-{i}"),"entityId":portal.id,"cells":self.grid.portal_index.iter().enumerate().filter_map(|(i,p)|(*p==index).then_some(i)).collect::<Vec<_>>(),"kind":"portal"}));
         }
         json!({"schemaVersion":1,"simulationId":self.initial.scene.simulation_id,"id":id,"initialSceneHash":self.initial_scene_hash,"versions":versions,
-            "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":[],"entityOrigins":[],
-            "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":[],"rules":[],"queues":[],"slots":[],"allocations":self.allocations,"random":self.random,
-            "metrics":{"samples":[],"departures":[],"removedCount":0,"portalCrossings":[],"queueTotals":[],"clearance":null},"events":[],"historyRevision":self.history.history_revision,
+            "tick":self.tick,"model":wire(&self.initial.resolved_model),"map":self.map(),"topologyVersion":self.topology_version,"overlays":overlays,"entities":self.map_state.entities().iter().map(wire).collect::<Vec<_>>(),"entityOrigins":[],
+            "profiles":wire(&self.initial.scene.profiles),"controllers":wire(&self.initial.scene.controllers),"agents":self.agents,"jobs":[],"rules":[],"queues":self.queues,"slots":self.slots,"allocations":self.allocations,"random":self.random,
+            "metrics":{"samples":[],"departures":self.departures,"removedCount":self.removed_count,"portalCrossings":[],"queueTotals":[],"clearance":null},"events":self.events,"historyRevision":self.history.history_revision,
             "appliedThrough":{"tick":self.tick,"order":self.history.records.len(),"prefixHash":fingerprint(&self.history.records)},"contactState":null})
     }
 }
@@ -441,6 +492,26 @@ pub fn wire<T: Serialize>(value: &T) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn service_serialization_preserves_fifo_credit_slots_and_nested_cursors() {
+        let input: Value = serde_json::from_str(include_str!(
+            "../../contract/fixtures/engine-services-load.json"
+        ))
+        .unwrap();
+        let initial = serde_json::from_value(input["compiled"].clone()).unwrap();
+        let mut world = World::load(initial, &Id("engine-demo".into())).unwrap();
+        world.advance(7).unwrap();
+        let mut restored: World =
+            serde_json::from_str(&serde_json::to_string(&world).unwrap()).unwrap();
+        for _ in 0..100 {
+            world.advance(1).unwrap();
+            restored.advance(1).unwrap();
+            assert_eq!(
+                world.snapshot(&Id("saved".into())),
+                restored.snapshot(&Id("saved".into()))
+            );
+        }
+    }
     #[test]
     fn movement_failure_rolls_back_the_whole_batch() {
         let input: Value = serde_json::from_str(include_str!(

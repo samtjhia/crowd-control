@@ -162,3 +162,47 @@ test('actual Wasm movement, crossing streams, terrain and recovery match native 
     bindings.destroy_engine(handle)
   }
 })
+
+test('actual Wasm service goals preserve claims, edits, cursors and departures with native parity', async () => {
+  const bindings = await engine(), handle = bindings.create_engine()
+  const initial = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-services-load.json', import.meta.url), 'utf8'))
+  const header = { schemaVersion: 1, simulationId: 'engine-demo' }
+  const apply = (id: string, operations: unknown[]) => ({ ...header, type: 'apply_request', commandId: id, request: { ...header, requestId: id, operations } })
+  const commands = [initial,
+    { ...header, commandId: 'join', type: 'step', ticks: 2 },
+    { ...header, commandId: 'queued', type: 'snapshot', snapshotId: 'queued' },
+    { ...header, commandId: 'serve', type: 'step', ticks: 11 },
+    { ...header, commandId: 'serving', type: 'snapshot', snapshotId: 'serving' },
+    apply('hold', [{ op: 'set', targets: { ids: ['a1'] }, values: { components: { mobility: { speedMultiplier: 0 } }, appearance: { pose: 'fallen' } } }]),
+    { ...header, commandId: 'held', type: 'step', ticks: 10 },
+    apply('recover', [{ op: 'set', targets: { ids: ['a1'] }, values: { components: { mobility: { speedMultiplier: 1 } }, appearance: { pose: 'upright' } } }]),
+    apply('pending', [{ op: 'assign_goal', targets: { ids: ['a3'] }, mode: 'enqueue', goal: { kind: 'wait', duration: 0.2 } }]),
+    apply('replace', [{ op: 'assign_goal', targets: { ids: ['a3'] }, goal: { kind: 'sequence', repeat: 2, goals: [{ kind: 'wait', duration: 0.1 }, { kind: 'wait', duration: 0.2 }] } }]),
+    apply('clear-pending', [{ op: 'clear_goal', targets: { ids: ['a3'] }, scope: 'queued' }]),
+    { ...header, commandId: 'finish', type: 'step', ticks: 400 },
+    { ...header, commandId: 'final', type: 'snapshot', snapshotId: 'final' },
+    { ...header, commandId: 'history', type: 'query', query: { kind: 'history' } },
+    apply('remove-roamer', [{ op: 'remove', targets: { ids: ['a3'], kind: 'agent' } }]),
+    { ...header, commandId: 'removed', type: 'snapshot', snapshotId: 'removed' },
+  ]
+  const wasm = commands.map((c) => {
+    assert.equal(parseWorkerCommand(c).ok, true, JSON.stringify(c))
+    const messages = JSON.parse(bindings.dispatch(handle, JSON.stringify(c)))
+    for (const m of messages) { const parsed = parseWorkerMessage(m); assert.equal(parsed.ok, true, JSON.stringify(parsed)); assert.notEqual(m.type, 'error', JSON.stringify(m)) }
+    return messages
+  })
+  const executable = fileURLToPath(new URL(`../../target/debug/examples/protocol${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url))
+  const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((line) => JSON.parse(line))
+  assert.deepEqual(wasm, native)
+  assert.equal(wasm[2][0].snapshot.queues.find((q: { targetId: string }) => q.targetId === 'desk').entries.length, 2)
+  assert.equal(wasm[4][0].snapshot.slots[0].slots[0].agentId, 'a1')
+  const final = wasm[12][0].snapshot
+  assert.equal(final.metrics.departures.length, 2)
+  assert.equal(final.events.filter((e: { name: string }) => e.name === 'departure').length, 2)
+  assert.equal(final.agents.every((a: { queueRef: unknown; interactionRef: unknown }) => a.queueRef === null && a.interactionRef === null), true)
+  assert.equal(final.slots[0].slots[0].agentId, null)
+  const removed = wasm.at(-1)[0].snapshot
+  assert.equal(removed.metrics.removedCount, 1)
+  assert.equal(removed.metrics.departures.length, 2)
+  bindings.destroy_engine(handle)
+})

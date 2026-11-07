@@ -30,7 +30,7 @@ pub fn point_segment(x: f64, y: f64, a: &Point, b: &Point) -> f64 {
     let t = ((x - a.x.0) * ux + (y - a.y.0) * uy).clamp(0.0, length);
     norm(x - (a.x.0 + t * ux), y - (a.y.0 + t * uy))
 }
-fn segment_rect(a: &Point, b: &Point, l: f64, t: f64, r: f64, bottom: f64) -> f64 {
+pub fn segment_rect(a: &Point, b: &Point, l: f64, t: f64, r: f64, bottom: f64) -> f64 {
     let mut enter: f64 = 0.0;
     let mut exit: f64 = 1.0;
     for (start, delta, min, max) in [

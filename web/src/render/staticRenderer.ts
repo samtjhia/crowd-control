@@ -4,6 +4,8 @@ type Graphics = {
   rect(x: number, y: number, width: number, height: number): Graphics
   circle(x: number, y: number, radius: number): Graphics
   poly(points: number[]): Graphics
+  moveTo(x: number, y: number): Graphics
+  lineTo(x: number, y: number): Graphics
   fill(color: string): Graphics
   stroke(style: { color: string; width: number }): Graphics
   position: { set(x: number, y: number): void }
@@ -49,12 +51,32 @@ export async function createStaticRenderer(host: HTMLElement) {
         const paint = (x: number, y: number, blocked: boolean, id: string | null | undefined, terrain = 1) => {
           const room = map.rooms.find((r) => r.id === id)
           const portal = map.portals.find((p) => p.id === id)
-          drawCell(x, y, blocked ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? '#E2E8F0', !blocked && terrain < 1)
+          const entity = scene.entities.find((e) => e.id === id)
+          drawCell(x, y, blocked ? '#334155' : room?.appearance?.fill ?? portal?.appearance?.fill ?? entity?.appearance?.fill ?? '#E2E8F0', !blocked && terrain < 1)
         }
         if ('grid' in map) {
           const grid = map.grid
           grid.blocked.forEach((blocked, i) => paint(i % grid.width, Math.floor(i / grid.width), blocked === 1, grid.portalIds[grid.portalIndex[i]!] ?? grid.zoneIds[grid.zoneIndex[i]!], grid.terrainSpeedMultiplier?.[i]))
         } else map.rows.forEach((row, y) => [...row].forEach((glyph, x) => paint(x, y, glyph === '#', map.legend[glyph])))
+        for (const entity of scene.entities) {
+          if (!entity.shape || entity.kind === 'zone' || entity.kind === 'portal') continue
+          const shape = entity.shape, graphic = new pixi.Graphics()
+          const x = (value: number) => (value - camera.pan.x) * scale
+          const y = (value: number) => (value - camera.pan.y) * scale
+          const fill = entity.appearance?.fill ?? '#64748B'
+          switch (shape.kind) {
+            case 'rectangle': graphic.rect(x(shape.x), y(shape.y), shape.width * scale, shape.height * scale).fill(fill); break
+            case 'circle': graphic.circle(x(shape.center.x), y(shape.center.y), shape.radius * scale).fill(fill); break
+            case 'polygon': graphic.poly(shape.points.flatMap((p) => [x(p.x), y(p.y)])).fill(fill); break
+            case 'thick_line':
+              graphic.moveTo(x(shape.points[0]!.x), y(shape.points[0]!.y))
+              for (const p of shape.points.slice(1)) graphic.lineTo(x(p.x), y(p.y))
+              graphic.stroke({ color: fill, width: shape.width * scale }); break
+          }
+          if (entity.appearance?.stroke) graphic.stroke({ color: entity.appearance.stroke, width: entity.appearance.strokeWidthPx ?? 1 })
+          graphic.alpha = entity.appearance?.opacity ?? 1
+          app.stage.addChild(graphic)
+        }
         for (const agent of scene.agents) {
           const r = agent.radius * scale
           const graphic = new pixi.Graphics()

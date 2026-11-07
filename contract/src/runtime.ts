@@ -8,7 +8,7 @@ import { CommandCursorSchema, HistoryStateSchema } from './history.js';
 import { ScenarioPlanSchema } from './planner.js';
 
 export const AgentStateSchema = z.enum(['idle', 'reacting', 'moving', 'waiting', 'queueing', 'interacting', 'blocked', 'immobile', 'departed', 'failed']);
-export const GoalRuntimeSchema = z.strictObject({ id: IdSchema, spec: CompiledGoalSchema, status: z.enum(['pending', 'active', 'suspended', 'completed', 'failed']), cursor: z.array(z.strictObject({ childIndex: CounterSchema, repeatsRemaining: CounterSchema })), startedAt: SimTimeSchema.nullable(), failure: z.strictObject({ code: IdSchema, message: z.string() }).nullable() });
+export const GoalRuntimeSchema = z.strictObject({ id: IdSchema, spec: CompiledGoalSchema, execution: z.strictObject({ phase: z.enum(['new', 'travel', 'arrived', 'active']), elapsed: SimTimeSchema, targetPoint: Vec2Schema.nullable() }).optional(), status: z.enum(['pending', 'active', 'suspended', 'completed', 'failed']), cursor: z.array(z.strictObject({ childIndex: CounterSchema, repeatsRemaining: CounterSchema })), startedAt: SimTimeSchema.nullable(), failure: z.strictObject({ code: IdSchema, message: z.string() }).nullable() });
 export const AgentRuntimeSchema = z.strictObject({
   id: IdSchema, kind: z.literal('agent'), label: z.string().optional(), tags: z.array(IdSchema), profile: IdSchema, components: ResolvedAgentComponentsSchema, appearance: AppearanceSchema.optional(),
   sensors: z.strictObject({ contactLoad: NonnegativeSchema, contactLoadRatio: NonnegativeSchema }).nullable(),
