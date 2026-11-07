@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
-  ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
+  ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
 } from 'lucide-react'
 import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
@@ -18,6 +18,7 @@ import { Timeline } from './Timeline.tsx'
 import { formatClock, toIncidents, type Incident } from './incidents.ts'
 import type { Pick, PickKind } from '../render/hitTest.ts'
 import { ChangesList, MapToolbar, SelectionDetails, type MapTool } from './MapTools.tsx'
+import { DensityPanel } from './DensityPanel.tsx'
 import { actionFor, toggle as toggleIn, union, type MapAction } from './mapActions.ts'
 import { describeScenario, scenarios, startScenario } from './scenario.ts'
 
@@ -88,6 +89,25 @@ function saveDrawMode(mode: AgentDrawMode) {
   }
 }
 
+const HEATMAP_KEY = 'crowd-control:heatmap'
+
+/** The heatmap is on unless this viewer turned it off. */
+function savedHeatmap(): boolean {
+  try {
+    return window.localStorage.getItem(HEATMAP_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+function saveHeatmap(on: boolean) {
+  try {
+    window.localStorage.setItem(HEATMAP_KEY, on ? 'on' : 'off')
+  } catch {
+    // Not persisted; the switch still works for this visit.
+  }
+}
+
 export default function SimulatorApp() {
   // One endpoint and client per page. The mock is swapped for the real Wasm adapter here later.
   const [client] = useState(() => new SimulationClient(createMockEndpoint()))
@@ -95,6 +115,8 @@ export default function SimulatorApp() {
   const rendererRef = useRef<CrowdRenderer | null>(null)
   const [camera, setCamera] = useState<Camera | null>(null)
   const [drawMode, setDrawMode] = useState<AgentDrawMode>(savedDrawMode)
+  const [heatmap, setHeatmap] = useState(savedHeatmap)
+  const heatmapRef = useRef(heatmap)
   const drawModeRef = useRef(drawMode)
   const panelsRef = useRef<Panels | null>(null)
   const [panels, setPanels] = useState<Panels>(() => {
@@ -203,6 +225,7 @@ export default function SimulatorApp() {
       stopBox = created.onBoxSelect((picks, additive) => onBoxRef.current(picks, additive))
       created.setPickable(PICKABLE[toolRef.current])
       created.setBoxSelect(BOX_MODE[toolRef.current])
+      created.setHeatmap(heatmapRef.current)
       if (panelsRef.current) created.setInsets(insetsFor(panelsRef.current))
     })
     return () => {
@@ -231,6 +254,12 @@ export default function SimulatorApp() {
   }, [drawMode])
 
   useEffect(() => {
+    heatmapRef.current = heatmap
+    rendererRef.current?.setHeatmap(heatmap)
+    saveHeatmap(heatmap)
+  }, [heatmap])
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (event.metaKey || event.ctrlKey || event.altKey || target?.closest('input, select, textarea, [contenteditable="true"]')) return
@@ -249,6 +278,7 @@ export default function SimulatorApp() {
           case 'b': case 'B': setTool('box'); return true
           case 'f': case 'F': setTool('trip'); return true
           case 'd': case 'D': setTool('doors'); return true
+          case 'h': case 'H': setHeatmap((on) => !on); return true
           case 'Escape':
             if (window.innerWidth >= WIDE) { setSelection([]); return true }
             setPanels({ left: false, right: false })
@@ -319,6 +349,10 @@ export default function SimulatorApp() {
         <button type="button" className="sim-icon-btn" aria-label="Zoom out" aria-keyshortcuts="-" onClick={() => rendererRef.current?.zoom(1 / 1.25)}><Minus size={15} /></button>
         <button type="button" className="sim-icon-btn" aria-label="Fit map to view" aria-keyshortcuts="0" onClick={() => rendererRef.current?.resetCamera()}><Maximize2 size={14} /></button>
         <span className="sim-zoom-divider" aria-hidden="true" />
+        <button type="button" className="sim-icon-btn" aria-pressed={heatmap} aria-keyshortcuts="H" onClick={() => setHeatmap((on) => !on)}
+          aria-label={heatmap ? 'Hide density heatmap' : 'Show density heatmap'} title={heatmap ? 'Hide density heatmap (H)' : 'Show density heatmap (H)'}>
+          <Flame size={15} />
+        </button>
         <button type="button" className="sim-icon-btn" aria-pressed={!anyPanelOpen} aria-keyshortcuts="\" onClick={toggleBoth}
           aria-label={anyPanelOpen ? 'Hide both panels' : 'Show both panels'} title={anyPanelOpen ? 'Hide both panels' : 'Show both panels'}>
           <PanelsLeftRight size={15} />
@@ -337,11 +371,7 @@ export default function SimulatorApp() {
           <SelectionDetails selection={selection} view={view} onAction={applyAction} onClear={() => setSelection([])} />
         </Section>
         <Section title="Density">
-          <p className="sim-muted">
-            {view.scene?.map.units === 'm'
-              ? 'The density heatmap arrives with the simulation engine.'
-              : 'This plan is not to scale, so density can’t be shown in people per m². The heatmap appears on metre-scaled venues once the engine is connected.'}
-          </p>
+          <DensityPanel view={view} on={heatmap} onToggle={() => setHeatmap((on) => !on)} />
         </Section>
         <EventLog incidents={incidents} error={view.lastError} />
         <Section title="Changes">
