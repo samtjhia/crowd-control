@@ -1,4 +1,5 @@
 import { parseCompileInput, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
+import { compileBehaviour } from './behaviour/compile.ts'
 import { chainLayout, designPopulation } from './layout/chain.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
 import { resolveProfiles } from './profiles/catalog.ts'
@@ -31,7 +32,7 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
-/** Generated chain layouts (§8). Sizing, the glyph map, profiles and the starting crowd are built; goals follow in steps 5–6. */
+/** Generated chain layouts (§8). Everything is compiled; assembling and self-validating the scene is step 6. */
 function compileGenerated(input: CompileInput): Result<CompileOutput> {
   const { layout } = input.plan
   if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
@@ -48,7 +49,9 @@ function compileGenerated(input: CompileInput): Result<CompileOutput> {
   if (!profiles.ok) return profiles
   const agents = placeInitialAgents(input.plan.initialOperations, rooms, profiles.value, input.model)
   if (!agents.ok) return agents
-  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are placed but goals are not compiled yet', { path: 'plan.layout' })
+  const behaviour = compileBehaviour(input.plan, { rooms, portals, agents: agents.value })
+  if (!behaviour.ok) return behaviour
+  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are compiled but the scene is not assembled yet', { path: 'plan.layout' })
 }
 
 /** Prepared venue lookup: built in step 8. */

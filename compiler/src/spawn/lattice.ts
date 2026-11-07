@@ -83,7 +83,7 @@ export function placeInitialAgents(operations: Operation[], rooms: RoomRecord[],
 }
 
 /** `{ inside: { ids: [room] } }`, optionally with `kind: "zone"`, is the one placement supported so far. */
-function insideRoomId(placement: Placement): string | undefined {
+export function insideRoomId(placement: Placement): string | undefined {
   if (!('inside' in placement) || Object.keys(placement).length !== 1) return undefined
   const { ids, kind, ...rest } = placement.inside
   if (Object.keys(rest).length > 0 || (kind !== undefined && kind !== 'zone') || ids?.length !== 1) return undefined
