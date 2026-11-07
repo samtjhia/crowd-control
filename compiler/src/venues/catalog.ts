@@ -6,17 +6,22 @@ import { buildPreparedMap, type MetreRect, type VenueSpec } from './build.ts'
  * The four prepared venues (Role B §2). Measurements are in metres at 0.25 m cells, origin
  * top-left. They are plausible, deliberately simple floor plans written for the demo, not
  * surveys of real buildings. Walls are 0.5 m unless a door opening sits in them.
+ *
+ * Exit doors list the inside area first and the outside area second: the simulator treats
+ * reaching the second area through an `exit` door as leaving the venue.
  */
 
 const rect = (x: number, y: number, width: number, height: number): MetreRect => ({ x, y, width, height })
 
-const OUTSIDE = { fill: '#DCFCE7' }
-const INDOOR = { fill: '#DBEAFE' }
-const CIRCULATION = { fill: '#F1F5F9' }
-const STREET = { fill: '#FEF3C7' }
-const FEATURE = { fill: '#FDE68A' }
-const SOCIAL = { fill: '#FCE7F3' }
+// Areas show their names on the map; door colours follow the worked example's green openings.
+const OUTSIDE = { fill: '#DCFCE7', labelVisible: true }
+const INDOOR = { fill: '#DBEAFE', labelVisible: true }
+const CIRCULATION = { fill: '#F1F5F9', labelVisible: true }
+const STREET = { fill: '#FEF3C7', labelVisible: true }
+const FEATURE = { fill: '#FDE68A', labelVisible: true }
+const SOCIAL = { fill: '#FCE7F3', labelVisible: true }
 const EXIT = { fill: '#86EFAC' }
+const DESK = { fill: '#FDE68A' }
 
 /**
  * Hero demo: a narrow, sloped alley about 4 m wide and 45 m long, running uphill from a
@@ -110,9 +115,9 @@ export const HACKATHON_HALL: VenueSpec = (() => {
       { id: 'car_park', label: 'Car park', tags: ['outside', 'assembly'], appearance: OUTSIDE, rects: [rect(56, 0.5, 6, 30)] },
     ],
     portals: [
-      { id: 'main_entrance', label: 'Main entrance', tags: ['entrance', 'exit'], appearance: EXIT, rect: rect(5, 14.5, 4, 0.5), connects: ['street', 'lobby'] },
-      { id: 'checkin_a', label: 'Check-in desk A', tags: ['check-in'], appearance: FEATURE, rect: rect(14.5, 4, 1, 1), connects: ['lobby', 'hall'], traversalTime: 4 },
-      { id: 'checkin_b', label: 'Check-in desk B', tags: ['check-in'], appearance: FEATURE, rect: rect(14.5, 10, 1, 1), connects: ['lobby', 'hall'], traversalTime: 4 },
+      { id: 'main_entrance', label: 'Main entrance', tags: ['entrance', 'exit'], appearance: EXIT, rect: rect(5, 14.5, 4, 0.5), connects: ['lobby', 'street'] },
+      { id: 'checkin_a', label: 'Check-in desk A', tags: ['check-in'], appearance: DESK, rect: rect(14.5, 4, 1, 1), connects: ['lobby', 'hall'], traversalTime: 4 },
+      { id: 'checkin_b', label: 'Check-in desk B', tags: ['check-in'], appearance: DESK, rect: rect(14.5, 10, 1, 1), connects: ['lobby', 'hall'], traversalTime: 4 },
       { id: 'fire_exit_north', label: 'North fire exit', tags: ['exit', 'fire-exit'], appearance: EXIT, rect: rect(55.5, 5, 0.5, 2), connects: ['hall', 'car_park'] },
       { id: 'fire_exit_south', label: 'South fire exit', tags: ['exit', 'fire-exit'], appearance: EXIT, rect: rect(55.5, 24, 0.5, 2), connects: ['hall', 'car_park'] },
     ],

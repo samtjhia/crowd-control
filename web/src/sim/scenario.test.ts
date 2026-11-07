@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import type { CompileOutput, Frame, ScenarioPlan, WorkerCommand, WorkerMessage } from '@crowd-control/contract'
 import { MockSimulation } from '../worker/mock/simulation.ts'
-import { describeScenario, startScenario } from './scenario.ts'
+import { describeScenario, scenarios, startScenario } from './scenario.ts'
 
 const fixture = <T>(name: string) => JSON.parse(readFileSync(new URL(`../../../contract/fixtures/${name}.json`, import.meta.url), 'utf8')) as T
 const plan = () => fixture<ScenarioPlan>('scenario-plan')
@@ -17,8 +17,8 @@ function compiled(): CompileOutput {
 }
 
 let commands = 0
-function send(sim: MockSimulation, body: Record<string, unknown>): WorkerMessage[] {
-  return sim.handle({ schemaVersion: 1, simulationId: 'worked-demo', commandId: `c${++commands}`, ...body } as WorkerCommand)
+function send(sim: MockSimulation, body: Record<string, unknown>, simulationId = 'worked-demo'): WorkerMessage[] {
+  return sim.handle({ schemaVersion: 1, simulationId, commandId: `c${++commands}`, ...body } as WorkerCommand)
 }
 const lastFrame = (messages: WorkerMessage[]): Frame => {
   const frame = messages.filter((m) => m.type === 'frame').at(-1)
@@ -54,4 +54,50 @@ test('a bad plan comes back as an error with the failing path, not a broken scen
   const result = startScenario(broken, model)
   assert.equal(result.ok, false)
   assert.equal(startScenario({ nonsense: true }, model).ok, false)
+})
+
+const all = scenarios(plan(), model)
+
+test('every scenario in the picker compiles, and venues are summarised by name', () => {
+  assert.deepEqual(all.map((s) => s.id), ['worked-example', 'hillside-alley', 'school-wing', 'concert-floor', 'hackathon-hall'])
+  for (const scenario of all) {
+    const result = startScenario(scenario.plan, scenario.model)
+    assert.equal(result.ok, true, `${scenario.id}: ${JSON.stringify(result.ok ? '' : result.error)}`)
+  }
+  const alley = startScenario(all[1]!.plan, all[1]!.model)
+  assert.equal(alley.ok && describeScenario(alley.value), 'Hillside Alley, Street level · 160 people')
+})
+
+test('each venue plays in the mock worker without errors, and walkers stay on floor cells', () => {
+  for (const scenario of all.slice(1)) {
+    const result = startScenario(scenario.plan, scenario.model)
+    if (!result.ok) throw new Error(result.error.message)
+    const { map } = result.value.scene
+    if (!('grid' in map)) throw new Error('venues use grid maps')
+    const sim = new MockSimulation()
+    const id = result.value.scene.simulationId
+    send(sim, { type: 'load', compiled: result.value, history: { historyRevision: 0, records: [], outcomes: [] } }, id)
+    const messages = send(sim, { type: 'run_to', time: 20 }, id)
+    assert.deepEqual(messages.filter((m) => m.type === 'error'), [], scenario.id)
+    const frame = lastFrame(messages)
+    assert.ok(frame.agents.length > 0)
+    // Wanderers and waiters stand on walkable cells (people walking between targets may cut corners in the mock).
+    const parked = frame.agents.filter((agent) => agent.state === 'waiting' || agent.state === 'idle')
+    for (const agent of parked) {
+      const i: number = Math.floor(agent.y / map.cellSize) * map.grid.width + Math.floor(agent.x / map.cellSize)
+      assert.equal(map.grid.blocked[i], 0, `${scenario.id} ${agent.id} at ${agent.x},${agent.y}`)
+    }
+  }
+})
+
+test('two-way alley: people from each end head for the other', () => {
+  const result = startScenario(all[1]!.plan, all[1]!.model)
+  if (!result.ok) throw new Error(result.error.message)
+  const sim = new MockSimulation()
+  const id = result.value.scene.simulationId
+  const start = lastFrame(send(sim, { type: 'load', compiled: result.value, history: { historyRevision: 0, records: [], outcomes: [] } }, id))
+  const later = lastFrame(send(sim, { type: 'run_to', time: 15 }, id))
+  const x = (frame: Frame, id: string) => frame.agents.find((agent) => agent.id === id)!.x
+  assert.ok(x(later, 'a1') > x(start, 'a1'), 'an uphill walker moves east')
+  assert.ok(x(later, 'a81') < x(start, 'a81'), 'a downhill walker moves west')
 })

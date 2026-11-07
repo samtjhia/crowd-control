@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
-  ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
+  ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, SendHorizontal, Siren, StepForward,
 } from 'lucide-react'
-import type { Camera, ModelPreset } from '@crowd-control/contract'
+import type { Camera, ModelPreset, ScenarioPlan } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
 import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
@@ -16,7 +16,7 @@ import { PlanSigns } from './PlanSigns.tsx'
 import { StatusIcon } from './StatusIcon.tsx'
 import { Timeline } from './Timeline.tsx'
 import { formatClock, toIncidents, type Incident } from './incidents.ts'
-import { describeScenario, startScenario } from './scenario.ts'
+import { describeScenario, scenarios, startScenario } from './scenario.ts'
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -38,10 +38,25 @@ function insetsFor(panels: Panels) {
   }
 }
 /**
- * The Technical PRD §8 plan, compiled in the browser on load, until the planner and prepared
- * venues supply plans. The preset is the fixture's example preset (model units, not metres).
+ * Demo plans compiled in the browser, until the planner supplies them: the Technical PRD §8
+ * worked example (model units) and one per prepared venue (metres).
  */
-const SCENARIO = { title: 'Worked example', plan: workedPlan as unknown, model: examplePreset.resolvedModel as ModelPreset }
+const SCENARIOS = scenarios(workedPlan as ScenarioPlan, examplePreset.resolvedModel as ModelPreset)
+const SCENARIO_PARAM = 'scenario'
+
+/** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
+function initialScenarioId(): string {
+  const requested = new URLSearchParams(window.location.search).get(SCENARIO_PARAM)
+  return SCENARIOS.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
+}
+
+/** Keeps the choice in the URL so a reload or a shared link opens the same venue. */
+function rememberScenario(id: string) {
+  const url = new URL(window.location.href)
+  if (id === SCENARIOS[0]!.id) url.searchParams.delete(SCENARIO_PARAM)
+  else url.searchParams.set(SCENARIO_PARAM, id)
+  window.history.replaceState(window.history.state, '', url)
+}
 const SUGGESTIONS = ['Close the hall door for 30 seconds', 'Someone trips in the foyer', 'Why did people queue at the exit?']
 
 type Panels = { left: boolean; right: boolean }
@@ -91,9 +106,15 @@ export default function SimulatorApp() {
     return { left: open, right: open }
   })
 
-  // Compiled once per page; the plan is fixed until the planner can replace it.
-  const [compiled] = useState(() => startScenario(SCENARIO.plan, SCENARIO.model))
+  const [scenarioId, setScenarioId] = useState(initialScenarioId)
+  const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId)!
+  // Compiled once per choice; switching scenarios loads a fresh simulation.
+  const compiled = useMemo(() => startScenario(scenario.plan, scenario.model), [scenario])
   const scenarioDetail = compiled.ok ? describeScenario(compiled.value) : 'This plan could not be built'
+  const chooseScenario = (id: string) => {
+    setScenarioId(id)
+    rememberScenario(id)
+  }
 
   useEffect(() => {
     // A plan that fails to compile never reaches the worker; its error shows in the event log.
@@ -188,7 +209,16 @@ export default function SimulatorApp() {
 
       <header className="sim-float sim-topbar">
         <p className="sim-brand"><BrandMark /> Crowd Control</p>
-        <p className="sim-scenario"><span>{SCENARIO.title}</span> · {scenarioDetail}</p>
+        <div className="sim-scenario">
+          <label className="sim-scenario-picker">
+            <span className="visually-hidden">Scenario</span>
+            <select value={scenarioId} onChange={(event) => chooseScenario(event.target.value)}>
+              {SCENARIOS.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+            </select>
+            <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
+          </label>
+          <span className="sim-scenario-detail">{scenarioDetail}</span>
+        </div>
         {alarm && (
           <p className="sim-tag sim-tag-alarm" role="status">
             <Siren size={13} strokeWidth={2.25} aria-hidden="true" /> Alarm at {formatClock(alarm.time, false)}
