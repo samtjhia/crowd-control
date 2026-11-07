@@ -1,4 +1,5 @@
 import { parseCompileInput, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
+import { chainLayout, designPopulation } from './layout/chain.ts'
 import { fail } from './result.ts'
 
 /**
@@ -27,9 +28,13 @@ export function compile(input: unknown): Result<CompileOutput> {
   }
 }
 
-/** Generated chain layouts (§8): built in step 1. */
-function compileGenerated(_input: CompileInput): Result<CompileOutput> {
-  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are not built yet', { path: 'plan.layout' })
+/** Generated chain layouts (§8). Sizing is built; rasterizing and agents follow in steps 2–6. */
+function compileGenerated(input: CompileInput): Result<CompileOutput> {
+  const { layout } = input.plan
+  if (layout.mode !== 'generate') throw new Error('compileGenerated needs a generated layout')
+  const sized = chainLayout(layout.spaces, layout.connections, designPopulation(input.plan), input.model)
+  if (!sized.ok) return sized
+  return fail('UNSUPPORTED_CAPABILITY', 'Generated layouts are sized but not yet rasterized', { path: 'plan.layout' })
 }
 
 /** Prepared venue lookup: built in step 8. */
