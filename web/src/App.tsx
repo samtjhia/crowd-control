@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { CampusCrowd, FallingCrowd, StoryCrowd } from './components/AmbientCrowd'
 import { Icon } from './components/Icons'
 import { ScenarioExplorer } from './components/ScenarioExplorer'
-import { CampusScene, SkyCorners } from './components/CampusScene'
+import { CampusScene } from './components/CampusScene'
+import { SkySimulation } from './components/SkySimulation'
 import { Journey } from './components/Journey'
 
 function Brand() {
@@ -22,9 +23,9 @@ function App() {
     <main>
       <Journey>
       <section className="hero" id="top" aria-labelledby="hero-title">
-        <header className="navigation"><Brand /><a className="button button-green nav-cta" href="#scenarios">Explore the demo <Icon name="diagonal" size={16} /></a></header>
-        <SkyCorners />
-        <div className="hero-copy"><h1 id="hero-title">Ask “what if?”<br /><span>Before it becomes “what now?”</span></h1></div>
+        <header className="navigation"><Brand /></header>
+        <SkySimulation reduced={reduced} />
+        <div className="hero-copy"><h1 id="hero-title">Simulate Any <span>Crowd.</span></h1><p>Describe a scenario. See what happens.</p><a className="button button-green hero-primary" href="#scenarios">Explore the demo <Icon name="arrow" size={19} /></a></div>
         <div className="campus-scene"><CampusScene /><CampusCrowd reduced={reduced} playing /></div>
 
       </section>

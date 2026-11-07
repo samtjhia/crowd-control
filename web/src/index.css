@@ -2,16 +2,16 @@
 
 :root {
   font-family: 'DM Sans', sans-serif;
-  color: #263c2e;
-  background: #fcfcf9;
+  color: #214b3b;
+  background: #fbfaf8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   color-scheme: light;
   scroll-behavior: smooth;
-  --paper: #fcfcf9;
-  --ink: #263c2e;
-  --green: #357650;
+  --paper: #fbfaf8;
+  --ink: #214b3b;
+  --green: #195c3e;
   --muted: #667362;
   --line: #e1e6db;
   --blue: #597dab;
@@ -58,7 +58,7 @@ h1, h2 { font-family: 'Manrope', sans-serif; font-weight: 500; letter-spacing: -
 .campus-scene { position: relative; aspect-ratio: 1536 / 720; max-width: 1600px; width: 100%; margin: 2px auto 0; overflow: hidden; }
 .campus-scene > img { position: absolute; width: 100%; height: auto; bottom: 0; display: block; mix-blend-mode: multiply; }
 .campus-crowd { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.campus-caption { position: absolute; bottom: 6%; left: 7%; display: flex; align-items: center; gap: 7px; font-size: 10px; color: #5a6e50; padding: 8px 11px; background: #fcfcf9e8; border-radius: 4px; }
+.campus-caption { position: absolute; bottom: 6%; left: 7%; display: flex; align-items: center; gap: 7px; font-size: 10px; color: #5a6e50; padding: 8px 11px; background: #fbfaf8e8; border-radius: 4px; }
 .small-status { width: 5px; height: 5px; background: #4d8052; border-radius: 50%; }
 .story { max-width: 1240px; margin: 35px auto 0; height: 1120px; position: relative; scroll-margin-top: 30px; }
 .story-crowd { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -250,9 +250,8 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
 .hero-copy { top: 38%; transform: translateY(-50%); }
 .hero h1 { margin-bottom: 0; }
 .campus-scene { top: 54%; bottom: 0; height: 46%; overflow: hidden; }
-.sky-corners { position: absolute; top: 0; left: 0; width: 100%; height: 22%; max-height: 240px; pointer-events: none; }
 .story { margin-top: 0; }
-.handoff-line { width: 86px; left: 50%; transform: translateX(-50%); height: 55px; background: #f6f2e8; }
+.handoff-line { width: 86px; left: 50%; transform: translateX(-50%); height: 55px; background: #fcf2e5; }
 .handoff-line::after { content: ''; position: absolute; left: 0; right: 0; bottom: -5px; height: 5px; background: #e1dcca; }
 @media (max-width: 700px) {
   .hero-copy { top: 38%; }
@@ -275,4 +274,58 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
 @media (max-height: 700px) and (min-width: 701px) {
   .hero-copy { top: 6%; }
   .navigation { top: 37%; }
+}
+
+/* Reference-led opening: a compact message/action stack over a park campus. */
+.hero { display: grid; grid-template-rows: auto minmax(300px, 1fr); height: min(100svh, 900px); min-height: 700px; }
+.navigation { top: 25px; left: 5%; right: auto; transform: none; width: auto; max-width: none; height: auto; padding: 0; border: 0; background: transparent; }
+.navigation .brand { font-size: 16px; }
+.hero-copy { position: relative; top: auto; left: auto; right: auto; transform: none; padding: clamp(78px, 12svh, 120px) 24px 25px; }
+.hero h1 { font-size: clamp(36px, 3.8vw, 56px); line-height: 1.13; font-weight: 650; letter-spacing: -.035em; }
+.hero-copy > p { font-size: 17px; line-height: 1.5; color: #4d6b60; margin: 15px auto 23px; }
+.hero-primary { min-height: 48px; padding: 13px 25px; gap: 24px; border-radius: 25px; font-size: 14px; font-weight: 550; background: #195c3e; }
+.hero-primary:hover { background: #185235; }
+.campus-scene { position: relative; top: auto; bottom: auto; left: auto; right: auto; height: 100%; min-height: 0; align-self: stretch; }
+@media (max-width: 700px) {
+  .hero { display: block; height: auto; min-height: 0; }
+  .navigation { top: 22px; left: 6%; }
+  .navigation .brand { font-size: 15px; }
+  .hero-copy { top: auto; padding: 89px 18px 23px; }
+  .hero h1 { font-size: clamp(27px, 6.9vw, 39px); line-height: 1.16; }
+  .hero-copy > p { font-size: 13px; margin: 15px auto 20px; max-width: 30ch; }
+  .hero-primary { min-height: 46px; font-size: 12px; padding: 12px 22px; }
+  .campus-scene { height: calc(100vw * .40625); }
+}
+@media (max-height: 720px) and (min-width: 701px) {
+  .hero { min-height: 650px; }
+  .hero-copy { padding-top: 70px; padding-bottom: 18px; }
+  .hero h1 { font-size: 42px; }
+  .hero-copy > p { font-size: 14px; margin: 11px auto 17px; }
+}
+
+@media (max-width: 700px) {
+  .hero h1 span { font-size: inherit; white-space: nowrap; }
+}
+
+/* The visible palette follows the supplied campus reference. */
+:root { --leaf: #2c8b4f; --water: #aed6df; --lime: #c8df98; --cloud: #d4e5ed; }
+.hero h1 span { color: var(--leaf); }
+.sky-simulation { position: absolute; top: 0; left: 0; width: 100%; height: 52%; max-height: 380px; pointer-events: none; z-index: 0; overflow: hidden; }
+@media (max-width: 700px) { .sky-simulation { height: 235px; } }
+
+/* Match the supplied reference's larger message and low park panorama. */
+.hero { min-height: 735px; }
+.hero-copy { padding: clamp(110px, 16.5svh, 150px) 24px 30px; }
+.hero h1 { font-size: clamp(40px, 5.3vw, 76px); font-weight: 700; letter-spacing: -.035em; }
+.hero-copy > p { font-size: clamp(18px, 2vw, 26px); margin: 17px auto 38px; color: #426258; }
+.hero-primary { min-height: 60px; padding: 16px 36px; border-radius: 32px; font-size: 19px; gap: 27px; background: #195d3e; box-shadow: 0 8px 14px -9px #36664080; }
+.hero h1 span { color: #318b4d; }
+.sky-simulation { height: 53%; max-height: 440px; }
+@media (max-width: 700px) {
+ .hero { min-height: 0; }
+ .hero-copy { padding: 104px 16px 30px; }
+ .hero h1 { font-size: clamp(27px, 7vw, 45px); }
+ .hero-copy > p { font-size: 14px; margin: 14px auto 24px; max-width: 32ch; }
+ .hero-primary { min-height: 48px; padding: 12px 25px; font-size: 14px; }
+ .sky-simulation { height: 270px; }
 }

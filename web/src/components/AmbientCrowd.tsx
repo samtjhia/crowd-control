@@ -13,7 +13,7 @@ export function CampusCrowd({ reduced, playing }: { reduced: boolean; playing: b
     for (const person of people) {
       if (person.i < 12) continue
       ctx.globalAlpha = person.opacity
-      drawPerson(ctx, person.x, frame.campusY + person.y * frame.campusScaleY, person.size, person.i, time * person.pace, !still && person.walking)
+      drawPerson(ctx, person.x, frame.campusY + person.y * frame.campusScaleY, Math.max(person.size, .52 / frame.scale), person.i, time * person.pace, !still && person.walking)
     }
     ctx.globalAlpha = 1
     ctx.restore()

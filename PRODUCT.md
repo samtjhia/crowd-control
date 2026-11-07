@@ -6,9 +6,9 @@ HackTrent 2026 browser crowd-simulation project. Users describe venues and scena
 
 Audience: hackathon judges, non-expert event organizers, and curious visitors. Explain crowd simulation quickly and make the natural-language approach approachable across skill levels.
 
-Approved headline: “Ask ‘what if?’ Before it becomes ‘what now?’” Emphasize planning ahead, exploring risks, and prevention.
+Approved headline: “Simulate Any Crowd.” Subheading: “Describe a scenario. See what happens.” Keep planning ahead, exploring risks, and prevention central to the supporting story.
 
-Approved direction: a white/off-white page with green as the main accent, blue and rose as supporting colors, a full-viewport angular pastel SVG campus opening with a centered headline above the Crowd Control/demo bar and people walking only on paved paths, a scrolling story about accessible planning, and clickable scenario choices. The crowd visually travels from the campus through the narrative and falls into the scenario area. Replace the prior dark blueprint and sequential staggered-departure experiment.
+Approved direction: a white/off-white page with green as the main accent, blue and rose as supporting colors, a full-viewport angular pastel SVG campus opening with a compact centered headline, explanatory line, and single demo CTA above a park-and-school panorama and people walking only on paved paths, a scrolling story about accessible planning, and clickable scenario choices. The crowd visually travels from the campus through the narrative and falls into the scenario area. Replace the prior dark blueprint and sequential staggered-departure experiment.
 
 Four scenarios come from the Product PRD:
 
@@ -18,3 +18,5 @@ Four scenarios come from the Product PRD:
 - Narrow alley: opposing streams move through a confined street; make it one-way.
 
 These are illustrative looping previews with humanoid figures, scenario selection, reversible scripted changes, and scenario pause and reset. The hero’s bottom text and ambient pause strip are removed as requested. Scenario selection supports keyboard navigation; motion respects reduced-motion preferences and pauses offscreen or when the document is hidden. They are not live engine output. The live application/AI connection remains future work. No invented safety statistics, performance improvements, or customer proof.
+
+The opening sky includes ambient bird flocking, wing motion, and independently drifting clouds. These are decorative scene behaviors, separate from the product's crowd-simulation engine, and remain static for reduced-motion users.

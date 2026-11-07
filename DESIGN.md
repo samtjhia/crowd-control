@@ -2,9 +2,9 @@
 name: Crowd Control — people in motion
 description: Bright, human crowd planning through everyday words and illustrated worlds.
 colors:
-  paper: "#fcfcf9"
-  ink: "#263c2e"
-  green: "#357650"
+  paper: "#faf9f6"
+  ink: "#214b3b"
+  green: "#195c3e"
   green-hover: "#265e3d"
   muted: "#667362"
   line: "#e1e6db"
@@ -116,7 +116,7 @@ The hero display uses the frontmatter display role. Narrative headings use the h
 
 ## Layout
 
-The story and scenario section share a maximum width of 1240px. A large two-line headline sits near the top of the full-viewport opening, with a compact rectangular navigation bar centered beneath it and the landscape framing the bottom. Three alternating story stops follow around a flowing crowd path and a short falling-people handoff.
+The story and scenario section share a maximum width of 1240px. A compact headline, supporting line, and single CTA sit above the campus panorama, with a small brand mark at upper left. Three alternating story stops follow around a flowing crowd path and a short falling-people handoff.
 
 The desktop workbench uses a 290px sidebar and a flexible preview; below 1000px the sidebar becomes 230px. Below 700px the compact header shrinks, story copy stays left of the crowd path, and scenario choices become a two-column grid above the preview. Preview heights step from 480px to 430px to 310px. The handoff shortens from 220px to 150px on mobile.
 
@@ -136,7 +136,7 @@ Filled green actions use white text and a deeper green hover. Subtle actions use
 
 ### Navigation
 
-A compact people mark accompanies the wordmark in a centered rectangular bar beneath the opening headline, alongside a filled, square-cornered demo CTA. The header contains no section-link menu. A skip link appears on focus. Header dimensions and type shrink on mobile while the brand and CTA remain.
+A small wordmark sits unobtrusively at the upper left. The opening headline, supporting sentence, and one green demo CTA form a centered group. The CTA uses a pill shape following the latest supplied reference; there is no boxed brand/demo bar or section-link menu. A skip link appears on focus. Header dimensions and type shrink on mobile while the brand and CTA remain.
 
 ### Scenario Workbench
 
@@ -163,11 +163,11 @@ The active campus is the native SVG component `web/src/components/CampusScene.ts
 - Don't present scripted illustrations as live AI or engine output.
 - Don't add invented safety statistics, performance improvements, or customer proof.
 
-## Angular SVG opening
+## Reference-led SVG opening
 
-The user's supplied Agentix screenshot governs alignment: a centered two-line headline near the top, the compact Crowd Control/demo bar beneath it, and scenery framing the lower viewport (the user requested swapping the prior headline and bar positions). The opening headline stands alone; the product explanation remains in the following story section. The hero's navigation and CTA are rectangular.
+The latest supplied campus reference governs the composition: a compact centered headline, one supporting sentence, one action, then a larger park-and-school panorama. The approved headline is “Simulate Any Crowd.” with “Crowd.” in green. The subheading is “Describe a scenario. See what happens.” The brand is secondary at the upper left. On mobile, headline words share the same responsive size; the full campus is framed rather than cropped.
 
-The campus is authored directly as SVG geometry: cuboid trees, faceted lawns, angular paths, three separate stair risers above a flat landing, and an open school made from flat polygon planes. Shapes use pale sage, cream, muted blue, and rose fills, with no rounded background shapes, raster assets, filters, or painted textures. The campus uses a 1536×624 viewBox starting at y=400 with xMidYMax slice framing. It occupies a separate lower region (54–100% of the hero). campusFrame.ts computes the responsive campus group transform and applies the same mapping to crowd footpoints, preserving figure proportions. This prevents scenery from overlapping the headline on wide, short screens.
+The campus remains native SVG geometry: cuboid trees, faceted lawns, stepped seating with a separate flat landing, cream school architecture, pale blue windows, a pond, a small wooden footbridge, and simple benches and planters. The pond sits outside all mapped pedestrian routes. No raster assets, filters, or painted textures are used. Desktop campusFrame.ts uses bottom-aligned slice framing; mobile uses meet framing with the matching canvas scale. Human figures have a minimum screen-space size so they remain visible in the mobile overview.
 
 ## Campus motion
 
@@ -175,8 +175,21 @@ Walkers follow seeded routes with varied speeds, pairs, and short pauses across 
 
 ## Connected trail
 
-The hero contains no bottom caption, follow prompt, or motion strip. The headline sits near the top (8% desktop / 9% mobile); the Crowd Control/demo bar is centered below it (38% desktop / 34% mobile). Scenery remains in the lower 54–100% of the hero.
+The hero contains no bottom caption, follow prompt, or motion strip. The headline, supporting line, and CTA occupy the first grid row. The SVG campus fills the remaining space; mobile uses a compact full-campus overview. The hero is capped at 900px on tall desktops to avoid excessive empty space.
 
 Journey.tsx measures the campus and story inside one wrapper. journeyGeometry.ts builds one native SVG Bézier path running from the courtyard through the narrative to the falling landing. The campus/story boundary shares matching vertical tangent handles; the road has one uniform cream stroke, 86px desktop / 48px mobile. There are no independent road caps or section margins at the join.
 
 Walkers use the same arc-length samples, screen-space size, identity, spacing, and shared animation clock on both sides of the boundary. Campus and story canvases render the relevant clipped portion of that stream, so a person continues across the boundary without being replaced. Local courtyard choreography remains independent. The narrative trail ends vertically at its exact center and continues onto a 55px landing before the falling animation. Mobile turns stay below the final text.
+
+## Reference palette and living sky
+
+Palette matches the visible reference direction: warm white #faf9f6, forest ink #214b3b, deep green actions #195c3e, leaf emphasis #2c8b4f, lime lawns #c8df98, pale water #aed6df, and powder blue clouds #d4e5ed, with blush accents. These are visually matched values; pixel-exact source colors were not available from the inline screenshot. Text and action colors retain readable contrast.
+
+SkySimulation.tsx renders six independently drifting cloud clusters and nine birds in small side flocks. Birds use cohesion, alignment, separation, boundary steering, and phased wingbeats. Clouds drift with differing wind rates. Motion stays away from the central copy, pauses offscreen or when hidden, and renders a static sky for prefers-reduced-motion. The sky is native SVG, decorative, and separate from the live simulation engine.
+
+
+### Campus reference refinement
+
+The supplied park reference now governs the landscape arrangement as well as the palette. The opening uses a larger centered headline and supporting sentence over a low panorama: pond and arched timber bridge at left, amphitheatre behind it, open pedestrian courtyard in the middle, and warm cream classrooms with blue glazing on the right. Rolling lawn contours, faceted shrubs, small stones and lamps frame the paved routes. Tree canopies remain block-shaped and all artwork remains native SVG. The campus and story retain one continuous cream road and shared pedestrian coordinates.
+
+The scene uses warm white `#fbfaf8`, cream paving `#fcf2e5`, yellow-green lawns `#d5e7a6` / `#c2df8a`, lime crowns `#d8e99d`, leafy shaded faces `#91b959` / `#719c48`, pond blue `#92cee0`, glass blue `#96cee7`, and warm classroom floors `#f6ebdb`. These are a visual match to the inline reference rather than sampled source pixels. The previous cool, flat lawn slabs are superseded by this park composition.
