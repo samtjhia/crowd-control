@@ -9,6 +9,7 @@ import { CampusPlaza } from './components/CampusPlaza'
 import { CityScenery } from './components/CityScenery'
 import { Journey } from './components/Journey'
 import { useTextEntrances } from './components/useTextEntrances'
+import { WhyItMatters } from './components/WhyItMatters'
 
 function Brand() {
   return <a className="brand" href="#top" aria-label="Crowd Control home"><span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /><i /><i /></span>Crowd Control<span className="brand-dot">.</span></a>
@@ -42,6 +43,7 @@ function App() {
       </section>
       <div className="crowd-handoff" aria-hidden="true"><FallingCrowd reduced={reduced} playing /></div>
       </Journey>
+      <WhyItMatters reduced={reduced} />
       <ScenarioExplorer reduced={reduced} />
       <section className="closing"><h2>A little curiosity.<br /><span>A better way forward.</span></h2><p>For the school day, the big night,<br />and everyone in between.</p><a className="button button-green" href="#scenarios">Explore another possibility <Icon name="arrow" size={18} /></a></section>
     </main>

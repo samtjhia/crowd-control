@@ -1,7 +1,6 @@
 import { EnvironmentalDisplay } from './EnvironmentalDisplay'
 import { Tree, Shrubs } from './CampusPlaza'
 import { alongPath, drawPerson, useCanvas } from './canvas'
-import { Icon } from './Icons'
 import { GARDEN_ROUTES } from './gardenRoutes'
 
 function Bench({ x, y }: { x: number; y: number }) {
@@ -49,7 +48,7 @@ function LocationResidents({ reduced, garden = false }: { reduced: boolean; gard
 
 function StationDisplay({ compact = false }: { compact?: boolean }) {
   const height = compact ? 165 : 223
-  return <g className={compact ? 'station-display-desktop' : 'station-display-mobile'}>
+  return <g className={compact ? 'station-display-desktop' : 'station-display-mobile'} transform="translate(-64 -50)">
     <path d="M119 119 448 91l8 6-329 28Z" fill="#7f9b85" />
     <path d={`M119 119 127 125v${height}l-8-6Z`} fill="#6c8875" />
     <path className="station-headline-face" d={`m127 125 329-28v${height}l-329 27Z`} fill="#fbf5e8" />
@@ -61,7 +60,7 @@ function StationDisplay({ compact = false }: { compact?: boolean }) {
 function OperationsArtwork() {
   return <svg className="location-art" viewBox="0 0 700 450" aria-hidden="true">
     {/* A modest waiting shelter and a freestanding station information display. */}
-    <Tree x={625} y={193} scale={.88} /><Tree x={59} y={281} scale={.8} />
+    <Tree x={625} y={193} scale={.88} /><Tree x={24} y={281} scale={.7} />
     {/* Ground is painted before every raised object. */}
     <path className="shelter-paving" d="m393 353 242-42m-218 65 228-41" stroke="#e1dfcd" strokeWidth="2" />
     {/* Glazing and supports meet the roof underside, not its top surface. */}
@@ -75,7 +74,7 @@ function OperationsArtwork() {
     <path d="m448 172 67 20m-21-27 67 20m-23-26 65 19" stroke="#ecf1e4" strokeWidth="3" />
     <Bench x={457} y={311} /><Bench x={546} y={298} />
     <path d="m495 209 35-6.2m52-9.2 38-6.7" stroke="#f7e6b7" strokeWidth="4" />
-    {/* Smaller display, clearly separate from the transparent shelter. */}
+    {/* The display sits farther back and clear of the shelter roof. */}
     <StationDisplay compact /><StationDisplay />
     <Planter x={48} y={330} width={72} pink /><Planter x={550} y={345} width={70} />
     <Bench x={286} y={391} /><Lamp x={648} y={380} />
@@ -96,11 +95,11 @@ function GardenArtwork() {
     <path className="garden-bridge" d="m500 296 28-17 51 93-30 18Z" fill="#cfb28a" /><path d="m500 296 49 94v6l-49-94Zm49 94 30-18v6l-30 18Z" fill="#b49a77" />
     <path d="m517 305 22-12m-16 24 22-12m-16 24 22-12m-16 24 22-12m-16 24 22-12" stroke="#e4ccaa" strokeWidth="3" />
     <path d="m500 289 49 94m-21-111 51 93" stroke="#a99374" strokeWidth="2" />
-    {/* A low planted wall carries the original headline at garden scale. */}
-    <path d="M97 111Q278 72 475 108v151Q282 223 97 265Z" fill="#ded7c2" />
+    {/* A freestanding cream sign with a continuous stone plinth. */}
+    <path className="garden-sign-return" d="M97 94 108 103v154l-11-9Z" fill="#ded7c2" />
     <path className="garden-headline-face" d="M108 103Q287 66 486 100v151Q286 217 108 257Z" fill="#faf2e2" />
-    <path d="M108 103Q287 66 486 100l-11-9Q280 54 97 94Z" fill="#fffcf2" />
-    <path d="M108 232q184-30 378-3v22q-200-33-378 6Z" fill="#e4ebd0" />
+    <path className="garden-sign-cap" d="M108 103Q287 66 486 100l-11-9Q276 57 97 94Z" fill="#fffcf2" />
+    <path className="garden-sign-plinth" d="M108 246q184-30 378-3v8q-200-33-378 6Z" fill="#d3c8af" />
     <Planter x={91} y={276} width={89} pink /><Planter x={420} y={220} width={68} pink />
     <Bench x={83} y={348} /><Bench x={270} y={426} /><Lamp x={662} y={381} />
     <Shrubs x={655} y={335} scale={.65} /><Shrubs x={205} y={420} scale={.9} />
@@ -109,14 +108,14 @@ function GardenArtwork() {
 
 export function OperationsPavilion({ reduced }: { reduced: boolean }) {
   return <article className="story-stop stop-two operations-location" aria-labelledby="operations-title">
-    <div className="story-building operations-building"><OperationsArtwork /><LocationResidents reduced={reduced} /><h2 id="operations-title"><span className="heading-plane">You ask the question.<br /><span className="heading-accent">We handle the moving parts.</span></span></h2></div>
-    <div className="location-copy operations-copy embedded-copy"><EnvironmentalDisplay kind="station"><p>From setting up a space to routing its crowd, the system handles the heavy work. You stay focused on what you want to find out.</p><div className="process-wayfinding"><ul className="plain-checks"><li>Describe a space and a scenario</li><li>Review the proposed changes</li><li>Watch the crowd respond</li></ul></div></EnvironmentalDisplay></div>
+    <div className="story-building operations-building"><OperationsArtwork /><LocationResidents reduced={reduced} /><h2 id="operations-title"><span className="heading-plane"><span className="billboard-step">02 — EXPERIMENT</span>Change the Scenario.<br /><span className="heading-accent">Explore the Outcomes.</span></span></h2></div>
+    <div className="location-copy operations-copy embedded-copy"><EnvironmentalDisplay kind="station"><p>Every situation is different. Customize your environment, crowd size, exits, and emergency conditions to test different possibilities and compare the results.</p></EnvironmentalDisplay></div>
   </article>
 }
 
 export function DecisionGarden({ reduced }: { reduced: boolean }) {
   return <article className="story-stop stop-three garden-location" aria-labelledby="garden-title">
-    <div className="story-building garden-building"><GardenArtwork /><LocationResidents reduced={reduced} garden /><h2 id="garden-title"><span className="heading-plane">A small change.<br /><span className="heading-accent">A different story.</span></span></h2></div>
-    <div className="location-copy garden-copy embedded-copy"><EnvironmentalDisplay kind="garden"><p>Close a door. Add a check-in desk. Make a street one-way. Explore how one decision changes the way people move.</p><p>And when a plan needs another look? Edit an earlier intervention and replay the possibilities.</p><a className="text-link" href="#scenarios">Let’s try a few <Icon name="arrow" size={17} /></a></EnvironmentalDisplay></div>
+    <div className="story-building garden-building"><GardenArtwork /><LocationResidents reduced={reduced} garden /><h2 id="garden-title"><span className="heading-plane"><span className="billboard-step">03 — PREPARE</span>Better Insights.<br /><span className="heading-accent">Safer Decisions.</span></span></h2></div>
+    <div className="location-copy garden-copy embedded-copy"><EnvironmentalDisplay kind="garden"><p>Turn your observations into actionable plans. Explore alternative routes, refine evacuation strategies, and prepare for potential risks before they arise.</p></EnvironmentalDisplay></div>
   </article>
 }

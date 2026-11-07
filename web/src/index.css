@@ -481,3 +481,116 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
 .plaza-kiosk .display-content { padding: 18px 12px 16px; }
 .plaza-kiosk .kiosk-visitors { top: auto; bottom: 0; height: 44px; }
 @media (max-width: 700px) { .plaza-kiosk { padding: 0; border: 0; } }
+
+/* Historical context: a quieter editorial interlude after the illustrated journey. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.why-matters { padding: 112px max(30px, calc((100vw - 1180px) / 2)) 0; background: #f5f3ec; }
+.why-matters h2 { font-size: clamp(34px, 4.2vw, 58px); line-height: 1.15; letter-spacing: -.035em; font-weight: 500; text-wrap: balance; }
+.why-matters h2 span { color: #6b806b; }
+.why-matters h3 { font-family: 'Manrope', sans-serif; }
+.why-eyebrow { display: block; font-size: 11px; font-weight: 600; letter-spacing: .15em; line-height: 1.6; margin-bottom: 25px; color: #526950; }
+.why-intro { text-align: center; max-width: 800px; margin: 0 auto 72px; }
+.why-intro h2 { margin: 0 0 27px; }
+.why-intro > p { max-width: 670px; margin: auto; font-size: 18px; line-height: 1.8; color: #536450; }
+.incident-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid #cbd1c1; gap: 26px; }
+.incident-tabs button { position: relative; display: flex; align-items: center; gap: 14px; padding: 22px 0; border: 0; background: transparent; color: #5d6d59; text-align: left; white-space: nowrap; font-size: 16px; }
+.incident-tabs button > span { font-size: 11px; color: #68765f; }
+.incident-tabs button::after { content: ''; position: absolute; height: 2px; bottom: -1px; left: 0; right: 0; background: var(--green); transform: scaleX(0); transform-origin: left; transition: transform 220ms ease-out; }
+.incident-tabs button[aria-selected='true'] { color: var(--green); font-weight: 600; }
+.incident-tabs button[aria-selected='true']::after { transform: scaleX(1); }
+.incident-tabs button:hover { color: var(--green); }
+.why-matters :is(button, a, [tabindex]):focus-visible { outline: 2px solid var(--green); outline-offset: 5px; }
+.incident-tabs button:focus-visible { outline-offset: -4px; }
+.incident-panel { padding-top: 42px; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+.incident-panel.is-leaving { opacity: 0; transform: translateY(5px); }
+.incident-content { display: grid; grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: 48px; min-height: 820px; animation: incident-arrive 200ms ease-out; }
+@keyframes incident-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.incident-location { display: flex; flex-wrap: wrap; gap: 5px 16px; color: #607058; font-size: 12px; line-height: 1.7; margin: 0 0 15px; }
+.incident-location span { white-space: nowrap; }
+.incident-story h3 { font-size: clamp(28px, 2.7vw, 39px); font-weight: 500; letter-spacing: -.035em; line-height: 1.2; margin: 0 0 22px; }
+.incident-fatalities { display: flex; align-items: baseline; gap: 12px; margin: 0 0 26px; color: #875343; }
+.incident-fatalities strong { font-family: 'Manrope', sans-serif; font-weight: 500; font-size: 47px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.incident-fatalities span { font-size: 13px; }
+.incident-story :is(.incident-account, .incident-concern p, .incident-question p) { font-size: 16px; line-height: 1.75; margin: 0; color: #4c604e; }
+.incident-story h4 { font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; margin: 0 0 8px; }
+.incident-concern { margin-top: 25px; }
+.incident-question { border-top: 1px solid #cfd4c5; padding-top: 21px; margin-top: 23px; }
+.incident-question p { font-weight: 500; }
+.incident-findings { margin-top: 22px; }
+.incident-findings ul { padding-left: 18px; margin: 0; color: #4c604e; font-size: 13px; line-height: 1.7; }
+.incident-findings li + li { margin-top: 4px; }
+.incident-source { display: flex; width: fit-content; flex-wrap: wrap; align-items: center; gap: 7px; font-size: 12px; margin-top: 25px; text-decoration: underline; text-underline-offset: 4px; }
+.incident-source > span:not(.sr-only) { flex-basis: 100%; font-size: 11px; color: #607058; }
+.incident-source:hover { color: #347a4b; }
+.incident-figure { margin: 0; padding: 23px 20px; background: #eeeee3; align-self: start; position: sticky; top: 24px; }
+.diagram-heading { display: flex; justify-content: space-between; gap: 10px; font-size: 9px; letter-spacing: .12em; color: #53674f; padding-bottom: 19px; border-bottom: 1px solid #d0d7c3; }
+.incident-figure svg { display: block; width: 100%; height: auto; margin: 25px auto 12px; }
+.diagram-legend { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 10px; line-height: 1.5; color: #50634c; padding-top: 17px; border-top: 1px solid #d0d7c3; }
+.diagram-legend span { display: flex; align-items: center; gap: 6px; }
+.diagram-legend i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #66816d; }
+.diagram-legend .hazard-key { background: #ad6b4c; }
+.incident-figure figcaption { font-size: 10px; color: #5d6c55; line-height: 1.6; margin-top: 15px; }
+.incident-context { font-size: 11px; line-height: 1.7; color: #607058; border-top: 1px solid #cbd1c1; padding-top: 19px; margin: 23px 0 0; }
+.why-consequences { display: grid; grid-template-columns: .85fr 1.15fr; gap: 75px; padding: 100px 0; margin-top: 60px; border-top: 1px solid #cbd1c1; }
+.why-impact-intro h2 { font-size: clamp(30px, 3vw, 42px); margin: 0 0 22px; }
+.why-impact-intro > p { font-size: 16px; line-height: 1.8; color: #536450; max-width: 38ch; }
+.consequence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 35px; }
+.consequence-item { border-top: 1px solid #bfc9b7; padding-top: 20px; }
+.consequence-top { display: flex; justify-content: space-between; align-items: center; color: #68795e; font-size: 11px; }
+.consequence-item h3 { font-size: 19px; font-weight: 500; line-height: 1.4; letter-spacing: -.02em; margin: 23px 0 10px; }
+.consequence-item p { font-size: 14px; line-height: 1.75; color: #536450; margin: 0; }
+.why-closing { text-align: center; padding: 85px 20px 90px; border-top: 1px solid #cbd1c1; }
+.why-closing h2 { margin: 0 0 23px; font-size: clamp(32px, 3.8vw, 50px); }
+.why-closing > p { max-width: 550px; margin: 0 auto 28px; font-size: 17px; line-height: 1.8; color: #536450; }
+.why-closing .button { font-size: 14px; gap: 27px; }
+.why-closing .why-planning-note { max-width: 480px; font-size: 11px; margin: 23px auto 0; }
+@media (max-width: 1000px) {
+ .incident-content { gap: 26px; grid-template-columns: 1fr 1fr; min-height: 950px; }
+ .incident-tabs { gap: 16px; }
+ .incident-tabs button { font-size: 14px; gap: 8px; }
+ .why-consequences { gap: 35px; }
+ .incident-figure { padding: 18px 12px; }
+}
+@media (max-width: 700px) {
+ .why-matters { padding: 75px 22px 0; }
+ .why-intro { margin-bottom: 40px; }
+ .why-eyebrow { font-size: 10px; margin-bottom: 20px; }
+ .why-intro > p { font-size: 16px; line-height: 1.8; }
+ .incident-tabs { display: flex; overflow-x: auto; gap: 27px; padding: 4px 0; scrollbar-width: thin; scroll-padding-inline: 4px; }
+ .incident-tabs button { flex-shrink: 0; min-height: 52px; font-size: 14px; padding: 14px 3px; }
+ .incident-panel { padding-top: 30px; }
+ .incident-content { grid-template-columns: 1fr; min-height: 0; gap: 32px; }
+ .incident-story { min-height: 0; }
+ .incident-story h3 { font-size: 32px; }
+ .incident-figure { position: static; padding: 20px 12px; }
+ .incident-figure svg text { font-size: 20px; }
+ .diagram-heading { font-size: 8px; }
+ .diagram-legend { font-size: 9px; gap: 9px 12px; }
+ .why-consequences { grid-template-columns: 1fr; padding: 65px 0; margin-top: 45px; gap: 25px; }
+ .why-impact-intro > p { max-width: none; }
+ .consequence-grid { grid-template-columns: 1fr; gap: 30px; }
+ .consequence-item h3 { margin-top: 13px; font-size: 21px; }
+ .consequence-item p { font-size: 15px; }
+ .why-closing { padding: 65px 0 70px; }
+ .why-closing > p { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .incident-panel, .incident-tabs button::after { transition: none; }
+ .incident-content { animation: none; }
+}
+
+/* Roadmap copy follows the sign faces; station sign is set behind the shelter. */
+.story-building .heading-plane > .billboard-step { display: block; color: var(--ink); font-family: 'DM Sans', sans-serif; font-size: .3em; font-weight: 600; line-height: 1.5; letter-spacing: .1em; margin-bottom: .8em; white-space: nowrap; }
+.operations-location h2 { top: 20.9%; left: 11.4%; width: 43%; font-size: clamp(22px, 2vw, 28px); }
+.garden-location h2 { top: 24%; }
+.plaza-copy { display: block; width: 64%; max-width: 460px; }
+@media (min-width: 701px) and (max-width: 1000px) {
+ .operations-location h2 { font-size: clamp(17px, 2.3vw, 23px); }
+ .plaza-copy { width: 76%; }
+}
+@media (max-width: 700px) {
+ .story-building .heading-plane > .billboard-step { font-size: 7.5px; }
+ .campus-plaza h2 { top: 26%; font-size: clamp(12px, 3.5vw, 20px); }
+ .operations-location h2 { font-size: clamp(11px, 3vw, 18px); }
+ .plaza-copy { width: 80%; }
+}

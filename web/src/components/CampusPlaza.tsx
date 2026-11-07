@@ -92,24 +92,14 @@ function PlazaResidents({ reduced }: { reduced: boolean }) {
   return <canvas className="plaza-residents" ref={canvas} aria-hidden="true" />
 }
 
-function KioskVisitors() {
-  const canvas = useCanvas((ctx, width, height) => {
-    drawPerson(ctx, 19, height - 5, .86, 74, 0, false)
-    drawPerson(ctx, width - 24, height - 2, .86, 81, 0, false)
-  }, true, false)
-  return <canvas className="kiosk-visitors" ref={canvas} aria-hidden="true" />
-}
-
 export function CampusPlaza({ reduced }: { reduced: boolean }) {
   return <article className="story-stop stop-one campus-plaza" aria-labelledby="plaza-title">
     <div className="plaza-building story-building">
       <PlazaArtwork /><PlazaResidents reduced={reduced} />
-      <h2 id="plaza-title"><span className="heading-plane">Big Possibilities.<br /><span className="heading-accent">Little Effort.</span></span></h2>
+      <h2 id="plaza-title"><span className="heading-plane"><span className="billboard-step">01 — OBSERVE</span>See the Crowd.<br /><span className="heading-accent">Spot the Risks.</span></span></h2>
     </div>
     <div className="plaza-copy embedded-copy">
-      <EnvironmentalDisplay kind="shelter"><p><strong>Start with a scenario.</strong></p>
-      <p>Tell us who's there, where they are, and what happens. Crowd Control brings your idea to life in a simulation you can explore.</p></EnvironmentalDisplay>
-      <div className="plaza-kiosk"><EnvironmentalDisplay kind="example"><div className="example-prompt"><span className="prompt-avatar">EXAMPLE PROMPT</span><span>&quot;Simulate a fire drill with 100 students in a school.&quot;</span></div></EnvironmentalDisplay><KioskVisitors /></div>
+      <EnvironmentalDisplay kind="shelter"><p>Visualize how crowds move and respond to different situations. Identify potential bottlenecks, congestion, and evacuation challenges before they become real-world problems.</p></EnvironmentalDisplay>
     </div>
   </article>
 }

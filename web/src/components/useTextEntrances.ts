@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 
-const GROUPS = '.hero-copy, .story-stop, .section-heading, .closing'
-const COPY = 'h1, h2, p, .example-prompt, .plain-checks, .text-link, .button'
+const GROUPS = '.hero-copy, .story-stop, .section-heading, .closing, .why-intro, .why-explorer, .why-impact-intro, .consequence-item, .why-closing'
+const COPY = 'h1, h2, p, .example-prompt, .plain-checks, .text-link, .button, .why-eyebrow'
 
 /** Progressive enhancement: the DOM and stylesheet always contain visible text.
  * Only supported, successfully initialized animations can temporarily cover it.
@@ -21,7 +21,7 @@ export function useTextEntrances() {
       const animations = groups.get(group)
       if (!animations) return
       groups.delete(group) // Entrances cannot be armed again on a return scroll.
-      observer?.unobserve(group.querySelector('h1, h2') ?? group)
+      observer?.unobserve(group.querySelector('h1, h2, h3') ?? group)
       for (const animation of animations) {
         if (immediate) animation.cancel()
         else animation.play()
@@ -54,13 +54,14 @@ export function useTextEntrances() {
       }, { rootMargin: '0px 0px -20% 0px', threshold: 0 })
 
       for (const group of element.querySelectorAll(GROUPS)) {
-        const heading = group.querySelector('h1, h2')
+        const heading = group.querySelector('h1, h2, h3')
         if (!heading) continue
         // A restored scroll position must never leave earlier content hidden.
         if (heading.getBoundingClientRect().bottom <= 0) continue
         const animations: Animation[] = []
         groups.set(group, animations)
-        for (const [index, target] of [...group.querySelectorAll<HTMLElement>(COPY)].entries()) {
+        const targets = group.matches('.why-explorer, .consequence-item') ? [group] : [...group.querySelectorAll<HTMLElement>(COPY)]
+        for (const [index, target] of targets.entries()) {
           const animation = target.animate([
             { opacity: 0, transform: `translateY(${index === 0 ? 16 : 12}px)` },
             { opacity: 1, transform: 'translateY(0)' },
