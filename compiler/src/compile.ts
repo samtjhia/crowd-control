@@ -1,11 +1,12 @@
-import { parseCompileInput, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
+import { parseCompileInput, type CompiledMap, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
 import { compileBehaviour } from './behaviour/compile.ts'
 import { chainLayout, designPopulation } from './layout/chain.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
 import { resolveProfiles } from './profiles/catalog.ts'
 import { fail } from './result.ts'
 import { finish } from './scene/finish.ts'
-import { placeInitialAgents } from './spawn/lattice.ts'
+import { mapFromPrepared } from './scene/prepared.ts'
+import { placeInitialAgents, rectArea, type SpawnArea } from './spawn/lattice.ts'
 
 /**
  * Turns a semantic scenario plan (C's planner output) plus prepared assets and a model
@@ -46,20 +47,42 @@ function compileGenerated(input: CompileInput): Result<CompileOutput> {
   if (cutOff.length > 0) {
     return fail('LAYOUT_CONSTRAINTS_UNSATISFIABLE', `Not every space connects: ${cutOff.join(', ')} cannot be reached`, { affectedIds: cutOff })
   }
-  const profiles = resolveProfiles(input.plan, input.model)
-  if (!profiles.ok) return profiles
-  const agents = placeInitialAgents(input.plan.initialOperations, rooms, profiles.value, input.model)
-  if (!agents.ok) return agents
-  const behaviour = compileBehaviour(input.plan, { rooms, portals, agents: agents.value })
-  if (!behaviour.ok) return behaviour
-  const map = {
+  const map: CompiledMap = {
     units: input.model.units, cellSize, width: worldWidth, height: worldHeight, rooms, portals,
-    rows: grid.value.rows, legend: grid.value.legend, source: { mode: 'generate' as const, accuracy: 'approximate' as const },
+    rows: grid.value.rows, legend: grid.value.legend, source: { mode: 'generate', accuracy: 'approximate' },
   }
-  return finish(input, map, profiles.value, behaviour.value)
+  return populate(input, map, rooms.map(rectArea))
 }
 
-/** Prepared venue lookup: built in step 8. */
-function compileLookup(_input: CompileInput): Result<CompileOutput> {
-  return fail('UNSUPPORTED_CAPABILITY', 'Prepared venue lookup is not built yet', { path: 'plan.layout' })
+/**
+ * Prepared venues (Technical PRD §2 "Lookup"): resolve venue + floor to a reviewed map among
+ * the supplied assets and record its revision. Geometry is measured, never resized to fit the
+ * crowd; if people don't fit, placement fails instead.
+ */
+function compileLookup(input: CompileInput): Result<CompileOutput> {
+  const { layout } = input.plan
+  if (layout.mode !== 'lookup') throw new Error('compileLookup needs a lookup layout')
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+  const asset = input.assets.find(({ source }) => source.mode === 'lookup' && same(source.venue, layout.venue) && same(source.floor, layout.floor))
+  if (!asset) {
+    const known = input.assets.flatMap(({ source }) => (source.mode === 'lookup' ? [`${source.venue} (${source.floor})`] : []))
+    return fail('MAP_NOT_FOUND', `No prepared map for ${layout.venue}, ${layout.floor}${known.length > 0 ? `; available: ${known.join(', ')}` : ''}`, { path: 'plan.layout' })
+  }
+  if (asset.grid.units !== input.model.units) {
+    return fail('UNSUPPORTED_CAPABILITY', `${layout.venue} is measured in ${asset.grid.units === 'm' ? 'metres' : 'model units'}, but the model preset "${input.model.id}" uses ${input.model.units === 'm' ? 'metres' : 'model units'}`, { path: 'model.units' })
+  }
+  const prepared = mapFromPrepared(asset)
+  if (!prepared.ok) return prepared
+  return populate(input, prepared.value.map, prepared.value.areas)
+}
+
+/** Shared by every layout source: profiles, the starting crowd, behaviour, then the checked scene. */
+function populate(input: CompileInput, map: CompiledMap, areas: SpawnArea[]): Result<CompileOutput> {
+  const profiles = resolveProfiles(input.plan, input.model)
+  if (!profiles.ok) return profiles
+  const agents = placeInitialAgents(input.plan.initialOperations, areas, profiles.value, input.model)
+  if (!agents.ok) return agents
+  const behaviour = compileBehaviour(input.plan, { rooms: map.rooms, portals: map.portals, agents: agents.value })
+  if (!behaviour.ok) return behaviour
+  return finish(input, map, profiles.value, behaviour.value)
 }

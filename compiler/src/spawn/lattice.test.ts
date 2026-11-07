@@ -3,10 +3,10 @@ import test from 'node:test'
 import type { CompileInput, Operation, Result, RoomRecord } from '@crowd-control/contract'
 import { chainLayout, designPopulation } from '../layout/chain.ts'
 import { fixture, workedExample } from '../testing.ts'
-import { placeInitialAgents as place, roomLattice } from './lattice.ts'
+import { latticeSlots, placeInitialAgents as place, rectArea } from './lattice.ts'
 
 const profiles = { person: { radius: 0.5, preferredSpeed: 1 }, staff: { radius: 0.5, preferredSpeed: 1 }, wide: { radius: 1.5, preferredSpeed: 1 } }
-const placeInitialAgents = (operations: Operation[], all: RoomRecord[], model: CompileInput['model']) => place(operations, all, profiles, model)
+const placeInitialAgents = (operations: Operation[], all: RoomRecord[], model: CompileInput['model']) => place(operations, all.map(rectArea), profiles, model)
 
 function value<T>(result: Result<T>): T {
   assert.equal(result.ok, true, JSON.stringify(result))
@@ -37,9 +37,9 @@ test('PRD §8: the eight starting attendees sit on the hall lattice exactly as i
 
 test('the hall lattice is five columns of two rows, as the PRD computes', () => {
   const input = workedExample()
-  const lattice = roomLattice(rooms(input)[0]!, 0.5, 2)
-  assert.equal(lattice.columns, 5)
-  assert.equal(lattice.capacity, 10)
+  const slots = latticeSlots(rectArea(rooms(input)[0]!), 0.5, 2)
+  assert.deepEqual([...new Set(slots.map((slot) => slot.x))], [1.5, 3.5, 5.5, 7.5, 9.5])
+  assert.deepEqual([...new Set(slots.map((slot) => slot.y))], [1.5, 3.5])
 })
 
 test('a second spawn into the same room continues the lattice instead of overlapping', () => {
@@ -80,12 +80,12 @@ test('impossible placements fail clearly', () => {
   const input = workedExample()
   const all = rooms(input)
   const code = (result: Result<unknown>) => (result.ok ? null : result.error.code)
-  assert.equal(code(placeInitialAgents([spawn(11, 'hall')], all, input.model)), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
-  assert.equal(code(placeInitialAgents([spawn(8, 'hall'), spawn(3, 'hall')], all, input.model)), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
+  assert.equal(code(placeInitialAgents([spawn(11, 'hall')], all, input.model)), 'NO_WALKABLE_SPACE')
+  assert.equal(code(placeInitialAgents([spawn(8, 'hall'), spawn(3, 'hall')], all, input.model)), 'NO_WALKABLE_SPACE')
   assert.equal(code(placeInitialAgents([spawn(1, 'kitchen')], all, input.model)), 'NOT_FOUND')
-  assert.equal(code(placeInitialAgents([spawn(1, 'hall', { components: { physical: { radius: 1.5 } } })], all, input.model)), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
+  assert.equal(code(placeInitialAgents([spawn(1, 'hall', { components: { physical: { radius: 1.5 } } })], all, input.model)), 'NO_WALKABLE_SPACE')
   const near: Operation = { op: 'spawn', template: { kind: 'agent' }, count: 1, placement: { near: { ids: ['hall_door'] } } }
-  assert.equal(code(placeInitialAgents([spawn(1, 'hall', { profile: 'wide' })], all, input.model)), 'LAYOUT_CONSTRAINTS_UNSATISFIABLE')
+  assert.equal(code(placeInitialAgents([spawn(1, 'hall', { profile: 'wide' })], all, input.model)), 'NO_WALKABLE_SPACE')
   assert.equal(code(placeInitialAgents([near], all, input.model)), 'UNSUPPORTED_CAPABILITY')
   const byTag: Operation = { op: 'spawn', template: { kind: 'agent' }, count: 1, placement: { inside: { tags: ['indoor'] } } }
   assert.equal(code(placeInitialAgents([byTag], all, input.model)), 'UNSUPPORTED_CAPABILITY')

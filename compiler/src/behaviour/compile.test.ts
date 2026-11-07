@@ -3,7 +3,7 @@ import test from 'node:test'
 import type { CompiledScene, Operation, Result, ScenarioPlan } from '@crowd-control/contract'
 import { chainLayout, designPopulation } from '../layout/chain.ts'
 import { resolveProfiles } from '../profiles/catalog.ts'
-import { placeInitialAgents } from '../spawn/lattice.ts'
+import { placeInitialAgents, rectArea } from '../spawn/lattice.ts'
 import { fixture, inline, workedExample } from '../testing.ts'
 import { compileBehaviour, type Behaviour } from './compile.ts'
 import { ControllerTable } from './controllers.ts'
@@ -21,7 +21,7 @@ function behaviour(edit: (plan: ScenarioPlan) => void = () => {}): Result<Behavi
   if (plan.layout.mode !== 'generate') throw new Error('worked example should be generated')
   const { rooms, portals } = value(chainLayout(plan.layout.spaces, plan.layout.connections, designPopulation(plan), model))
   const profiles = value(resolveProfiles(plan, model))
-  const agents = value(placeInitialAgents(plan.initialOperations, rooms, profiles, model))
+  const agents = value(placeInitialAgents(plan.initialOperations, rooms.map(rectArea), profiles, model))
   return compileBehaviour(plan, { rooms, portals, agents })
 }
 
