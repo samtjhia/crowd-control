@@ -1,121 +1,129 @@
 # Crowd Control
 
-HackTrent 2026!
+**Simulate any crowd. Describe a scenario, see what happens.** Built at HackTrent 2026.
 
-An npm workspace for the TypeScript app and a Cargo workspace for the Rust engine.
-Use Node 24+, npm 10+, and Rust with edition 2024 support.
+Crowd Control lets you test a venue before the crowd shows up. Upload a floor plan or pick a
+demo venue, describe a situation in plain English, and watch every person move through it,
+simulated individually by a Rust engine running in your browser.
 
-```text
-contract/   Strict Zod schemas, shared types and JSON fixtures — C leads, everyone reviews
-compiler/   Layout generation, maps, rasterization, placement — B
-engine/     Rust operations, scheduling, goals, movement, metrics and Wasm bridge — A
-history/    Intervention revisions and replay planning — C
-server/     Node API and Gemini planner; persistence adapters — C
-web/        React + Vite UI — B, with C owning chat
-docs/       Existing local PRDs, contracts, roles and tech stack
-```
+- **Describe it.** Gemini turns "80 people check in at the front door" into a runnable scenario.
+- **Watch it.** A live density heatmap shows where it gets dangerous, in people per m².
+- **Change it mid-run.** Close a door, add a danger, make someone fall, or rewind and try a fix.
+- **Learn from it.** Every run is saved to your account with an AI safety report built from its own measurements.
 
-## Setup
+## Quick start
+
+You need **Node 24+**, **npm 10+** and **Rust** (edition 2024) with the Wasm target.
 
 ```sh
 npm install
 rustup target add wasm32-unknown-unknown
-npm run build
-```
-
-Start the frontend and API together:
-
-```sh
+cp .env.example .env      # then fill it in (see below)
 npm run dev
 ```
 
-For separate terminals with API auto-reload, run `npm run dev:web` and:
+Open <http://localhost:5173>.
+
+`npm run dev` builds the engine, starts the API on port 3001 (or reuses one already running),
+and serves the site on port 5173. Closing either one stops the other.
+
+**Run only one of these.** `npm run dev` already includes the API, so a separate
+`npm run dev:server` will fail with `EADDRINUSE` on port 3001. If you want the API to reload
+when you change server code, use two terminals instead:
 
 ```sh
-npm run dev:server
+npm run dev:server   # API on 3001, reloads on changes to server/src
+npm run dev:web      # site on 5173
 ```
 
-`npm run dev` reuses a healthy API on port 3001, otherwise starts one. Closing
-either managed service stops the other. Restart for API source changes, or use
-the separate-terminal commands above for API auto-reload.
+## Configuration
 
-Keep `PORT=3001` in `.env`; Vite uses port 5173 separately. The API dev command
-watches only `server/src` to avoid exhausting file watchers (`EMFILE`).
+Everything lives in the root `.env` (copy it from `.env.example`).
 
-The API exposes `GET http://127.0.0.1:3001/health`, `GET /health/database`,
-and `POST /api/plan`. With Tiger Data enabled, it also accepts run records at
-`POST /api/runs`, metric batches at `POST /api/runs/:runId/metrics`, and
-acknowledged interventions at `POST /api/runs/:runId/interventions`.
-`GET /api/runs/:runId/analytics` returns peak density by zone and mean zone
-density before and after each acknowledged intervention. It compares recorded
-samples in the 10 simulated seconds before and after the intervention; missing
-sides remain unavailable rather than being inferred. Vite proxies `/api`
-requests to the local Node server. Authenticated `GET /api/runs` lists up to 50
-recent runs owned by the signed-in user, with metric and intervention counts;
-the `/history` page displays that list and selected-run analytics without
-replaying simulations.
-Set `PROD=FALSE` in the root `.env` to enable Gemini. `PROD=TRUE` hides the
-assistant, AI scenario creation/planner demo, and AI report controls, and rejects
-planner/report-generation requests on the API with HTTP 403. This flag is separate
-from `NODE_ENV`. The browser reads the API's flag before rendering, so the API's
-runtime setting overrides any frontend build default. Restart the API and reload
-the browser after changing it. Deploy this frontend/API update once to enable that
-runtime behavior; later flag changes do not require rebuilding the frontend.
+| Variable | What it does |
+| --- | --- |
+| `PROD` | `FALSE` turns on Gemini. `TRUE` hides the assistant, AI scenarios and AI reports, and the API refuses them (HTTP 403). Restart the API and reload the page after changing it; no rebuild needed. |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini, for the assistant and reports. Never put the key in a `VITE_` variable. |
+| `DATABASE_URL` | Tiger Data (Postgres + Timescale), where runs, metrics, changes, floor plans and scenarios are saved. |
+| `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` | Auth0 for the API, which verifies sign-in tokens. |
+| `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE` | Auth0 for the site. The two audience values must match. |
+| `PORT`, `HOST` | Where the API listens. Keep `3001` and `127.0.0.1` locally. |
 
-To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
-`GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
-in chat. Set `DATABASE_URL` in the same root `.env` to enable Tiger Data.
-Sign-in is required before using the app or its API. Create an Auth0
-single-page application and an API, then set `AUTH0_DOMAIN`,
-`AUTH0_AUDIENCE`, `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and
-`VITE_AUTH0_AUDIENCE` in the root `.env` (the two audience values must match).
-Allow the local app origin, such as `http://localhost:5173`, in the Auth0
-application's callback, logout, and web origins. The API accepts only verified
-Auth0 RS256 access tokens for the configured issuer and audience; `/health`
-and `/health/database` remain public, as does `GET /api/features` (only the public
-Gemini-enabled boolean). Missing server Auth0 configuration fails closed for all
-other `/api/*` routes.
-On startup, the server creates the run, intervention, and metric tables and
-turns the metric table into a Timescale hypertable. The offline mock writes
-run metadata, batches metric samples, and records worker-acknowledged
-interventions in the background. On `/history`, users can view their saved runs
-and analytics. Ask why on `/planner` sends recent in-memory
-metrics, events, and applied interventions to Gemini; answers are instructed to
-stay within that evidence and cite only supplied event IDs. This is a
-current-session mock feature. Generated
-scenario plans are previews only: the compiler handoff is not connected yet.
-New saved runs are owned by the authenticated Auth0 subject. Existing anonymous
-runs remain unowned and unavailable to signed-in users; they are not assigned
-to the first person who logs in. Chat history remains in browser localStorage.
+**Setting up Auth0:** create a *Single Page Application* and an *API*. In the application, add
+`http://localhost:5173` to Allowed Callback URLs, Allowed Logout URLs and Allowed Web Origins.
+
+**Setting up the database:** just set `DATABASE_URL`. On startup the server creates its tables
+and turns the metrics table into a Timescale hypertable.
+
+## Running with Docker
+
+```sh
+docker compose up --build
+```
+
+This builds the engine and the site, runs the API, and serves everything through Caddy on ports
+80 and 443. It reads the same `.env`. Set `SITE_ADDRESS` to your domain for automatic HTTPS;
+it defaults to `localhost`.
+
+## How it fits together
+
+```text
+contract/   Shared Zod schemas, types and JSON fixtures: the language every part speaks
+compiler/   Turns a scenario plan + venue into a scene the engine can run
+engine/     Rust/Wasm simulation: movement, goals, scheduling, rules, metrics, rewind
+history/    Intervention revisions and replay planning
+server/     Node API: Gemini planner and reports, Auth0, Tiger Data storage
+web/        React + Vite + PixiJS: landing page, simulator, editor, past runs
+docs/       Product and technical specs
+```
+
+A scenario flows through it like this:
+
+1. **You describe it.** The assistant sends your words, the venue and any points you marked to the API.
+2. **Gemini plans it.** The server asks Gemini for a scenario plan in the shared contract format.
+3. **The compiler builds it.** It checks the plan against the venue and produces a scene.
+4. **The engine runs it.** The Rust engine runs in a Web Worker; the page draws each frame with PixiJS.
+5. **The run is saved.** Metrics and changes stream to Tiger Data, ready for Past runs and the report.
+
+| Team | Area |
+| --- | --- |
+| Conrad | `engine/` |
+| Samuel | `compiler/`, `web/` |
+| Josephine | `server/`, `history/`, `contract/` (everyone reviews) |
+| Benito | Landing page |
+
+## API
+
+The site talks to the API through Vite's `/api` proxy. All `/api/*` routes need an Auth0 token,
+except the public ones marked below.
+
+| Route | What it does |
+| --- | --- |
+| `GET /health`, `GET /health/database` | Health checks (public). |
+| `GET /api/features` | Whether Gemini is turned on (public). |
+| `POST /api/plan` | Ask Gemini for a scenario, a change, or an answer about a run. |
+| `GET /api/runs`, `POST /api/runs` | List your recent runs (up to 50), or start a new one. |
+| `DELETE /api/runs/:id` | Delete a run. |
+| `POST /api/runs/:id/metrics`, `POST /api/runs/:id/interventions` | Save a run's measurements and changes. |
+| `GET /api/runs/:id/analytics` | Peak density by area, and density before and after each change. |
+| `GET /api/runs/:id/replay` | What's needed to replay a run. |
+| `GET`, `POST /api/runs/:id/report` | Read a run's saved report, or write one with Gemini. |
+| `/api/venues[/:id]`, `/api/scenarios[/:id]` | Your floor plans and assistant scenarios (`GET`, `PUT`, `DELETE`). |
 
 ## Checks
 
 ```sh
-npm run check
-npm run lint
-npm test
-npm run test:wasm
+npm run check       # TypeScript, Rust formatting, cargo check
+npm run lint        # web lint
+npm test            # every workspace, plus Rust and contract compatibility tests
+npm run test:wasm   # the compiled engine through its JavaScript bridge
 ```
 
-`check` runs TypeScript checks, Rust formatting and Cargo checking. `build`
-builds the Wasm module, npm workspaces and native Rust library. `test` runs
-contracts, history, server, compiler, mock/real endpoint, Cargo and native
-Rust/Zod compatibility tests. `test:wasm` exercises the compiled JS bridge.
-Browser acceptance and simulation physics/replay remain pending. Commit both lockfiles.
+Commit both lockfiles (`package-lock.json` and `Cargo.lock`).
 
-The engine demo is at `/`; the planner UI is at `/planner`. The engine's PixiJS
-view loads a pinned CDN bundle and needs network access.
+## More docs
 
-The frontend runs the service fixture: two attendees queue/interact at a desk,
-then depart; a third wanders. Playback, door controls and Stop/Recover exercise
-Rust goals, movement and recorded changes. Its minimal PixiJS view needs network
-for a pinned CDN bundle. See [engine/README.md](engine/README.md) for supported
-inputs and limitations.
-
-The product simulator at `/sim` runs the Rust/Wasm engine. `/demo/mock` runs the
-same PixiJS UI and compiled scenarios on the TypeScript mock worker. The engine runs movement, goals, arrivals, rules, live changes and real metrics.
-The preset is explicitly movement-only. Open `/?demo=contact` for the opt-in
-physical contact and compression-fall fixture. Replay remains pending.
-
-See [contract/README.md](contract/README.md) for contract imports, validation
-boundaries and remaining engine/adapter work.
+- [engine/README.md](engine/README.md): what the engine supports and its limits
+- [contract/README.md](contract/README.md): the shared contract and validation
+- [web/README.md](web/README.md): the frontend
+- [docs/](docs/): product and technical specs
