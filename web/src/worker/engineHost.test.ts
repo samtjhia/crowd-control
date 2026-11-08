@@ -15,7 +15,7 @@ function setup(stepCostMs = 0, withDensity = false, completeAt = Infinity) {
   let tick = 0, destroyed = false
   const batches: number[] = [], received: WorkerMessage[] = []
   const bindings: WasmEngineBindings = {
-    abi_version: () => 1, engine_version: () => 'contact-engine-v8.6', create_engine: () => 1, destroy_engine() { destroyed = true },
+    abi_version: () => 1, engine_version: () => 'contact-engine-v8.7', create_engine: () => 1, destroy_engine() { destroyed = true },
     dispatch(_handle, json) {
       const command = JSON.parse(json) as WorkerCommand
       if (command.simulationId !== 'engine-demo') return JSON.stringify([{ schemaVersion: 1, simulationId: command.simulationId, type: 'error', commandId: command.commandId, error: { code: 'INVALID_SCHEMA', message: 'wrong simulation' } }])
@@ -30,9 +30,10 @@ function setup(stepCostMs = 0, withDensity = false, completeAt = Infinity) {
   }
   const host = createEngineHost(bindings, (message) => received.push(message), clock)
   let sequence = 0
-  const send = (type: 'pause' | 'resume' | 'reset' | 'speed', multiplier = 1) => host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: `control-${++sequence}`, type, ...(type === 'speed' ? { multiplier } : {}) })
+  let playbackSpeed = 1
+  const send = (type: 'pause' | 'resume' | 'reset' | 'speed', multiplier = 1) => { if (type === 'speed') playbackSpeed = multiplier; if (type === 'reset') playbackSpeed = 1; host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: `control-${++sequence}`, type, ...(type === 'speed' ? { multiplier } : {}) }) }
   host.send(load)
-  const drain = (target: number) => { for (let i = 0; tick < target && i < 10000; i++) clock.elapse(0); assert.equal(tick, target) }
+  const drain = (target: number) => { for (let i = 0; tick < target && i < 10000; i++) clock.elapse(50 / playbackSpeed); assert.equal(tick, target) }
   return { host, send, drain, clock, batches, received, tick: () => tick, destroyed: () => destroyed }
 }
 test('fixed clock retains fractional time and runs 4× without changing dt', () => {
@@ -50,7 +51,7 @@ test('fixed clock retains fractional time and runs 4× without changing dt', () 
 })
 test('large backlogs are processed in bounded batches without discarding debt', () => {
   const s = setup(); s.send('resume'); s.clock.elapse(50_000)
-  assert.equal(s.tick(), MAX_TICKS_PER_BATCH)
+  assert.equal(s.tick(), 1)
   s.drain(1000)
   assert.ok(s.batches.every((ticks) => ticks <= MAX_TICKS_PER_BATCH))
   assert.equal(s.received.filter((m) => m.type === 'ack').length, 2, 'Paced ticks do not leak internal acknowledgements')
@@ -72,7 +73,8 @@ test('pause retains backlog; resume and speed changes preserve elapsed old-rate 
   s.send('resume'); s.clock.elapse(6.25); assert.equal(s.tick(), 3)
   s.clock.elapse(50_000); s.send('pause'); const paused = s.tick()
   s.clock.elapse(0); assert.equal(s.tick(), paused)
-  s.send('resume'); s.clock.elapse(0); assert.equal(s.tick(), paused + MAX_TICKS_PER_BATCH)
+  s.send('resume'); s.clock.elapse(0); assert.equal(s.tick(), paused)
+  s.clock.elapse(50); assert.equal(s.tick(), paused + 2)
   s.host.dispose()
 })
 test('failed commands do not reset pacing and reset/load deliberately start a new clock', () => {
@@ -89,7 +91,7 @@ test('expensive Rust ticks shrink catch-up batches instead of growing stalls', (
   const s = setup(25)
   s.send('speed', 8); s.send('resume')
   s.clock.elapse(1000)
-  assert.equal(s.batches[0], MAX_TICKS_PER_BATCH)
+  assert.ok(s.batches[0]! <= 3)
   for (let i = 0; i < 20; i++) s.clock.elapse(16)
   assert.ok(s.batches.slice(1).every((n) => n === 1))
   assert.ok(s.tick() < 160, 'slow hardware retains simulation debt rather than jumping over ticks')
@@ -115,7 +117,7 @@ test('automatic density transport is capped in wall time without losing ticks or
 
 test('completion stops automatic ticks and reset permits another run', () => {
   const s = setup(0, true, 4)
-  s.send('resume'); s.clock.elapse(200)
+  s.send('resume'); for (let i = 0; i < 4; i++) s.clock.elapse(50)
   assert.equal(s.tick(), 4)
   assert.equal(s.clock.callback, undefined)
   s.clock.elapse(5000); assert.equal(s.tick(), 4)
@@ -132,6 +134,37 @@ test('seek pauses playback, clears old debt and preserves playback speed', () =>
   assert.equal(s.clock.callback, undefined)
   assert.equal(s.tick(), 0)
   s.send('resume'); s.clock.elapse(0); assert.equal(s.tick(), 0)
-  s.clock.elapse(50); assert.equal(s.tick(), 4)
+  s.clock.elapse(12.5); assert.equal(s.tick(), 1)
+  s.host.dispose()
+})
+
+test('an alarm-sized stall cannot produce sustained catch-up above the selected 8× rate', () => {
+  const s = setup()
+  s.send('speed', 8); s.send('resume')
+  s.clock.elapse(1000)
+  const afterStall = s.tick()
+  assert.ok(afterStall <= 3)
+  for (let i = 0; i < 60; i++) s.clock.elapse(1000 / 60)
+  assert.equal(s.tick() - afterStall, 160, 'recovery must keep the requested speed rather than emptying debt in a burst')
+  assert.ok(s.tick() < 320, 'unprocessed debt is retained instead of skipped')
+  const before = s.tick()
+  for (let i = 0; i < 100; i++) s.clock.elapse(0)
+  assert.equal(s.tick(), before, 'queued messages cannot spend the same wall-clock allowance twice')
+  s.host.dispose()
+})
+
+test('prepared venue dt=0.1 also recovers at 8× after an expensive alarm', () => {
+  const s = setup()
+  const venue = structuredClone(load)
+  assert.equal(venue.type, 'load')
+  if (venue.type !== 'load') throw new Error('Expected load fixture')
+  venue.compiled.scene.model.dt = 0.1
+  venue.compiled.resolvedModel.dt = 0.1
+  s.host.send(venue)
+  s.send('speed', 8); s.send('resume'); s.clock.elapse(1000)
+  const before = s.tick()
+  assert.ok(before <= 2)
+  for (let i = 0; i < 60; i++) s.clock.elapse(1000 / 60)
+  assert.equal(s.tick() - before, 80, 'one second advances eight simulated seconds at the venue timestep')
   s.host.dispose()
 })

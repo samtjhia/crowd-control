@@ -75,9 +75,9 @@ test('real Wasm plus worker host retains tick debt and applies pause/speed with 
   host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'resume', type: 'resume' })
   now += 1000; callback?.()
   const frame = () => messages.filter((m) => m.type === 'frame').at(-1)!
-  const drain = (target: number) => { for (let i = 0; frame().frame.tick < target && i < 1000; i++) callback?.(); assert.equal(frame().frame.tick, target) }
+  const drain = (target: number) => { for (let i = 0; frame().frame.tick < target && i < 1000; i++) { now += 12.5; callback?.() } assert.equal(frame().frame.tick, target) }
   drain(80); assert.equal(frame().frame.time, 4)
-  now += 10_000; callback?.(); assert.equal(frame().frame.tick, 88)
+  now += 10_000; callback?.(); assert.equal(frame().frame.tick, 82)
   drain(880)
   host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'pause', type: 'pause' })
   assert.equal(callback, undefined)

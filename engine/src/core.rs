@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "contact-engine-v8.6";
+pub const ENGINE_VERSION: &str = "contact-engine-v8.7";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -172,6 +172,7 @@ impl Engine {
                 replay_to(&mut candidate, &self.recorded_requests, &mut cursor, target)?;
                 self.loaded = Some(candidate);
                 self.request_cursor = cursor;
+                self.remember_checkpoint();
                 self.stream = stream;
                 self.published_events = 0;
                 self.published_density_tick = None;
@@ -254,36 +255,70 @@ impl Engine {
             self.loaded.as_mut().unwrap().advance(ticks)?;
         }
         self.furthest_tick = self.furthest_tick.max(target);
-        let world = self.loaded.as_ref().unwrap();
         if self
             .checkpoints
             .back()
-            .is_none_or(|(saved, _)| world.time() - saved.time() >= 10.0)
+            .is_none_or(|(saved, _)| self.loaded.as_ref().unwrap().time() - saved.time() >= 2.0)
         {
-            // shortcut: four checkpoints within a one-million-cell budget; older seeks replay from load.
-            if world.grid.blocked.len() <= 1_000_000 {
-                while self.checkpoints.len() >= 4
-                    || self
-                        .checkpoints
-                        .iter()
-                        .map(|(w, _)| w.grid.blocked.len())
-                        .sum::<usize>()
-                        + world.grid.blocked.len()
-                        > 1_000_000
-                {
-                    self.checkpoints.pop_front();
-                }
-                self.checkpoints
-                    .push_back((world.clone(), self.request_cursor));
-            }
+            self.remember_checkpoint();
         }
         Ok(())
+    }
+    fn remember_checkpoint(&mut self) {
+        let world = self.loaded.as_ref().unwrap();
+        if world.grid.blocked.len() > 1_000_000 {
+            return;
+        }
+        let current_tick = world.tick;
+        let index = self
+            .checkpoints
+            .partition_point(|(saved, _)| saved.tick < world.tick);
+        if self.checkpoints.get(index).is_some_and(|(saved, cursor)| {
+            saved.tick == world.tick && *cursor == self.request_cursor
+        }) {
+            return;
+        }
+        if self
+            .checkpoints
+            .get(index)
+            .is_some_and(|(saved, _)| saved.tick == world.tick)
+        {
+            self.checkpoints.remove(index);
+        }
+        self.checkpoints
+            .insert(index, (world.clone(), self.request_cursor));
+        let mut cells: usize = self
+            .checkpoints
+            .iter()
+            .map(|(saved, _)| saved.grid.blocked.len())
+            .sum();
+        while self.checkpoints.len() > 32 || cells > 1_000_000 {
+            // Keep the start and four recent points; thin the most densely covered older interval.
+            let end = self.checkpoints.len().saturating_sub(4).max(1);
+            let remove = (1..end)
+                .filter(|i| self.checkpoints[*i].0.tick != current_tick)
+                .min_by_key(|i| self.checkpoints[i + 1].0.tick - self.checkpoints[i - 1].0.tick)
+                .unwrap_or_else(|| {
+                    (0..self.checkpoints.len())
+                        .find(|i| self.checkpoints[*i].0.tick != current_tick)
+                        .unwrap_or(0)
+                });
+            cells -= self
+                .checkpoints
+                .remove(remove)
+                .unwrap()
+                .0
+                .grid
+                .blocked
+                .len();
+        }
     }
     fn clear_recording(&mut self) {
         self.recorded_requests.clear();
         self.request_cursor = 0;
         self.furthest_tick = 0;
         self.checkpoints.clear();
+        self.remember_checkpoint();
     }
     fn stamp(&self) -> Value {
         let world = self.loaded.as_ref().unwrap();
@@ -351,4 +386,57 @@ fn replay_to(
         *cursor += 1;
     }
     world.advance(target - world.tick)
+}
+
+#[cfg(test)]
+mod seek_cache_tests {
+    use super::*;
+    #[test]
+    fn checkpoints_cover_old_and_recent_time_with_bounded_storage() {
+        let mut e = Engine::default();
+        let input = include_str!("../../contract/fixtures/engine-navigation-load.json");
+        assert_eq!(
+            serde_json::from_str::<Value>(&e.dispatch(input)).unwrap()[0]["type"],
+            "ack"
+        );
+        for _ in 0..120 {
+            e.advance(40).unwrap();
+        }
+        assert_eq!(e.checkpoints.front().unwrap().0.tick, 0);
+        assert!(e.checkpoints.len() <= 32);
+        assert!(
+            e.checkpoints
+                .iter()
+                .map(|(w, _)| w.grid.blocked.len())
+                .sum::<usize>()
+                <= 1_000_000
+        );
+        let target = 1200;
+        let saved = e
+            .checkpoints
+            .iter()
+            .rev()
+            .find(|(w, _)| w.tick <= target)
+            .unwrap()
+            .0
+            .tick;
+        assert!(
+            target - saved <= 800,
+            "old seeks should not replay from load: {saved}"
+        );
+        let recent: Vec<_> = e
+            .checkpoints
+            .iter()
+            .rev()
+            .take(4)
+            .map(|(w, _)| w.tick)
+            .collect();
+        assert!(recent.windows(2).all(|v| v[0] - v[1] == 40));
+        let output:Value = serde_json::from_str(&e.dispatch(&json!({"schemaVersion":1,"simulationId":"engine-demo","commandId":"seek","type":"seek","time":60.05}).to_string())).unwrap();
+        assert_eq!(output[0]["type"], "ack");
+        assert!(
+            e.checkpoints.iter().any(|(w, _)| w.tick == 1201),
+            "repeated seeks reuse the exact restored point"
+        );
+    }
 }

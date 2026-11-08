@@ -6,10 +6,7 @@ export function Timeline({ now, recordedUntil, incidents, disabled, onSeek }: {
   now: number; recordedUntil: number; incidents: Incident[]; disabled: boolean; onSeek(time: number): Promise<unknown> | void
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const active = useRef(false)
   const latest = useRef<number | null>(null)
-  const queued = useRef<number | null>(null)
   const [trackPx, setTrackPx] = useState(600)
   const [preview, setPreview] = useState<number | null>(null)
   const [timeInput, setTimeInput] = useState('')
@@ -20,44 +17,20 @@ export function Timeline({ now, recordedUntil, incidents, disabled, onSeek }: {
     observer.observe(track)
     return () => {
       observer.disconnect()
-      if (timer.current !== null) clearTimeout(timer.current)
     }
   }, [])
 
-  const send = (time: number) => {
-    if (active.current) { queued.current = time; return }
-    active.current = true
-    void Promise.resolve()
-      .then(() => onSeek(time))
-      .catch(() => {})
-      .finally(() => {
-        active.current = false
-        const next = queued.current
-        queued.current = null
-        if (next !== null) send(next)
-      })
-  }
-  const schedule = () => {
-    if (timer.current !== null) return
-    timer.current = setTimeout(() => {
-      timer.current = null
-      if (latest.current !== null) send(latest.current)
-    }, 120)
-  }
   const change = (time: number) => {
     latest.current = time
     setPreview(time)
-    schedule()
   }
   const commit = () => {
-    if (timer.current !== null) { clearTimeout(timer.current); timer.current = null }
     const time = latest.current
     latest.current = null
     setPreview(null)
-    if (time !== null) send(time)
+    if (time !== null && time !== now) void onSeek(time)
   }
   const cancel = () => {
-    if (timer.current !== null) { clearTimeout(timer.current); timer.current = null }
     latest.current = null
     setPreview(null)
   }
@@ -98,7 +71,7 @@ export function Timeline({ now, recordedUntil, incidents, disabled, onSeek }: {
       <form className="timeline-jump" onSubmit={(event) => {
         event.preventDefault()
         const time = Number(timeInput)
-        if (timeInput.trim() && Number.isFinite(time) && time >= 0 && time <= recordedUntil) send(time)
+        if (timeInput.trim() && Number.isFinite(time) && time >= 0 && time <= recordedUntil) void onSeek(time)
       }}>
         <label htmlFor="seek-seconds">Go to second</label>
         <input id="seek-seconds" type="number" min={0} max={recordedUntil} step="any" value={timeInput}

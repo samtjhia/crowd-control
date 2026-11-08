@@ -48,7 +48,6 @@ type AgentView = {
   pose: FigurePose | null
   fallen: boolean
   rotates: boolean
-  last: Vec2 | null
   heading: number
   phase: number
 }
@@ -637,6 +636,13 @@ export class CrowdRenderer {
   private drawAgents(previous: Parameters<typeof displayPositions>[0], current: Parameters<typeof displayPositions>[1]) {
     const now = performance.now()
     const positions = displayPositions(previous, current, now)
+    const continuous = previous !== null && previous.frame.streamId === current.frame.streamId
+      && current.frame.tick > previous.frame.tick && current.receivedAt > previous.receivedAt
+    const before = continuous ? new Map(previous.frame.agents.map((agent) => [agent.id, agent])) : null
+    // Worker frames describe motion throughout a tick, even if its final state is waiting.
+    const fresh = continuous && now - current.receivedAt <= Math.max(150, 2 * (current.receivedAt - previous.receivedAt))
+    const alpha = continuous ? Math.min(1, Math.max(0, (now - current.receivedAt) / (current.receivedAt - previous.receivedAt))) : 1
+    const animationTime = continuous ? previous.frame.time + (current.frame.time - previous.frame.time) * alpha : current.frame.time
     this.positions = positions
     const ppu = this.camera.pixelsPerUnit
     const seen = new Set<string>()
@@ -649,7 +655,7 @@ export class CrowdRenderer {
         view = {
           body: new Graphics(), figure: null, badge: null, label: null, state: null, metadata: null, pixelsPerUnit: 0, mode: null,
           radiusPx: 0, topPx: 0, badgeText: null, colors: { body: '', skin: '', hair: '' }, look: figureLook(agent.id), pose: null, fallen: false, rotates: false,
-          last: null, heading: 0, phase: stableIndex(agent.id, 2),
+          heading: 0, phase: stableIndex(agent.id, 2),
         }
         this.layers.agents.addChild(view.body)
         this.agentViews.set(agent.id, view)
@@ -659,14 +665,16 @@ export class CrowdRenderer {
       }
       view.state = agent.state
       const screen = worldToScreen(this.camera, positions.get(agent.id)!)
-      const moved = view.last ? Math.hypot(screen.x - view.last.x, screen.y - view.last.y) : 0
-      if (view.last && moved > 0.05) view.heading = Math.atan2(screen.y - view.last.y, screen.x - view.last.x)
-      const walking = agent.state === 'moving' && moved > 0.05
-      view.last = screen
+      const from = before?.get(agent.id)
+      const dx = from ? agent.x - from.x : 0
+      const dy = from ? agent.y - from.y : 0
+      const moved = Math.hypot(dx, dy) > 1e-7
+      if (moved) view.heading = Math.atan2(dy, dx)
+      const walking = fresh && moved
 
       if (view.figure && view.figure.visible) {
         const pose: FigurePose = view.fallen ? 'fallen'
-          : walking ? ((Math.floor(now / 1000 / WALK_STEP_SECONDS) + view.phase) % 2 === 0 ? 'stepA' : 'stepB')
+          : walking ? ((Math.floor(animationTime / WALK_STEP_SECONDS) + view.phase) % 2 === 0 ? 'stepA' : 'stepB')
           : 'stand'
         if (pose !== view.pose) this.applyFigure(view, pose)
         view.figure.position.set(screen.x, screen.y)

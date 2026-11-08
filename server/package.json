@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "npm run build --workspace @crowd-control/contract",
-    "dev": "node --env-file-if-exists=../.env --watch src/index.ts",
+    "dev": "node --env-file-if-exists=../.env --watch-path=src src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",

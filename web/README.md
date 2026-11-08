@@ -35,8 +35,9 @@ and wandering, without queue/service behavior. Use `/sim?engine=real` for Rust;
   6,000 entries or 128 MiB; protect textures referenced by visible sprites. The
   budgets are soft when the visible working set alone exceeds them. Avoid global
   cache clears and accumulated retired textures during animation/zoom changes.
-- Automatic Rust playback uses at most 8 ticks per dispatch and measured tick cost
-  to target 12 ms of work. Keep unprocessed tick debt and yield between batches;
+- Automatic Rust playback uses at most 4 ticks per dispatch and measured tick cost
+  to target 12 ms of work. Visual catch-up is capped so agents never advance in
+  perceptible jumps after expensive ticks. Keep unprocessed tick debt and yield between batches;
   pause must not wait behind a 400-tick catch-up call. A single expensive Rust tick
   cannot be preempted. Slow hardware may lag the requested speed without skipping
   simulation time. Public manual step/run_to limits remain unchanged.
@@ -79,6 +80,11 @@ large zoom textures, preserved playback debt, and expensive-tick batch reduction
   arrivals after reaching the hall. Recheck target visibility and immediately
   resample when furniture blocks it; crowd avoidance alone does not cause a
   resample. An explicit no-goal/clear-goal means idle.
+- Walking animation and marker headings use displacement between consecutive
+  engine frames, independently of camera movement, zoom or per-paint distance.
+  A tick ending in waiting can still animate its measured movement. Repeated
+  paints retain walking between worker updates; stale frames settle to standing.
+  Reset/rewind stream changes never count as movement.
 - Reuse Pixi geometry across moving/waiting/idle/reacting transitions. Pose changes
   animate; meaningful annotations and appearance changes still restyle. Alarm
   pulses animate opacity, without a map-sized animated shadow.
@@ -98,3 +104,22 @@ Browser FPS is unverified: local-server binding is blocked in this session.
 The 2,000-agent benchmark remains near/below 4× compute budget: 78.9 ticks/CPU s
 without contact, 65.8 with contact; 80 required, excluding transfer/rendering.
 JSON bridging/validation remains costly; full performance acceptance is pending.
+
+Playback after expensive ticks: retain owed simulation ticks, but cap spendable
+wall-clock credit to one nominal 60 Hz update plus its fractional tick. Old debt
+cannot cause sustained movement above the selected speed; it remains queued until
+processed or an explicit reset/seek clears it. This deliberately allows simulation
+time to fall behind wall time under load. Manual step/run_to are unchanged.
+Walking poses follow interpolated simulation time, so 8× playback also advances
+walking cadence 8×. Repainting an unchanged frame does not advance the gait.
+
+Seeking (v8.7): keep up to 32 checkpoints spread across recorded time, with
+recent points two simulated seconds apart and a one-million-grid-cell storage
+budget. Cache successful seek destinations for repeat jumps. Older intervals
+are thinned instead of deleting the entire early timeline. The slider previews
+locally while dragging; release or Go performs one exact engine restore.
+Long gaps on large maps can still require replay; no physics ticks are skipped.
+
+Local Wasm seek benchmark (430 concert agents, 180 s recorded): seeking to
+90.05 s improved from 7,178 ms to 155 ms; repeating 30.05 s took 19 ms.
+These measure engine dispatch, excluding browser rendering and transport.

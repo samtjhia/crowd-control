@@ -35,6 +35,9 @@ In another terminal, start the API:
 npm run dev:server
 ```
 
+Keep `PORT=3001` in `.env`; Vite uses port 5173 separately. The API dev command
+watches only `server/src` to avoid exhausting file watchers (`EMFILE`).
+
 The API exposes `GET http://127.0.0.1:3001/health`, `GET /health/database`,
 and `POST /api/plan`. With Tiger Data enabled, it also accepts run records at
 `POST /api/runs`, metric batches at `POST /api/runs/:runId/metrics`, and
