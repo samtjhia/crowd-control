@@ -402,8 +402,11 @@ impl Navigator {
             }
             for dir in 0..4 {
                 if let Some(j) = neighbour(grid, i, dir) {
+                    // A step the portal rules don't allow (e.g. straight from one door into a
+                    // touching door, as drawn floor plans can have) is simply not an edge,
+                    // as in the steering and permits checks; it must not reject the whole map.
                     if c.walk[j]
-                        && allowed(grid, &portal_info, i, j)?
+                        && allowed(grid, &portal_info, i, j).unwrap_or(false)
                         && geometry::clear(
                             grid,
                             bodies,

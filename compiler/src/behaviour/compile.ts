@@ -111,6 +111,12 @@ function compileJob(schedule: ScheduleOperation, path: string, world: StaticWorl
   const compact = new Map<SpawnOperation, CompactSpawn>()
   for (const [index, operation] of schedule.operations.entries()) {
     const here = `${path}.operations.${index}`
+    if (operation.op === 'spawn' && !('inside' in operation.placement)) {
+      // Near or along something (arrivals just outside a door, `within` the outside area): the
+      // engine places these itself when the job runs, so they pass through as written.
+      operations.push(copy(operation))
+      continue
+    }
     if (operation.op === 'spawn') {
       const spawn = compactSpawn(operation, here, world)
       if (!spawn.ok) return spawn

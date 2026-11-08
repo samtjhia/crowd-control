@@ -97,7 +97,7 @@ function operationError(operations: Operation[], options: ValidationOptions, bou
       if (!error && 'placement' in op && op.placement) {
         const p = op.placement;
         const anchor = 'inside' in p ? p.inside : 'near' in p ? p.near : p.along;
-        for (const s of [anchor, ...(p.awayFrom ?? [])]) { error = selector(s); if (error) break; }
+        for (const s of [anchor, ...('within' in p && p.within ? [p.within] : []), ...(p.awayFrom ?? [])]) { error = selector(s); if (error) break; }
       }
     }
     if (error) return { ...error, operationIndex };

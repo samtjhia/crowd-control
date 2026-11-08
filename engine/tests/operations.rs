@@ -414,3 +414,30 @@ fn new_event_rules_do_not_consume_historical_events() {
     );
     assert_eq!(snapshot(&mut e)["events"].as_array().unwrap().len(), 1);
 }
+#[test]
+fn near_placement_within_an_area_stays_on_that_side_of_the_door() {
+    let mut e = init(load());
+    ok(
+        &mut e,
+        "arrivals",
+        json!([{"op":"spawn","template":{"kind":"agent","tags":["arrival"]},"count":3,"placement":{"near":{"ids":["door"]},"within":{"ids":["outside"]},"distance":3}}]),
+    );
+    let s = snapshot(&mut e);
+    let arrivals: Vec<&Value> = s["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| a["tags"] == json!(["arrival"]))
+        .collect();
+    assert_eq!(arrivals.len(), 3);
+    for a in arrivals {
+        let x = a["position"]["x"].as_f64().unwrap();
+        assert!((10.0..=11.0).contains(&x), "arrival placed in the hall at x={x}");
+    }
+    let out = apply(
+        &mut e,
+        "within-alone",
+        json!([{"op":"spawn","template":{"kind":"agent"},"count":1,"placement":{"inside":{"ids":["hall"]},"within":{"ids":["outside"]}}}]),
+    );
+    assert_eq!(out[0]["type"], "error", "{out:?}");
+}
