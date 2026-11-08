@@ -23,17 +23,21 @@ rustup target add wasm32-unknown-unknown
 npm run build
 ```
 
-Start the frontend at the URL Vite prints:
+Start the frontend and API together:
 
 ```sh
 npm run dev
 ```
 
-In another terminal, start the API:
+For separate terminals with API auto-reload, run `npm run dev:web` and:
 
 ```sh
 npm run dev:server
 ```
+
+`npm run dev` reuses a healthy API on port 3001, otherwise starts one. Closing
+either managed service stops the other. Restart for API source changes, or use
+the separate-terminal commands above for API auto-reload.
 
 Keep `PORT=3001` in `.env`; Vite uses port 5173 separately. The API dev command
 watches only `server/src` to avoid exhausting file watchers (`EMFILE`).

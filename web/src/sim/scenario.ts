@@ -214,16 +214,14 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
           spawn(45, 'hall', ['hacker', 'seated'], '#059669'),
           spawn(15, 'hall', ['hacker', 'hungry'], '#0D9488', 'square'),
           spawn(40, 'street', ['arrival'], '#2563EB', 'triangle'),
-          // Most hackers sit at the nearest table and work.
-          assign('seated', { kind: 'sequence', goals: [{ kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' }, { kind: 'wait', duration: 300 }] }),
+          // Spread working hackers across tables, then let them roam after their work session.
+          assign('seated', { kind: 'sequence', goals: [{ kind: 'reach', target: { tags: ['table'] }, selection: 'random' }, { kind: 'wait', duration: 300 }, { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6 }] }),
           // Some take turns at the snack table (three served at once), then roam.
-          assign('hungry', { kind: 'sequence', repeat: 3, goals: [{ kind: 'interact', target: inside('snacks') }, { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6, duration: 40 }] }),
-          // Arrivals enter through the check-in desks (4 s each), find the nearest table and settle in, then roam.
+          assign('hungry', { kind: 'sequence', goals: [{ kind: 'sequence', repeat: 3, goals: [{ kind: 'interact', target: inside('snacks') }, { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6, duration: 40 }] }, { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6 }] }),
+          // Arrivals enter through the check-in desks (4 s each), then roam in the hall.
           assign('arrival', {
             kind: 'sequence', goals: [
               { kind: 'reach', target: inside('hall') },
-              { kind: 'reach', target: { tags: ['table'] }, selection: 'nearest' },
-              { kind: 'wait', duration: 60 },
               { kind: 'wander', inside: inside('hall'), changeTargetEvery: 6 },
             ],
           }),

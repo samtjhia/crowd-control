@@ -360,12 +360,12 @@ test('worked fire drill clears every agent in actual Wasm', async () => {
   } finally { bindings.destroy_engine(handle) }
 })
 
-test('prepared fire drill, concert and hackathon demos finish their advertised behavior', async () => {
+for (const scenarioId of ['school-wing', 'concert-floor', 'hackathon-hall', 'hillside-alley']) test(`prepared ${scenarioId} demo finishes its advertised behavior`, async () => {
   const { scenarios, startScenario, movementPreset } = await import('../../web/src/sim/scenario.ts')
   const worked = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
   const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
   const bindings = await engine()
-  for (const scenario of scenarios(worked, movementPreset(preset)).filter((s) => ['school-wing', 'concert-floor', 'hackathon-hall', 'hillside-alley'].includes(s.id))) {
+  for (const scenario of scenarios(worked, movementPreset(preset)).filter((s) => s.id === scenarioId)) {
     const compiled = startScenario(scenario.plan, scenario.model)
     assert.equal(compiled.ok, true)
     if (!compiled.ok) throw new Error(scenario.id)
@@ -418,7 +418,10 @@ test('prepared fire drill, concert and hackathon demos finish their advertised b
         const later: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'still-wandering' }))))
         const next = later.find((m) => m.type === 'snapshot')
         assert.ok(next?.type === 'snapshot')
-        assert.ok(next.snapshot.agents.every((a) => a.randomState !== randomBefore.get(a.id)), 'all hackathon agents keep selecting wander targets after arrivals finish')
+        const arrivals = next.snapshot.agents.filter((a) => a.tags.includes('arrival'))
+        assert.ok(arrivals.every((a) => a.randomState !== randomBefore.get(a.id)), 'arrivals keep selecting wander targets; working hackers may still be in their explicit wait')
+        const positions = new Map(agents.map((a) => [a.id, a.position]))
+        assert.ok(arrivals.filter((a) => Math.hypot(a.position.x - positions.get(a.id)!.x, a.position.y - positions.get(a.id)!.y) > 0.2).length >= 36, 'arrivals physically roam after reaching the hall')
       } else if (scenario.id === 'hillside-alley') {
         for (const direction of ['uphill', 'downhill']) assert.ok(agents.some((a) => a.tags.includes(direction) && a.currentGoal?.cursor[0]?.childIndex === 1), `${direction} traffic crosses the alley`)
       } else {
@@ -428,13 +431,50 @@ test('prepared fire drill, concert and hackathon demos finish their advertised b
   }
 })
 
+test('both alley flows reach their destinations instead of following slower traffic indefinitely', async () => {
+  const { scenarios, startScenario, movementPreset } = await import('../../web/src/sim/scenario.ts')
+  const worked = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
+  const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
+  const scenario = scenarios(worked, movementPreset(preset)).find((s) => s.id === 'hillside-alley')!
+  const compiled = startScenario(scenario.plan, scenario.model)
+  assert.ok(compiled.ok)
+  const bindings = await engine(), handle = bindings.create_engine()
+  const send = (type: string, extra = {}): WorkerMessage[] => {
+    const messages = JSON.parse(bindings.dispatch(handle, JSON.stringify({ schemaVersion: 1, simulationId: scenario.plan.simulationId, commandId: type, type, ...extra })))
+    assert.ok(messages.every((m: WorkerMessage) => m.type !== 'error'))
+    return messages
+  }
+  try {
+    send('load', { compiled: compiled.value, history: { historyRevision: 0, records: [], outcomes: [] } })
+    send('run_to', { time: 120 })
+    const report = send('snapshot', { snapshotId: 'crossed' }).find((m) => m.type === 'snapshot')
+    assert.ok(report?.type === 'snapshot')
+    assert.equal(report.snapshot.agents.length, 160)
+    for (const a of report.snapshot.agents) {
+      assert.equal(a.currentGoal?.cursor[0]?.childIndex, 1, `${a.id} has not crossed the alley`)
+      assert.equal(a.zoneId, a.tags.includes('downhill') ? 'station_plaza' : 'bar_street')
+    }
+    send('run_to', { time: 130 })
+    const later = send('snapshot', { snapshotId: 'wandering' }).find((m) => m.type === 'snapshot')
+    assert.ok(later?.type === 'snapshot')
+    const before = new Map(report.snapshot.agents.map((a) => [a.id, a]))
+    let moved = 0
+    for (const a of later.snapshot.agents) {
+      const previous = before.get(a.id)!
+      assert.notEqual(a.randomState, previous.randomState, `${a.id} must keep choosing wander targets`)
+      if (Math.hypot(a.position.x - previous.position.x, a.position.y - previous.position.y) > 0.2) moved++
+    }
+    assert.ok(moved >= 144, `${moved}/160 agents actually moved after arrival`)
+  } finally { bindings.destroy_engine(handle) }
+})
+
 test('concert evacuation keeps making progress across different crowd seeds', async () => {
   const { scenarios, startScenario, movementPreset } = await import('../../web/src/sim/scenario.ts')
   const worked = JSON.parse(readFileSync(new URL('../../contract/fixtures/scenario-plan.json', import.meta.url), 'utf8'))
   const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
   const scenario = scenarios(worked, movementPreset(preset)).find((s) => s.id === 'concert-floor')!
   const bindings = await engine()
-  for (const seed of [7, 99]) {
+  for (const seed of [7, 99, 42]) {
     const compiled = startScenario({ ...scenario.plan, seed }, scenario.model)
     assert.ok(compiled.ok)
     const handle = bindings.create_engine()
@@ -452,6 +492,7 @@ test('concert evacuation keeps making progress across different crowd seeds', as
         assert.equal(frame.frame.agents.length, 430)
         const count = frame.frame.agents.filter((a) => a.state === 'departed').length
         assert.ok(count > departed || departed === 430, `seed ${seed}: exits stopped making progress at ${time}s (${count}/430)`)
+        if (seed === 42 && time === 210) assert.equal(count, 430, 'the dense crowd must clear instead of leaving a stationary blob')
         departed = count
       }
       assert.equal(departed, 430, `seed ${seed}: people left behind`)
@@ -508,7 +549,7 @@ test('Wasm rewind across scheduled work and live changes matches native Rust', a
   const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-load.json', import.meta.url), 'utf8'))
   const bindings = await engine(), handle = bindings.create_engine()
   const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: 'engine-demo', commandId: type, type, ...extra })
-  const commands = [load, h('run_to', { time: 12 }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'colour', operations: [{ op: 'set', targets: { ids: ['a2'] }, values: { appearance: { fill: '#00FF00' } } }] } }),
+  const commands = [load, h('run_to', { time: 8 }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'colour', operations: [{ op: 'set', targets: { ids: ['a2'] }, values: { appearance: { fill: '#00FF00' } } }] } }),
     h('run_to', { time: 40 }), h('seek', { time: 4.13 }), h('snapshot', { snapshotId: 'before-alarm' }),
     h('run_to', { time: 40 }), h('snapshot', { snapshotId: 'replayed' })]
   try {

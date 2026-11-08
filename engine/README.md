@@ -565,3 +565,60 @@ Long gaps on large maps can still require replay; no physics ticks are skipped.
 Local Wasm seek benchmark (430 concert agents, 180 s recorded): seeking to
 90.05 s improved from 7,178 ms to 155 ms; repeating 30.05 s took 19 ms.
 These measure engine dispatch, excluding browser rendering and transport.
+
+Wide gates (v8.12): compare up to eight crossing points using travel length and
+nearby congestion, with a per-tick summed occupancy grid. Every alternative still
+goes through the portal; no retreat/rally waypoints. Preserve near-threshold lanes,
+narrow/timed-door semantics, one-way access, terrain costs and physical collisions.
+A clear direct velocity stays first. When it is obstructed, compare safe passing
+velocities on goal progress while retaining the separation preference. Regressions
+cover overtaking a slow leader then reaching the original goal, passing a wall-side
+queue through free gate width, and all worked-example evacuees actually departing.
+
+Dense groups keep coordinated separation steering when both passing sides are
+blocked. The v8.12 concert seed-42 trace, 430 agents: departures 148 at 90 s, 290 at 120 s, all 430 at 180 s
+in the local Wasm trace. This is a liveness regression, not a calibrated prediction.
+
+Gate routing (v8.16): wide-gate approaches compare short routes across usable
+width, scoring distance plus crowd occupancy along the approach and at the gate.
+Lookahead is two seconds of preferred walking, at least six body radii; lateral
+changes are bounded by that distance. Occupancy uses at most twelve approach samples
+and one gate query per candidate; slower people cost more. A short waypoint lets agents
+go around a clump before returning toward their destination. Wall-corner approaches
+still turn through open space. Geometry, portal permissions, physical speed and
+collision checks remain authoritative; timed queues retain their admission waits.
+
+Zone arrival requires the full body inside its mask. An agent partly across the
+boundary seeks a nearby body-safe interior point instead of turning back toward
+a shared cell centre. The next sequence goal then starts normally, including
+wander. Bare reach goals stop; no goal is silently replaced with wandering.
+
+Seed-42 alley runs and multi-seed concert runs check progress and full clearance;
+post-arrival checks verify actual movement and evolving wander RNG. These are
+liveness checks, not calibrated travel-time predictions.
+
+Hackathon demo: arrivals pass the timed check-in portals, reach the hall, then
+wander indefinitely. They do not visit a table or dwell for 60 seconds. Working
+hackers choose tables using seeded random selection, work for 300 seconds after
+arrival, then wander. Snack visitors roam after their three service/wander cycles.
+These are explicit scenario goals; the engine does not change nearest selection
+or turn arbitrary completed goals into wandering.
+
+General traffic steering (v8.17): every moving agent rechecks its route each engine
+tick, including ordinary reach, wander, follow, avoid and travel toward activities.
+It compares nearby bypasses using distance-to-goal and the local walking-speed
+deficit relative to its desired pace. Clear traffic keeps the original route.
+This works on maps with no portals and on unnamed walkable floor; gate-specific
+approach routing remains available. A bypass must reduce remaining goal cost,
+stay in the current floor zone and pass body-clearance checks. It cannot cross a
+portal to evade admission rules. Agents finish nearby waypoints before detouring,
+so door-entry waits and arrival transitions cannot be skipped or orbited.
+
+Queue tickets, occupied interaction slots, reaction delays and explicit dwell
+waits retain their order/timers. Crowds are sampled once per tick; stored sample
+positions/speeds exclude the subject's own contribution even across substeps.
+These samples are derived caches; original goals and snapshot contracts are unchanged.
+
+v8.17 local 2,000-agent worker benchmark: about 77 ticks/s with scheduled work
+(80 required for 4×), about 65 with contact/sensors. Browser render FPS is unmeasured;
+the 2,000-agent 4×/60 FPS performance target remains unmet in this benchmark.

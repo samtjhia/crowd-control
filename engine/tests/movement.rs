@@ -333,3 +333,179 @@ fn open_flow_preserves_parallel_lanes_instead_of_snapping_people_to_cell_centres
     assert!((y(&s["agents"][0]) - 4.2).abs() < 1e-8, "{}", s["agents"]);
     assert!((y(&s["agents"][1]) - 7.8).abs() < 1e-8, "{}", s["agents"]);
 }
+
+#[test]
+fn a_faster_walker_passes_a_slow_leader_and_still_reaches_its_goal() {
+    let fast = agent("fast", 3.5, 5.5, "east");
+    let mut slow = agent("slow", 4.3, 5.5, "east");
+    slow["components"] = json!({"navigation":{"preferredSpeed":0.2}});
+    let mut e = load(input(vec![fast, slow]));
+    let mut sideways = false;
+    for _ in 0..200 {
+        step(&mut e, 1);
+        let s = snapshot(&mut e);
+        let agents = s["agents"].as_array().unwrap();
+        let fast = &agents[0];
+        let slow = &agents[1];
+        sideways |= (y(fast) - 5.5).abs() > 0.2;
+        assert!(
+            (x(fast) - x(slow)).hypot(y(fast) - y(slow)) >= 0.4 - 1e-8,
+            "must pass without overlapping"
+        );
+    }
+    let s = snapshot(&mut e);
+    assert!(sideways, "use the free space beside the slow walker");
+    assert!(
+        x(&s["agents"][0]) > x(&s["agents"][1]) + 2.0,
+        "should overtake instead of staying behind the slower person: {}",
+        s["agents"]
+    );
+    step(&mut e, 600);
+    let s = snapshot(&mut e);
+    assert_eq!(
+        s["agents"][0]["currentGoal"]["status"], "completed",
+        "overtaking must preserve the original goal"
+    );
+    assert_eq!(s["agents"][0]["zoneId"], "east");
+}
+
+#[test]
+fn a_closing_walker_starts_passing_before_reaching_the_leader() {
+    let mut fast = agent("fast", 3.5, 5.5, "east");
+    fast["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});
+    let mut slow = agent("slow", 5.0, 5.5, "east");
+    slow["components"] =
+        json!({"physical":{"radius":0.25},"navigation":{"preferredSpeed":0.2,"personalSpace":0.5}});
+    let mut e = load(input(vec![fast, slow]));
+    for tick in 0..60 {
+        step(&mut e, 1);
+        let s = snapshot(&mut e);
+        let a = &s["agents"][0];
+        let leader = &s["agents"][1];
+        assert!((x(a) - x(leader)).hypot(y(a) - y(leader)) >= 0.5 - 1e-8);
+        if tick == 19 {
+            assert!(
+                (y(a) - 5.5).abs() > 0.2,
+                "start using the open side while still approaching the leader: {a}"
+            );
+        }
+    }
+    let s = snapshot(&mut e);
+    assert!(x(&s["agents"][0]) > x(&s["agents"][1]));
+}
+
+#[test]
+fn entering_a_destination_region_starts_wandering_without_visiting_a_cell_centre() {
+    let mut v = input(vec![agent("a", 30.3, 5.2, "east")]);
+    v["compiled"]["scene"]["controllers"]["east"] = json!({"kind":"sequence","goals":[{"kind":"reach","targetZone":"east"},{"kind":"wander","insideZone":"east","changeTargetEvery":2}]});
+    let mut e = load(v);
+    step(&mut e, 1);
+    let s = snapshot(&mut e);
+    assert_eq!(
+        s["agents"][0]["currentGoal"]["cursor"][0]["childIndex"].as_f64(),
+        Some(1.0),
+        "the whole body is already in the destination region"
+    );
+    step(&mut e, 5);
+    let s = snapshot(&mut e);
+    assert!(
+        s["agents"][0]["currentGoal"]["execution"]["targetPoint"].is_object(),
+        "the next wander goal must select a target"
+    );
+}
+
+#[test]
+fn nearby_people_on_one_side_do_not_disable_passing_on_the_open_side() {
+    let mut fast = agent("fast", 3.5, 5.5, "east");
+    fast["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});
+    let mut agents = vec![fast];
+    for (id, x, y) in [
+        ("leader", 4.2, 5.5),
+        ("right-front", 4.2, 6.05),
+        ("right", 3.6, 6.05),
+    ] {
+        let mut slow = agent(id, x, y, "east");
+        slow["components"] = json!({"physical":{"radius":0.25},"navigation":{"preferredSpeed":0.2,"personalSpace":0.5}});
+        agents.push(slow);
+    }
+    let mut e = load(input(agents));
+    for _ in 0..160 {
+        step(&mut e, 1);
+    }
+    let s = snapshot(&mut e);
+    let a = s["agents"].as_array().unwrap();
+    assert!(
+        x(&a[0]) > x(&a[1]) + 2.0,
+        "nearby neighbours must not force following when the other side is clear: {a:?}"
+    );
+    step(&mut e, 640);
+    assert_eq!(
+        snapshot(&mut e)["agents"][0]["currentGoal"]["status"],
+        "completed"
+    );
+}
+
+#[test]
+fn a_new_clump_is_bypassed_in_an_open_room_without_portals() {
+    let mut walker = agent("walker", 3.5, 5.5, "east");
+    walker["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});
+    let mut agents = vec![walker];
+    let mut stopped = vec![];
+    for column in 0..2 {
+        for row in 0..3 {
+            let id = format!("cluster-{column}-{row}");
+            let mut a = agent(
+                &id,
+                6.5 + column as f64 * 0.6,
+                4.9 + row as f64 * 0.6,
+                "east",
+            );
+            a["components"] =
+                json!({"physical":{"radius":0.25},"navigation":{"preferredSpeed":0.1}});
+            agents.push(a);
+            stopped.push(id);
+        }
+    }
+    for unnamed in [false, true] {
+        let mut v = input(agents.clone());
+        if unnamed {
+            for cell in v["compiled"]["scene"]["map"]["grid"]["zoneIndex"]
+                .as_array_mut()
+                .unwrap()
+            {
+                if *cell == json!(1) {
+                    *cell = json!(0);
+                }
+            }
+        }
+        let mut e = load(v);
+        step(&mut e, 10);
+        let mut c = command("apply_request");
+        c["request"] = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"late-blockage","operations":[{"op":"assign_goal","targets":{"ids":stopped},"mode":"replace","goal":{"kind":"wait","duration":600}}]});
+        assert_eq!(send(&mut e, c)[0]["type"], "ack");
+        step(&mut e, 20);
+        let s = snapshot(&mut e);
+        let walker = s["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "walker")
+            .unwrap();
+        assert!(
+            (y(walker) - 5.5).abs() > 0.2,
+            "choose open space before joining the new clump: {walker}"
+        );
+        step(&mut e, 800);
+        let s = snapshot(&mut e);
+        let walker = s["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "walker")
+            .unwrap();
+        assert_eq!(
+            walker["currentGoal"]["status"], "completed",
+            "retain the destination after passing"
+        );
+    }
+}

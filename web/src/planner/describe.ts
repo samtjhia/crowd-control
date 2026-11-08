@@ -1,4 +1,4 @@
-import type { InventoryItem, Operation, ScenarioPlan } from '@crowd-control/contract'
+import type { InventoryItem, Operation, ScenarioPlan, Selection } from '@crowd-control/contract'
 
 /**
  * Plain-language summaries of planner output, shared by the planner page and the simulator's
@@ -73,7 +73,7 @@ export function describeOperation(operation: Operation, inventory: InventoryItem
   if (operation.op === 'assign_goal') {
     const who = describeWho(operation.targets, inventory)
     const after = operation.mode === 'enqueue' ? ' after what they are doing' : ''
-    if (operation.goal.kind === 'reach') return `Send ${who} to ${describeWhere(operation.goal.target, inventory)}${after}`
+    if (operation.goal.kind === 'reach') return `Send ${who} to ${describeWhere(operation.goal.target, inventory, operation.goal.selection)}${after}`
     return `Have ${who} ${describeGoal(operation.goal, inventory)}${after}`
   }
   if (operation.op === 'clear_goal') return `Stop ${describeWho(operation.targets, inventory)} from what they are doing`
@@ -128,16 +128,16 @@ export function describeWho(selector: Selector, inventory: InventoryItem[]): str
 }
 
 /** Where a goal points: named rooms or doors, or a description of the selection. */
-function describeWhere(selector: Selector, inventory: InventoryItem[]): string {
+function describeWhere(selector: Selector, inventory: InventoryItem[], selection?: Selection): string {
   if ('binding' in selector) return 'that person'
   if (selector.ids) return selector.ids.map((id) => nameIn(id, inventory)).join(' or ')
-  return selector.tags ? `the nearest ${selector.tags.map(displayName).join(' ')}` : 'the target'
+  return selector.tags ? `${selection === 'random' ? 'a randomly chosen' : 'the nearest'} ${selector.tags.map(displayName).join(' ')}` : 'the target'
 }
 
 /** A goal as something to do: "go to Outside", "wander in Hall", "wait 20 s, then go to Exit". */
 export function describeGoal(goal: Goal, inventory: InventoryItem[]): string {
   switch (goal.kind) {
-    case 'reach': return `go to ${describeWhere(goal.target, inventory)}`
+    case 'reach': return `go to ${describeWhere(goal.target, inventory, goal.selection)}`
     case 'avoid': return `keep away from ${describeWhere(goal.target, inventory)}`
     case 'wait': return `wait ${goal.duration} s${goal.inside ? ` in ${describeWhere(goal.inside, inventory)}` : ''}`
     case 'wander': return `wander in ${describeWhere(goal.inside, inventory)}`
