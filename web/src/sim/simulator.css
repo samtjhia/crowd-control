@@ -970,3 +970,7 @@
 .sim .map-point:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .sim-point-tip { color: var(--muted); }
 .sim-point-tip q { color: var(--text); font-style: normal; }
+
+/* What a "why" answer was based on: the events it cites, under the answer. */
+.sim-evidence { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 12px; }
+.sim-evidence span { color: var(--text); font-weight: 600; }

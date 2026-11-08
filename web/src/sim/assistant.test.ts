@@ -219,3 +219,22 @@ test('a sign-in refusal from the server is shown as it is, not as an unreadable 
   const outcome = await askPlanner(request('change'), 'change', gate.fetcher)
   assert.deepEqual(outcome, { type: 'message', tone: 'error', text: 'The assistant is unavailable: A valid Auth0 access token is required.' })
 })
+
+test('a "why" question sends the run’s measurements and events, and shows the events the answer cites', async () => {
+  const { spread } = await import('./assistant.ts')
+  assert.deepEqual(spread([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4), [1, 4, 7, 10], 'evenly spread, keeping the first and last')
+  const sample = (time: number) => ({ time, present: 10, departed: 0, blocked: 0, immobile: 0, removed: 0, zones: [], portals: [], queues: [], clearance: { t50: null, t90: null, t100: null } })
+  const events = [{ id: 'e1', tick: 40, time: 4, name: 'portal_closed', source: 'street_exit_west' }]
+  const why = request('change', { kind: 'why', metricSamples: Array.from({ length: 250 }, (_, k) => sample(k)), events })
+  assert.equal(why.context.askWhy, true)
+  assert.equal(why.context.metricSamples?.length, 100, 'a long run is thinned to what one request may carry')
+  assert.equal(why.context.metricSamples?.at(-1)?.time, 249, 'the latest measurement is always kept')
+  assert.deepEqual(why.context.events, events)
+  assert.equal(request('change').context.askWhy, undefined, 'other requests are not "why" questions')
+
+  const answer = server(() => ({ ok: true, value: { kind: 'answer', text: 'The west exit closed at 0:04, so everyone used the east exit.', evidenceEventIds: ['e1'] } }))
+  assert.deepEqual(await askPlanner(why, 'why', answer.fetcher), { type: 'message', tone: 'info', text: 'The west exit closed at 0:04, so everyone used the east exit.', evidence: ['e1'] })
+  const change = server((r) => ({ ok: true, value: { kind: 'followup', request: { schemaVersion: 1, simulationId: r.simulationId, requestId: r.requestId, operations: [{ op: 'emit', event: { name: 'alarm' } }] } } }))
+  const refused = await askPlanner(why, 'why', change.fetcher)
+  assert.ok(refused.type === 'message' && /rather than an answer/.test(refused.text), 'a "why" question never changes the run')
+})

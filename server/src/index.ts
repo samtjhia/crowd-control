@@ -2,8 +2,9 @@ import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
 import { createAuth0TokenVerifier } from './auth.ts';
-import { deleteVenue, getOwnedRuns, getRunAnalytics, getRunReplay, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
+import { deleteRun, deleteVenue, getOwnedRuns, getRunAnalytics, getRunFacts, getRunReplay, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
+import { createReportWriter } from './report.ts';
 
 const port = Number(process.env.PORT ?? 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -17,6 +18,7 @@ const verifyAccessToken = createAuth0TokenVerifier(
   process.env.AUTH0_DOMAIN,
   process.env.AUTH0_AUDIENCE,
 );
+const writeReport = createReportWriter({ apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL });
 const plan = createGeminiPlanner({
   apiKey: process.env.GEMINI_API_KEY,
   model: process.env.GEMINI_MODEL,
@@ -188,6 +190,50 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
         : 'UNKNOWN';
       console.error(`Tiger Data analytics query failed (${code}).`);
       sendJson(response, 503, { ok: false, error: 'Could not load analytics from Tiger Data.' });
+    });
+    return;
+  }
+
+  // Deleting a run, with its measurements and changes; only the owner's own runs.
+  const runRoute = /^\/api\/runs\/([^/]+)$/.exec(telemetryPath);
+  if (request.method === 'DELETE' && runRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const deleted = await deleteRun(database, ownerSub, runRoute[1]!);
+      if (deleted === 'invalid') sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' });
+      else sendJson(response, deleted ? 200 : 404, deleted ? { ok: true } : { ok: false, error: 'Run was not found.' });
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'UNKNOWN';
+      console.error(`Tiger Data run delete failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not delete the run from Tiger Data.' });
+    });
+    return;
+  }
+
+  // The AI safety report for a run, written by Gemini from the run's measured facts.
+  const reportRoute = /^\/api\/runs\/([^/]+)\/report$/.exec(telemetryPath);
+  if (request.method === 'POST' && reportRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const body = await readJsonBody(request);
+      const metres = body.ok && typeof body.value === 'object' && body.value !== null && 'units' in body.value && body.value.units === 'm';
+      const facts = await getRunFacts(database, ownerSub, reportRoute[1]!, metres ? 'people/m²' : 'relative');
+      if (facts === 'invalid') { sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' }); return; }
+      if (facts === null) { sendJson(response, 404, { ok: false, error: 'Run was not found.' }); return; }
+      if (facts.measurements === 0) { sendJson(response, 422, { ok: false, error: 'This run has no measurements yet. Play it for a while first.' }); return; }
+      const report = await writeReport(facts);
+      if (report.ok) sendJson(response, 200, { ok: true, report: report.value, facts });
+      else sendJson(response, 503, { ok: false, error: report.error.message });
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'UNKNOWN';
+      console.error(`Safety report failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not write the report.' });
     });
     return;
   }

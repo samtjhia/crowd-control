@@ -104,6 +104,27 @@
 .hist-detail-head { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--cc-hair); }
 .hist-detail-head h2 { margin: 0 0 2px; font-size: 22px; font-weight: 700; }
 .hist-detail-head p { margin: 0; color: var(--cc-muted); }
+.hist-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.hist-detail-actions .hist-button { margin-top: 0; height: 36px; font-size: 13.5px; }
+.hist-page .hist-quiet,
+.hist-page .hist-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  cursor: pointer;
+  font: 600 13.5px/1 var(--cc-body);
+}
+.hist-page .hist-quiet { background: none; color: var(--cc-muted); }
+.hist-page .hist-quiet:hover { background: var(--cc-rose-soft); color: #96364e; }
+.hist-page .hist-danger { background: #a1324c; color: #fff; }
+.hist-page .hist-danger:hover { background: #87283f; }
+.hist-page .hist-danger:disabled { background: #c58a9a; cursor: default; }
+.hist-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 4px 4px 4px 12px; border-radius: 12px; background: var(--cc-rose-soft); color: #6f2337; font-size: 13px; }
+.hist-detail-head .hist-problem { margin-top: 8px; color: #a1324c; }
 .hist-detail h3 { margin: 22px 0 8px; font-size: 15px; font-weight: 650; }
 .hist-detail-head + h3 { margin-top: 0; }
 

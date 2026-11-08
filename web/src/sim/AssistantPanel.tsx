@@ -5,6 +5,7 @@ import type { CreateInterventionRequest, InterventionSummary, InventoryItem, Sce
 import { describeOperations, describePlan, displayName } from '../planner/describe.ts'
 import type { SimulationClient, SimulationView } from '../worker/simulationClient.ts'
 import { askPlanner, buildRequest, capacityNote, explainRefusal, pinGoalTargets, placesNote, titleFrom, type AskKind } from './assistant.ts'
+import { formatClock } from './incidents.ts'
 import { placesInScene } from './places.ts'
 import { loadPoints, pointsKeyForLayout, pointsKeyForSource, pointsNote, preparedGeometry, sceneGeometry } from './points.ts'
 import { loadThread, saveThread, type Message } from './assistantStore.ts'
@@ -16,7 +17,14 @@ type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, 'id'> :
 const SUGGESTIONS: Record<AskKind, string[]> = {
   change: ['Close the exit for 30 seconds', 'Add 20 more people in the busiest room', 'At 20 seconds, close the main door'],
   scenario: ['200 people leave a concert through two exits after an alarm at 30 seconds', 'A fire drill: every classroom empties to the yards when the alarm sounds'],
+  why: ['Why did it get so crowded?', 'Why did people take so long to leave?', 'What happened after the alarm?'],
 }
+
+const KINDS: { kind: AskKind; label: string; placeholder: string; intro: string }[] = [
+  { kind: 'change', label: 'Change this run', placeholder: 'Describe a change…', intro: 'Describe a change to this run. You’ll see what it would do before anything changes.' },
+  { kind: 'scenario', label: 'New scenario', placeholder: 'Describe a scenario…', intro: 'Describe a whole scenario: the crowd, and what happens when. You’ll see the plan before it runs.' },
+  { kind: 'why', label: 'Ask why', placeholder: 'Ask about this run…', intro: 'Ask about what has happened in this run so far. The answer uses only its measurements and events.' },
+]
 
 /** "Make up a building" in the Where picker. */
 const GENERATE = 'generate'
@@ -130,6 +138,33 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
     else add({ from: 'assistant', text: 'That came back as a whole new scenario rather than a change. Switch to “New scenario” if that’s what you want.', tone: 'info' })
   }
 
+  /**
+   * A question about this run: the planner gets its measurements and events so far, and must
+   * answer from them alone, citing the events it relied on (shown under the answer).
+   */
+  const askWhy = async (prompt: string) => {
+    if (!view.simulationId || !view.current) return add({ from: 'assistant', tone: 'info', text: 'Press Play first: there’s nothing to ask about until the run has started.' })
+    const [samples, events] = await Promise.all([
+      client.command({ type: 'query', query: { kind: 'metrics' } }),
+      client.command({ type: 'query', query: { kind: 'events' } }),
+    ])
+    const metricSamples = samples.type === 'query_result' && samples.result.kind === 'metrics' ? samples.result.samples : []
+    const eventRecords = events.type === 'query_result' && events.result.kind === 'events' ? events.result.events : []
+    const interventions: InterventionSummary[] = view.changes.map((change) => ({ id: change.interventionId, revision: 1, label: change.label, at: change.at, deleted: false }))
+    const request = buildRequest({
+      simulationId: view.simulationId, prompt, kind: 'why', inventory: await liveInventory(), interventions,
+      ...(view.metrics && { summary: view.metrics }), metricSamples, events: eventRecords,
+    })
+    if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that question: ${request.error.message}`, tone: 'error' })
+    const outcome = await askPlanner(request.value, 'why', authFetch)
+    if (outcome.type !== 'message') return add({ from: 'assistant', tone: 'info', text: 'That came back as a change rather than an answer.' })
+    // Cited events, as "Door closed (00:04)", in the order they happened.
+    const cited = (outcome.evidence ?? []).flatMap((id) => eventRecords.filter((e) => e.id === id))
+      .sort((a, b) => a.time - b.time)
+      .map((e) => `${e.name.replaceAll('_', ' ')}${e.source ? ` · ${e.source.replaceAll('_', ' ')}` : ''} (${formatClock(e.time, false)})`)
+    add({ from: 'assistant', text: outcome.text, tone: outcome.tone, ...(cited.length > 0 && { evidence: cited }) })
+  }
+
   const send = async (event?: FormEvent) => {
     event?.preventDefault()
     const prompt = text.trim()
@@ -139,6 +174,7 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
     setBusy(true)
     try {
       if (kind === 'scenario') await askScenario(prompt, where === GENERATE ? null : where)
+      else if (kind === 'why') await askWhy(prompt)
       else await askChange(prompt)
     } finally {
       setBusy(false)
@@ -192,11 +228,7 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
       {messages.length === 0 ? (
         <div className="sim-chat-empty">
           <p className="sim-chat-title">Talk to the simulation</p>
-          <p className="sim-muted">
-            {kind === 'change'
-              ? 'Describe a change to this run. You’ll see what it would do before anything changes.'
-              : 'Describe a whole scenario: the crowd, and what happens when. You’ll see the plan before it runs.'}
-          </p>
+          <p className="sim-muted">{KINDS.find((k) => k.kind === kind)!.intro}</p>
           <ul className="sim-suggestions" aria-label="Example requests">
             {SUGGESTIONS[kind].map((suggestion) => (
               <li key={suggestion}>
@@ -219,9 +251,9 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
 
       <form className="sim-chat-form" onSubmit={send}>
         <div className="sim-ask-kind" role="radiogroup" aria-label="What to ask for">
-          {(['change', 'scenario'] as const).map((option) => (
-            <button key={option} type="button" role="radio" aria-checked={kind === option} onClick={() => setKind(option)}>
-              {option === 'change' ? 'Change this run' : 'New scenario'}
+          {KINDS.map((option) => (
+            <button key={option.kind} type="button" role="radio" aria-checked={kind === option.kind} onClick={() => setKind(option.kind)}>
+              {option.label}
             </button>
           ))}
         </div>
@@ -236,7 +268,7 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
         )}
         <div className="sim-composer">
           <label className="visually-hidden" htmlFor="sim-chat-input">Message</label>
-          <textarea id="sim-chat-input" ref={input} rows={1} value={text} placeholder={kind === 'change' ? 'Describe a change…' : 'Describe a scenario…'}
+          <textarea id="sim-chat-input" ref={input} rows={1} value={text} placeholder={KINDS.find((k) => k.kind === kind)!.placeholder}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} />
           <button type="submit" className="sim-send" disabled={busy || !text.trim()} aria-label="Send"><SendHorizontal size={15} /></button>
@@ -256,7 +288,16 @@ function MessageView({ message, venues, busy, onRun, onApply, onAskAgain, onDisc
   onDiscard: (id: number) => void
 }) {
   if (message.from === 'you') return <li className="sim-message sim-message-you">{message.text}</li>
-  if ('text' in message) return <li className={`sim-message sim-message-assistant${message.tone === 'error' ? ' is-error' : ''}`}>{message.text}</li>
+  if ('text' in message) {
+    return (
+      <li className={`sim-message sim-message-assistant${message.tone === 'error' ? ' is-error' : ''}`}>
+        {message.text}
+        {message.evidence && message.evidence.length > 0 && (
+          <span className="sim-evidence"><span>Based on</span> {message.evidence.join(', ')}</span>
+        )}
+      </li>
+    )
+  }
 
   if ('plan' in message) {
     const { locations, population } = describePlan(message.plan)

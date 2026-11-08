@@ -11,7 +11,7 @@ import type { Scenario } from './scenario.ts'
 
 export type Message =
   | { id: number; from: 'you'; text: string; kind: AskKind }
-  | { id: number; from: 'assistant'; text: string; tone: 'info' | 'error' }
+  | { id: number; from: 'assistant'; text: string; tone: 'info' | 'error'; evidence?: string[] }
   | { id: number; from: 'assistant'; plan: ScenarioPlan; prompt: string; where: string | null; status: 'ready' | 'running' | 'discarded'; note?: string }
   | { id: number; from: 'assistant'; change: CreateInterventionRequest; prompt: string; inventory: InventoryItem[]; status: 'ready' | 'applied' | 'discarded'; note?: string }
 

@@ -7,6 +7,7 @@ import {
   serviceResultSchema,
   type Capabilities,
   type CreateInterventionRequest,
+  type EventRecord,
   type InterventionSummary,
   type InventoryItem,
   type LayoutSource,
@@ -42,7 +43,8 @@ export const CHANGE_CAPABILITIES: Capabilities = {
   geometry: ['rectangle'], layouts: ['generate', 'lookup', 'upload'], entityMetrics: [], editableHistory: false,
 }
 
-export type AskKind = 'scenario' | 'change'
+/** A change to this run, a whole new scenario, or a question about what happened in this run. */
+export type AskKind = 'scenario' | 'change' | 'why'
 
 export type AskContext = {
   simulationId: string
@@ -54,6 +56,16 @@ export type AskContext = {
   summary?: MetricSample
   interventions: InterventionSummary[]
   requestId?: string
+  /** For "why" questions: the run's measurements and events, the only evidence the answer may use. */
+  metricSamples?: MetricSample[]
+  events?: EventRecord[]
+}
+
+/** At most `limit` items, spread evenly and keeping the last, so a long run still fits a request. */
+export function spread<T>(items: readonly T[], limit: number): T[] {
+  if (items.length <= limit) return [...items]
+  const step = (items.length - 1) / (limit - 1)
+  return Array.from({ length: limit }, (_, k) => items[Math.round(k * step)]!)
 }
 
 export function buildRequest(context: AskContext) {
@@ -68,6 +80,7 @@ export function buildRequest(context: AskContext) {
       inventory: context.inventory,
       ...(context.summary && { summary: context.summary }),
       interventions: context.interventions,
+      ...(context.kind === 'why' && { askWhy: true, metricSamples: spread(context.metricSamples ?? [], 100), events: (context.events ?? []).slice(-100) }),
     },
   })
 }
@@ -76,7 +89,7 @@ export function buildRequest(context: AskContext) {
 export type Outcome =
   | { type: 'scenario'; plan: ScenarioPlan }
   | { type: 'change'; request: CreateInterventionRequest }
-  | { type: 'message'; text: string; tone: 'info' | 'error' }
+  | { type: 'message'; text: string; tone: 'info' | 'error'; evidence?: string[] }
 
 type Fetcher = (url: string, init: RequestInit) => Promise<{ json(): Promise<unknown> }>
 
@@ -112,6 +125,12 @@ export async function askPlanner(request: PlannerRequest, kind: AskKind, fetcher
 
 /** Checks a reply against what was asked, the way the planner page does. */
 export function interpret(reply: Extract<ReturnType<typeof PlannerReplySchema.parse>, object>, kind: AskKind, request: PlannerRequest): Outcome {
+  if (kind === 'why') {
+    return reply.kind === 'answer'
+      ? { type: 'message', tone: 'info', text: reply.text, evidence: reply.evidenceEventIds }
+      : reply.kind === 'clarification' ? { type: 'message', tone: 'info', text: reply.message }
+      : { type: 'message', tone: 'info', text: 'That came back as a change rather than an answer. Ask about something that has already happened in this run.' }
+  }
   switch (reply.kind) {
     case 'scenario':
       return kind === 'scenario'

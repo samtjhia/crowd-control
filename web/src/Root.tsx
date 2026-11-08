@@ -2,10 +2,12 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { navigate } from './site/navigate.ts'
 
 // Each page loads on demand so its features stay out of the others' bundles: the simulator
-// (/sim, also the home page), floor-plan editor (/editor), past runs (/history), the
+// (/sim, also the home page), floor-plan editor (/editor), past runs (/history), a run's safety
+// report (/report), the
 // original planner page (/planner, reachable by URL), and Conrad's engine test page (/engine).
 const PlannerApp = lazy(() => import('./PlannerApp.tsx'))
 const HistoryApp = lazy(() => import('./HistoryApp.tsx'))
+const ReportApp = lazy(() => import('./ReportApp.tsx'))
 const SimulatorApp = lazy(() => import('./sim/SimulatorApp.tsx'))
 const EditorApp = lazy(() => import('./editor/EditorApp.tsx'))
 const EngineApp = lazy(() => import('./App.tsx'))
@@ -30,6 +32,7 @@ export default function Root() {
   if (home) return null
   const page = path.startsWith('/planner') ? <PlannerApp />
     : path.startsWith('/history') ? <HistoryApp />
+    : path.startsWith('/report') ? <ReportApp />
     : path.startsWith('/editor') ? <EditorApp />
     : path.startsWith('/engine') ? <EngineApp />
     : <SimulatorApp />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { LoaderCircle, Play, RefreshCw, RotateCcw, TrendingDown, TrendingUp } from 'lucide-react'
+import { FileText, LoaderCircle, Play, RefreshCw, RotateCcw, Trash2, TrendingDown, TrendingUp } from 'lucide-react'
 import { RunAnalyticsSchema, RunSummariesSchema, type RunAnalytics, type RunSummary } from '@crowd-control/contract'
 import { SiteHeader } from './site/Site.tsx'
 import { useAuthFetch } from './site/useAuthFetch.ts'
@@ -80,6 +80,24 @@ export default function HistoryApp() {
     }
   }, [authFetch])
 
+  /** Deletes a run for good; returns why not, or null when it's gone. */
+  const remove = async (run: RunSummary): Promise<string | null> => {
+    try {
+      const response = await authFetch(`/api/runs/${run.runId}`, { method: 'DELETE' })
+      if (!response.ok && response.status !== 404) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        return payload?.error ?? `HTTP ${response.status}`
+      }
+    } catch {
+      return 'the server can’t be reached'
+    }
+    latest.current++
+    setRuns((current) => (current.state === 'ready' ? { state: 'ready', value: current.value.filter((r) => r.runId !== run.runId) } : current))
+    setSelected(null)
+    setAnalytics(null)
+    return null
+  }
+
   return (
     <div className="hist-page">
       <SiteHeader />
@@ -102,7 +120,7 @@ export default function HistoryApp() {
           </section>
           {hasRuns && (
             <section className="hist-detail" aria-live="polite" aria-label="Run details">
-              <Details run={selected} analytics={analytics} onRetry={() => selected && void open(selected)} />
+              <Details key={selected?.runId ?? 'none'} run={selected} analytics={analytics} onRetry={() => selected && void open(selected)} onDelete={remove} />
             </section>
           )}
         </div>
@@ -160,9 +178,18 @@ function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>
   )
 }
 
-function Details({ run, analytics, onRetry }: { run: RunSummary | null; analytics: Load<RunAnalytics> | null; onRetry: () => void }) {
+function Details({ run, analytics, onRetry, onDelete }: {
+  run: RunSummary | null; analytics: Load<RunAnalytics> | null; onRetry: () => void; onDelete: (run: RunSummary) => Promise<string | null>
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
   if (!run || !analytics) {
-    return <p className="hist-placeholder">Choose a run to see where it got busiest and what each change did.</p>
+    return <p className="hist-placeholder">Choose a run to see where it got busiest and what each change did, write a safety report, or delete it.</p>
+  }
+  const reallyDelete = async () => {
+    setDeleting({ busy: true, error: null })
+    const error = await onDelete(run)
+    if (error) setDeleting({ busy: false, error })
   }
   const identity = runIdentity(run.simulationId)
   const unit = identity.metres ? 'people/m²' : ''
@@ -172,6 +199,21 @@ function Details({ run, analytics, onRetry }: { run: RunSummary | null; analytic
       <header className="hist-detail-head">
         <h2>{titleOf(run)}</h2>
         <p>{when(run.startedAt)}</p>
+        <div className="hist-detail-actions">
+          <a className="hist-button" href={`/report?run=${encodeURIComponent(run.runId)}${identity.metres ? '&units=m' : ''}`}>
+            <FileText size={15} aria-hidden="true" /> Write safety report
+          </a>
+          {confirming ? (
+            <span className="hist-confirm" role="group" aria-label="Confirm delete">
+              <span>Delete this run and its measurements for good?</span>
+              <button type="button" className="hist-danger" onClick={() => void reallyDelete()} disabled={deleting.busy}>{deleting.busy ? 'Deleting…' : 'Delete'}</button>
+              <button type="button" className="hist-link" onClick={() => setConfirming(false)} disabled={deleting.busy}>Cancel</button>
+            </span>
+          ) : (
+            <button type="button" className="hist-quiet" onClick={() => setConfirming(true)}><Trash2 size={14} aria-hidden="true" /> Delete</button>
+          )}
+        </div>
+        {deleting.error && <p className="hist-problem" role="alert">Couldn’t delete it: {deleting.error}</p>}
       </header>
       {analytics.state === 'loading' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading this run…</p>}
       {analytics.state === 'error' && (

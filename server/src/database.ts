@@ -307,6 +307,71 @@ export async function saveRun(pool: Pool, ownerSub: string, input: unknown): Pro
   return result.rowCount !== null && result.rowCount > 0
 }
 
+/** Deletes one of the person's runs with its measurements and changes; false if it isn't theirs. */
+export async function deleteRun(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | boolean> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+  const owned = await pool.query('SELECT 1 FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2', [runId, ownerSub])
+  if (owned.rowCount === 0) return false
+  await pool.query('DELETE FROM crowd_metric_samples WHERE run_id = $1', [runId])
+  await pool.query('DELETE FROM crowd_interventions WHERE run_id = $1', [runId])
+  const removed = await pool.query('DELETE FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2', [runId, ownerSub])
+  return (removed.rowCount ?? 0) > 0
+}
+
+/** The measured facts the safety report is written from, all from one of the person's runs. */
+export type RunFacts = {
+  scenario: string
+  startedAt: string
+  units: 'people/m²' | 'relative'
+  measuredSeconds: number
+  measurements: number
+  end: { present: number; departed: number; immobile: number; clearance: { t50: number | null; t90: number | null; t100: number | null } } | null
+  busiest: RunAnalytics['peakDensityByZone']
+  changes: RunAnalytics['interventions']
+}
+
+export async function getRunFacts(pool: Pool, ownerSub: string, runId: string, units: RunFacts['units']): Promise<'invalid' | null | RunFacts> {
+  const analytics = await getRunAnalytics(pool, ownerSub, runId)
+  if (analytics === 'invalid' || analytics === null) return analytics
+  const [run, timeline] = await Promise.all([
+    pool.query('SELECT simulation_id AS "simulationId", title, started_at AS "startedAt" FROM crowd_runs WHERE run_id = $1', [runId]),
+    pool.query(
+      `SELECT simulation_time AS "time", present, departed, immobile, clearance
+       FROM crowd_metric_samples WHERE run_id = $1 ORDER BY simulation_time`,
+      [runId],
+    ),
+  ])
+  const row = run.rows[0] ?? {}
+  const samples = timeline.rows as { time: number; present: number; departed: number; immobile: number; clearance: { t50: number | null; t90: number | null; t100: number | null } }[]
+  const last = samples.at(-1)
+  // Clearance times, when the simulator didn't record them: the first moment half, 90% and
+  // everyone had left, from the departure counts.
+  const total = last ? last.present + last.departed : 0
+  const firstAt = (share: number) => {
+    if (total === 0) return null
+    const needed = Math.ceil(total * share)
+    return samples.find((sample) => sample.departed >= needed)?.time ?? null
+  }
+  const end = last && {
+    ...last,
+    clearance: {
+      t50: last.clearance?.t50 ?? firstAt(0.5),
+      t90: last.clearance?.t90 ?? firstAt(0.9),
+      t100: last.clearance?.t100 ?? (last.present === 0 ? firstAt(1) : null),
+    },
+  }
+  return {
+    scenario: row.title ?? row.simulationId ?? 'Simulation',
+    startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : String(row.startedAt ?? ''),
+    units,
+    measuredSeconds: end ? Number(end.time) : 0,
+    measurements: analytics.sampleCount,
+    end: end ? { present: end.present, departed: end.departed, immobile: end.immobile, clearance: end.clearance } : null,
+    busiest: [...analytics.peakDensityByZone].sort((a, b) => b.peakDensity - a.peakDensity).slice(0, 12),
+    changes: analytics.interventions,
+  }
+}
+
 /**
  * What it takes to replay one of the person's runs: its scenario (if it was saved with the run)
  * and every change applied, in the order they took effect, with the time each took effect.

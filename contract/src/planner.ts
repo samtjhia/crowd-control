@@ -45,6 +45,15 @@ export const RunReplaySchema = z.strictObject({
   changes: z.array(z.strictObject({ at: SimTimeSchema, label: z.string(), prompt: z.string(), operations: z.array(OperationSchema).min(1) })),
 });
 export type RunReplay = z.infer<typeof RunReplaySchema>;
+/** The AI safety report for a saved run: a summary, rated findings, recommendations and caveats. */
+export const RunReportSchema = z.strictObject({
+  title: z.string().min(1).max(160),
+  summary: z.string().min(1).max(1500),
+  findings: z.array(z.strictObject({ heading: z.string().min(1).max(160), detail: z.string().min(1).max(800), severity: z.enum(['high', 'medium', 'low']), when: z.string().max(60).optional(), where: z.string().max(120).optional() })).min(1).max(8),
+  recommendations: z.array(z.string().min(1).max(400)).min(1).max(6),
+  caveats: z.array(z.string().min(1).max(400)).min(1).max(5),
+});
+export type RunReport = z.infer<typeof RunReportSchema>;
 export type FollowupRequest = z.infer<typeof FollowupRequestSchema>;
 export type CreateInterventionRequest = z.infer<typeof CreateInterventionRequestSchema>;
 export type FollowupAction = Omit<Extract<FollowupRequest, { operations: unknown }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'edit_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'delete_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'>;
