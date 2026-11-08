@@ -4,7 +4,7 @@ import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
-  Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
+  Pause, Play, Plus, Rewind, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
 } from 'lucide-react'
 import { RunReplaySchema, type Camera, type ModelPreset, type RunReplay, type ScenarioPlan, type Vec2 } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
@@ -49,7 +49,7 @@ const MAP_FONT = "'DM Sans Variable', 'DM Sans', sans-serif"
 /** Below this width the side panels overlay the map instead of sitting beside it. */
 const WIDE = 1000
 /** Floating layout, in CSS pixels; simulator.css uses the same numbers. */
-const LAYOUT = { gap: 12, left: 320, right: 340, top: 52, bottom: 68 }
+const LAYOUT = { gap: 12, left: 320, right: 340, top: 52, bottom: 86 }
 
 /** Screen edges covered by floating UI, so fitting centres the map in the visible space. */
 function insetsFor(panels: Panels) {
@@ -469,8 +469,8 @@ export default function SimulatorApp() {
       const renderer = rendererRef.current
       const handled = (() => {
         switch (event.key) {
-          case ' ': void (client.getView().playing ? client.pause() : client.play()); return true
-          case '.': void client.step(1); return true
+          case ' ': if (!client.getView().seeking) void (client.getView().playing ? client.pause() : client.play()); return true
+          case '.': if (!client.getView().seeking) void client.step(1); return true
           case 'r': case 'R': void client.reset(); return true
           case '[': setPanels((p) => ({ ...p, left: !p.left })); return true
           case ']': setPanels((p) => ({ ...p, right: !p.right })); return true
@@ -575,9 +575,6 @@ export default function SimulatorApp() {
         <AccountMenu save={save} />
       </header>
 
-      {alarm && !view.completed && <div key={alarm.id} className="sim-alarm-banner" role="status">
-        <Siren size={20} aria-hidden="true" /> Alarm active · Evacuating
-      </div>}
       {view.completed && <p className="sim-complete" role="status">Simulation complete · {formatClock(now, false)}</p>}
 
       <MapToolbar tool={tool} onTool={setTool} />
@@ -802,14 +799,18 @@ function PlaybackBar({ client, view, ready, now, incidents }: {
   return (
     <section className="sim-float sim-playback" aria-label="Playback and timeline">
       <div className="sim-transport" role="toolbar" aria-label="Playback">
-        <button type="button" className="sim-play" disabled={!ready || view.completed} aria-pressed={view.playing} aria-keyshortcuts="Space"
+        <button type="button" className="sim-play" disabled={!ready || view.completed || view.seeking} aria-pressed={view.playing} aria-keyshortcuts="Space"
           onClick={() => void (view.playing ? client.pause() : client.play())}>
           {view.playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-          {view.completed ? 'Complete' : view.playing ? 'Pause' : 'Play'}
+          {view.seeking ? 'Seeking…' : view.completed ? 'Complete' : view.playing ? 'Pause' : 'Play'}
         </button>
-        <button type="button" className="sim-icon-btn" disabled={!ready || view.playing} aria-label="Step one tick" aria-keyshortcuts="."
+        <button type="button" className="sim-icon-btn" disabled={!ready || view.playing || view.seeking} aria-label="Step one tick" aria-keyshortcuts="."
           onClick={() => void client.step(1)}><StepForward size={16} /></button>
-        <button type="button" className="sim-icon-btn" disabled={!ready} aria-label="Reset" aria-keyshortcuts="R"
+        <button type="button" className="sim-icon-btn" disabled={!ready || view.endpointKind !== 'real' || view.seeking || now === 0}
+          aria-label="Rewind 10 seconds" title="Rewind 10 seconds" onClick={() => void client.seek(Math.max(0, now - 10))}>
+          <Rewind size={16} />
+        </button>
+        <button type="button" className="sim-icon-btn" disabled={!ready || view.seeking} aria-label="Reset" aria-keyshortcuts="R"
           onClick={() => void client.reset()}><RotateCcw size={15} /></button>
         <div className="sim-speed" role="radiogroup" aria-label="Speed">
           {SPEEDS.map((speed) => (
@@ -819,7 +820,8 @@ function PlaybackBar({ client, view, ready, now, incidents }: {
         </div>
       </div>
       <p className="sim-clock" aria-label={`Simulation time ${formatClock(now)}`}>{formatClock(now)}</p>
-      <Timeline now={now} incidents={incidents} />
+      <Timeline now={now} recordedUntil={view.recordedUntil} incidents={incidents} disabled={!ready || view.endpointKind !== 'real'}
+        onSeek={(time) => client.seek(time)} />
     </section>
   )
 }

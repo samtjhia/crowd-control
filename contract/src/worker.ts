@@ -17,7 +17,7 @@ export const WorkerCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...commandHeader, type: z.literal('pause') }), z.strictObject({ ...commandHeader, type: z.literal('resume') }),
   z.strictObject({ ...commandHeader, type: z.literal('step'), ticks: PositiveIntegerSchema }), z.strictObject({ ...commandHeader, type: z.literal('speed'), multiplier: PositiveSchema }),
   z.strictObject({ ...commandHeader, type: z.literal('query'), query: ReadQuerySchema }), z.strictObject({ ...commandHeader, type: z.literal('snapshot'), snapshotId: IdSchema }),
-  z.strictObject({ ...commandHeader, type: z.literal('restore'), snapshot: EngineSnapshotSchema }), z.strictObject({ ...commandHeader, type: z.literal('run_to'), time: SimTimeSchema }),
+  z.strictObject({ ...commandHeader, type: z.literal('restore'), snapshot: EngineSnapshotSchema }), z.strictObject({ ...commandHeader, type: z.literal('run_to'), time: SimTimeSchema }), z.strictObject({ ...commandHeader, type: z.literal('seek'), time: SimTimeSchema }),
 ]).refine((v) => (v.type !== 'load' || v.compiled.scene.simulationId === v.simulationId) && (v.type !== 'apply_request' || v.request.simulationId === v.simulationId) && (v.type !== 'restore' || v.snapshot.simulationId === v.simulationId), 'Nested simulationId must match command');
 export const StampSchema = z.strictObject({ streamId: IdSchema, tick: TickSchema, time: SimTimeSchema, topologyVersion: CounterSchema, sceneVersion: CounterSchema, historyRevision: CounterSchema });
 export const FrameAgentSchema = z.strictObject({ id: IdSchema, x: FiniteSchema, y: FiniteSchema, profile: IdSchema, controller: IdSchema.nullable(), state: AgentStateSchema });

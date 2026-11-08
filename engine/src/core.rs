@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "contact-engine-v8.5";
+pub const ENGINE_VERSION: &str = "contact-engine-v8.6";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -12,6 +12,10 @@ pub struct Engine {
     stream: u64,
     published_events: usize,
     published_density_tick: Option<u64>,
+    recorded_requests: Vec<(u64, Value)>,
+    request_cursor: usize,
+    furthest_tick: u64,
+    checkpoints: std::collections::VecDeque<(World, usize)>,
 }
 pub(crate) type Failure = (&'static str, String);
 pub(crate) fn invalid(message: impl Into<String>) -> Failure {
@@ -72,7 +76,7 @@ impl Engine {
             "pause" | "reset" | "resume" => &[],
             "step" => &["ticks"],
             "speed" => &["multiplier"],
-            "run_to" => &["time"],
+            "run_to" | "seek" => &["time"],
             "apply_request" => &["request"],
             "query" => &["query"],
             "snapshot" => &["snapshotId"],
@@ -102,6 +106,7 @@ impl Engine {
             self.published_events = 0;
             self.published_density_tick = None;
             self.loaded = Some(world);
+            self.clear_recording();
             self.stream = stream;
             return Ok(self.publication(&c.command_id, true));
         }
@@ -119,6 +124,7 @@ impl Engine {
                 self.published_events = 0;
                 self.published_density_tick = None;
                 self.loaded = Some(world);
+                self.clear_recording();
                 self.stream = stream;
                 Ok(self.publication(&c.command_id, true))
             }
@@ -136,21 +142,7 @@ impl Engine {
                 ))
             }
             "run_to" => {
-                let requested = c.time.unwrap().0;
-                let dt = world.initial.scene.model.dt.0;
-                let quotient = (requested / dt).ceil();
-                if !quotient.is_finite() || quotient > 9_007_199_254_740_991.0 {
-                    return Err(("RESOURCE_LIMIT", "Requested time exceeds tick range".into()));
-                }
-                let mut target = quotient as u64;
-                if target > 0 && (target - 1) as f64 * dt >= requested {
-                    target -= 1;
-                }
-                if (target as f64) * dt < requested {
-                    target = target
-                        .checked_add(1)
-                        .ok_or_else(|| invalid("Requested tick overflow"))?;
-                }
+                let target = target_tick(c.time.unwrap().0, world.initial.scene.model.dt.0)?;
                 if target < world.tick {
                     return Err(invalid("run_to cannot go backward without a valid restore"));
                 }
@@ -161,16 +153,51 @@ impl Engine {
                     self.loaded.as_ref().unwrap().scene_version != version,
                 ))
             }
+            "seek" => {
+                let target = target_tick(c.time.unwrap().0, world.initial.scene.model.dt.0)?;
+                if target > self.furthest_tick {
+                    return Err(invalid("Seek time exceeds the recorded timeline"));
+                }
+                let stream = self.next_stream()?;
+                let (mut candidate, mut cursor) = if let Some((saved, cursor)) = self
+                    .checkpoints
+                    .iter()
+                    .rev()
+                    .find(|(w, _)| w.tick <= target)
+                {
+                    (saved.clone(), *cursor)
+                } else {
+                    (World::load(world.initial.clone(), &c.simulation_id)?, 0)
+                };
+                replay_to(&mut candidate, &self.recorded_requests, &mut cursor, target)?;
+                self.loaded = Some(candidate);
+                self.request_cursor = cursor;
+                self.stream = stream;
+                self.published_events = 0;
+                self.published_density_tick = None;
+                Ok(self.publication(&c.command_id, true))
+            }
             "snapshot" => Ok(vec![
                 json!({"schemaVersion":1,"simulationId":c.simulation_id,"type":"snapshot","commandId":c.command_id,"snapshot":world.snapshot(c.snapshot_id.as_ref().unwrap())}),
                 self.ack(&c.command_id),
             ]),
             "apply_request" => {
-                let result = self
-                    .loaded
-                    .as_mut()
-                    .unwrap()
-                    .apply_request(c.request.as_ref().unwrap())?;
+                let request = c.request.as_ref().unwrap();
+                let duplicate = request["requestId"]
+                    .as_str()
+                    .is_some_and(|id| world.request_contents.contains_key(&Id(id.into())));
+                if world.tick < self.furthest_tick && !duplicate {
+                    return Err(unsupported(
+                        "Return to the latest recorded time before applying a new change",
+                    ));
+                }
+                let tick = world.tick;
+                let outcomes = world.history.outcomes.len();
+                let result = self.loaded.as_mut().unwrap().apply_request(request)?;
+                if self.loaded.as_ref().unwrap().history.outcomes.len() > outcomes {
+                    self.recorded_requests.push((tick, request.clone()));
+                    self.request_cursor = self.recorded_requests.len();
+                }
                 if result["ok"] == true {
                     let mut messages = self.publication(&c.command_id, true);
                     messages[0]["applied"] = result["value"].clone();
@@ -206,7 +233,57 @@ impl Engine {
                 format!("Tick batch exceeds {MAX_TICKS_PER_COMMAND}"),
             ));
         }
-        self.loaded.as_mut().unwrap().advance(ticks)
+        let target = self
+            .loaded
+            .as_ref()
+            .unwrap()
+            .tick
+            .checked_add(ticks)
+            .ok_or_else(|| invalid("Tick overflow"))?;
+        if self
+            .recorded_requests
+            .get(self.request_cursor)
+            .is_some_and(|(tick, _)| *tick <= target)
+        {
+            let mut candidate = self.loaded.as_ref().unwrap().clone();
+            let mut cursor = self.request_cursor;
+            replay_to(&mut candidate, &self.recorded_requests, &mut cursor, target)?;
+            self.loaded = Some(candidate);
+            self.request_cursor = cursor;
+        } else {
+            self.loaded.as_mut().unwrap().advance(ticks)?;
+        }
+        self.furthest_tick = self.furthest_tick.max(target);
+        let world = self.loaded.as_ref().unwrap();
+        if self
+            .checkpoints
+            .back()
+            .is_none_or(|(saved, _)| world.time() - saved.time() >= 10.0)
+        {
+            // shortcut: four checkpoints within a one-million-cell budget; older seeks replay from load.
+            if world.grid.blocked.len() <= 1_000_000 {
+                while self.checkpoints.len() >= 4
+                    || self
+                        .checkpoints
+                        .iter()
+                        .map(|(w, _)| w.grid.blocked.len())
+                        .sum::<usize>()
+                        + world.grid.blocked.len()
+                        > 1_000_000
+                {
+                    self.checkpoints.pop_front();
+                }
+                self.checkpoints
+                    .push_back((world.clone(), self.request_cursor));
+            }
+        }
+        Ok(())
+    }
+    fn clear_recording(&mut self) {
+        self.recorded_requests.clear();
+        self.request_cursor = 0;
+        self.furthest_tick = 0;
+        self.checkpoints.clear();
     }
     fn stamp(&self) -> Value {
         let world = self.loaded.as_ref().unwrap();
@@ -241,4 +318,37 @@ impl Engine {
         }
         out
     }
+}
+
+fn target_tick(requested: f64, dt: f64) -> Result<u64, Failure> {
+    let quotient = (requested / dt).ceil();
+    if !quotient.is_finite() || quotient > 9_007_199_254_740_991.0 {
+        return Err(("RESOURCE_LIMIT", "Requested time exceeds tick range".into()));
+    }
+    let mut target = quotient as u64;
+    if target > 0 && (target - 1) as f64 * dt >= requested {
+        target -= 1;
+    }
+    if target as f64 * dt < requested {
+        target = target
+            .checked_add(1)
+            .ok_or_else(|| invalid("Requested tick overflow"))?;
+    }
+    Ok(target)
+}
+fn replay_to(
+    world: &mut World,
+    requests: &[(u64, Value)],
+    cursor: &mut usize,
+    target: u64,
+) -> Result<(), Failure> {
+    if target.saturating_sub(world.tick) > MAX_TICKS_PER_COMMAND {
+        return Err(("RESOURCE_LIMIT", "Replay exceeds tick budget".into()));
+    }
+    while let Some((tick, request)) = requests.get(*cursor).filter(|(tick, _)| *tick <= target) {
+        world.advance(*tick - world.tick)?;
+        world.apply_request(request)?;
+        *cursor += 1;
+    }
+    world.advance(target - world.tick)
 }

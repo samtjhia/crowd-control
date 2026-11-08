@@ -82,6 +82,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
           case 'resume':
             if (!playing && !completed) { last = clock.now(); playing = true; stopLoop = clock.every(1000 / 60, pulse) }
             break
+          case 'seek': stop(); owedTicks = 0; tickCostMs = 0; last = clock.now(); lastDensityAt = last; break
           case 'pause': stop(); break
           case 'speed': multiplier = command.multiplier; break
         }

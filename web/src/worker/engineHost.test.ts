@@ -15,11 +15,12 @@ function setup(stepCostMs = 0, withDensity = false, completeAt = Infinity) {
   let tick = 0, destroyed = false
   const batches: number[] = [], received: WorkerMessage[] = []
   const bindings: WasmEngineBindings = {
-    abi_version: () => 1, engine_version: () => 'contact-engine-v8.5', create_engine: () => 1, destroy_engine() { destroyed = true },
+    abi_version: () => 1, engine_version: () => 'contact-engine-v8.6', create_engine: () => 1, destroy_engine() { destroyed = true },
     dispatch(_handle, json) {
       const command = JSON.parse(json) as WorkerCommand
       if (command.simulationId !== 'engine-demo') return JSON.stringify([{ schemaVersion: 1, simulationId: command.simulationId, type: 'error', commandId: command.commandId, error: { code: 'INVALID_SCHEMA', message: 'wrong simulation' } }])
       if (command.type === 'load' || command.type === 'reset') tick = 0
+      if (command.type === 'seek') tick = Math.ceil(command.time / 0.05)
       if (command.type === 'step') { batches.push(command.ticks); tick += command.ticks; clock.time += stepCostMs * command.ticks }
       const stamp = { streamId: 'clock-test', tick, time: tick * 0.05, topologyVersion: 0, sceneVersion: 1, historyRevision: 0 }
       return JSON.stringify([{ schemaVersion: 1, simulationId: 'engine-demo', commandId: command.commandId, type: 'ack', stamp }, ...(command.type === 'step' ? [{ schemaVersion: 1, simulationId: 'engine-demo', type: 'frame', frame: { ...stamp, agents: [] } }, ...(withDensity ? [{ schemaVersion: 1, simulationId: 'engine-demo', type: 'metrics', stamp,
@@ -121,5 +122,16 @@ test('completion stops automatic ticks and reset permits another run', () => {
   s.send('resume'); assert.equal(s.clock.callback, undefined)
   s.send('reset'); s.send('resume'); assert.ok(s.clock.callback)
   s.clock.elapse(50); assert.equal(s.tick(), 1)
+  s.host.dispose()
+})
+
+test('seek pauses playback, clears old debt and preserves playback speed', () => {
+  const s = setup()
+  s.send('speed', 4); s.send('resume'); s.clock.elapse(1000)
+  s.host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: 'seek-back', type: 'seek', time: 0 })
+  assert.equal(s.clock.callback, undefined)
+  assert.equal(s.tick(), 0)
+  s.send('resume'); s.clock.elapse(0); assert.equal(s.tick(), 0)
+  s.clock.elapse(50); assert.equal(s.tick(), 4)
   s.host.dispose()
 })

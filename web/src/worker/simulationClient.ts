@@ -45,6 +45,8 @@ export type SimulationView = {
   events: EventRecord[]
   playing: boolean
   completed: boolean
+  recordedUntil: number
+  seeking: boolean
   speed: number
   lastError: ContractError | null
   /** Changes applied in this stream; cleared when a new stream starts (load or reset). */
@@ -102,7 +104,7 @@ export class SimulationClient {
     this.scheduleNotification = scheduleNotification
     this.view = {
       endpointKind: endpoint.kind, simulationId: null, streamId: null, scene: null, sceneVersion: 0, historyRevision: 0,
-      current: null, previous: null, metrics: null, density: null, events: [], playing: false, completed: false, speed: 1, lastError: null, changes: [],
+      current: null, previous: null, metrics: null, density: null, events: [], playing: false, completed: false, recordedUntil: 0, seeking: false, speed: 1, lastError: null, changes: [],
     }
     this.detach = endpoint.subscribe((message) => this.receive(message))
   }
@@ -144,6 +146,22 @@ export class SimulationClient {
   step(ticks = 1) { return this.command({ type: 'step', ticks }) }
   setSpeed(multiplier: number) { return this.command({ type: 'speed', multiplier }) }
   reset() { return this.command({ type: 'reset' }) }
+
+  async seek(time: number): Promise<WorkerMessage> {
+    this.update({ seeking: true })
+    try {
+      const reply = await this.command({ type: 'seek', time })
+      if (reply.type === 'ack') {
+        const history = await this.command({ type: 'query', query: { kind: 'history' } })
+        if (history.type === 'query_result' && history.result.kind === 'history' && history.stamp.streamId === this.view.streamId) {
+          this.update({ changes: history.result.history.records.filter((r) => !r.deleted && r.origin === 'followup')
+            .map((r) => ({ interventionId: r.id, label: r.label, at: r.at })) })
+        }
+      }
+      return reply
+    } finally { this.update({ seeking: false }) }
+  }
+
 
   /** Sends a command and resolves with its correlated ack, error, query result or snapshot. */
   command(body: CommandBody): Promise<WorkerMessage> {
@@ -229,7 +247,8 @@ export class SimulationClient {
     this.pending.delete(commandId)
     if (message.type === 'ack') {
       if (entry.type === 'resume') this.update({ playing: !this.view.completed })
-      if (entry.type === 'pause' || entry.type === 'load' || entry.type === 'reset') this.update({ playing: false })
+      if (entry.type === 'pause' || entry.type === 'seek' || entry.type === 'load' || entry.type === 'reset') this.update({ playing: false })
+      if (entry.type === 'load' || entry.type === 'reset') this.update({ recordedUntil: 0 })
       if (entry.type === 'speed' && entry.multiplier !== undefined) this.update({ speed: entry.multiplier })
     }
     entry.resolve(message)
@@ -273,6 +292,7 @@ export class SimulationClient {
       previous: current,
       current: { frame, receivedAt: this.now() },
       historyRevision: frame.historyRevision,
+      recordedUntil: Math.max(this.view.recordedUntil, frame.time),
     })
   }
 

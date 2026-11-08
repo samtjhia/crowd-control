@@ -458,3 +458,69 @@ test('concert evacuation keeps making progress across different crowd seeds', as
     } finally { bindings.destroy_engine(handle) }
   }
 })
+
+test('rewind restores real client state, preserves the recorded extent and resumes replay', async () => {
+  const { SimulationClient } = await import('../../web/src/worker/simulationClient.ts')
+  const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-navigation-load.json', import.meta.url), 'utf8'))
+  const bindings = await engine()
+  let now = 0
+  let pulse: (() => void) | undefined
+  const listeners = new Set<(m: WorkerMessage) => void>()
+  const host = createEngineHost(bindings, (m) => {
+    assert.equal(parseWorkerMessage(m).ok, true, JSON.stringify(m))
+    queueMicrotask(() => listeners.forEach((listener) => listener(m)))
+  }, { now: () => now, every(_ms, callback) { pulse = callback; return () => { pulse = undefined } } })
+  const client = new SimulationClient({ kind: 'real', send: (c) => host.send(c), subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } } })
+  try {
+    await client.load(load.compiled)
+    await client.command({ type: 'run_to', time: 1 })
+    assert.equal((await client.apply('Blue attendee', [{ op: 'set', targets: { ids: ['a1'] }, values: { appearance: { fill: '#0000FF' } } }])).ok, true)
+    await client.command({ type: 'run_to', time: 8 })
+    const expected = await client.command({ type: 'snapshot', snapshotId: 'same' })
+    assert.equal(client.getView().recordedUntil, 8)
+    const previousStream = client.getView().streamId
+    await client.seek(0.51)
+    assert.equal(client.getView().current?.frame.time, 0.55)
+    assert.notEqual(client.getView().streamId, previousStream)
+    assert.equal(client.getView().playing, false)
+    assert.equal(client.getView().seeking, false)
+    assert.equal(client.getView().recordedUntil, 8)
+    assert.equal(client.getView().changes.length, 0)
+    await client.play()
+    assert.ok(pulse)
+    now = 50; pulse?.()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.ok(Math.abs(client.getView().current!.frame.time - 0.6) < 1e-9)
+    await client.seek(8)
+    assert.equal(pulse, undefined, 'seeking stops the timer and clears catch-up debt')
+    assert.equal(client.getView().changes.length, 1)
+    const restored = await client.command({ type: 'snapshot', snapshotId: 'same' })
+    assert.ok(restored.type === 'snapshot' && expected.type === 'snapshot')
+    assert.deepEqual(restored.snapshot, expected.snapshot)
+    await client.reset()
+    assert.equal(client.getView().recordedUntil, 0)
+    assert.equal((await client.seek(1)).type, 'error')
+    assert.equal(client.getView().current?.frame.time, 0)
+  } finally { client.dispose(); host.dispose() }
+})
+
+test('Wasm rewind across scheduled work and live changes matches native Rust', async () => {
+  const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-load.json', import.meta.url), 'utf8'))
+  const bindings = await engine(), handle = bindings.create_engine()
+  const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: 'engine-demo', commandId: type, type, ...extra })
+  const commands = [load, h('run_to', { time: 12 }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'colour', operations: [{ op: 'set', targets: { ids: ['a2'] }, values: { appearance: { fill: '#00FF00' } } }] } }),
+    h('run_to', { time: 40 }), h('seek', { time: 4.13 }), h('snapshot', { snapshotId: 'before-alarm' }),
+    h('run_to', { time: 40 }), h('snapshot', { snapshotId: 'replayed' })]
+  try {
+    const wasm = commands.map((c) => JSON.parse(bindings.dispatch(handle, JSON.stringify(c))))
+    for (const messages of wasm) for (const m of messages) {
+      assert.equal(parseWorkerMessage(m).ok, true, JSON.stringify(m))
+      assert.notEqual(m.type, 'error', JSON.stringify(m))
+    }
+    const executable = fileURLToPath(new URL(`../../target/debug/examples/protocol${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url))
+    const native = execFileSync(executable, { input: commands.map((c) => JSON.stringify(c)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map((line) => JSON.parse(line))
+    assert.deepEqual(wasm, native)
+    assert.equal(wasm[5][0].snapshot.events.some((e: { name: string }) => e.name === 'alarm'), false)
+    assert.equal(wasm[7][0].snapshot.events.filter((e: { name: string }) => e.name === 'alarm').length, 1)
+  } finally { bindings.destroy_engine(handle) }
+})

@@ -223,6 +223,8 @@ export class MockSimulation {
         return this.apply(command.commandId, command.request)
       case 'query':
         return this.query(command.commandId, command.query)
+      case 'seek':
+        return [this.errorMessage(world.simulationId, command.commandId, unsupported('rewind; use the Rust engine'))]
       case 'snapshot':
       case 'restore':
         return [this.errorMessage(world.simulationId, command.commandId, unsupported('snapshots or restore'))]

@@ -29,7 +29,7 @@
   --left-w: 320px;
   --right-w: 340px;
   --top-h: 52px;
-  --bottom-h: 68px;
+  --bottom-h: 86px;
   --inset-l: var(--gap);
   --inset-r: var(--gap);
 
@@ -1045,7 +1045,7 @@
   font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
 }
 
-.sim-alarm-banner, .sim-complete {
+.sim-complete {
   position: absolute;
   z-index: 5;
   top: calc(var(--top-h) + var(--gap) * 2);
@@ -1063,7 +1063,13 @@
   box-shadow: 0 4px 20px #b4233640;
   pointer-events: none;
 }
-.sim-alarm-banner { animation: sim-alarm-alert 0.8s ease-in-out 4; }
 .sim-complete { background: var(--green); }
-@keyframes sim-alarm-alert { 50% { opacity: 0.55; } }
-@media (prefers-reduced-motion: reduce) { .sim-alarm-banner { animation: none; } }
+
+.timeline-seek { position: absolute; inset: -10px 0; width: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.timeline-track:focus-within { outline: 2px solid var(--green); outline-offset: 8px; }
+.timeline-seek:disabled { cursor: default; }
+.timeline-jump { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 11px; }
+.sim .timeline-jump input { width: 78px; padding: 2px 5px; border: 1px solid var(--hair); border-radius: 4px; background: var(--well); }
+.sim .timeline-jump button { padding: 2px 6px; border-radius: 4px; background: var(--well-strong); }
+
+@media (max-width: 767px) { .sim-transport { flex-wrap: wrap; } }
