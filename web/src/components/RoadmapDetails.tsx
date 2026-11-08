@@ -29,11 +29,3 @@ export function Airship({ x, y, scale = 1 }: { x: number; y: number; scale?: num
     <path d="M0 41v7m12-6v7m19-1h12m-3-5v11" stroke="#69594c" strokeWidth="2" />
   </g>
 }
-
-export function ParkedBicycle({ x, y }: { x: number; y: number }) {
-  return <g className="roadmap-bicycle" transform={`translate(${x} ${y})`} fill="none" strokeLinecap="round" strokeLinejoin="round">
-    <g stroke="#7d816d" strokeWidth="2"><ellipse cx="-22" rx="12" ry="11" /><ellipse cx="24" rx="12" ry="11" /></g>
-    <path d="m-22 0 13-23L5 0h-27l27-24L24 0M-9-23h-8m22-1 3-10h9" stroke="#8f4f59" strokeWidth="2.5" />
-    <path d="M-18-25h12M11-34h9" stroke="#7c6450" strokeWidth="3" /><circle cx="5" r="3" stroke="#8f4f59" strokeWidth="2" />
-  </g>
-}

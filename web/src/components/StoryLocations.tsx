@@ -1,4 +1,4 @@
-import { Flowers, ParkedBicycle } from './RoadmapDetails'
+import { Flowers } from './RoadmapDetails'
 import { EnvironmentalDisplay } from './EnvironmentalDisplay'
 import { Tree, Shrubs } from './CampusPlaza'
 import { alongPath, drawPerson, useCanvas } from './canvas'
@@ -78,7 +78,7 @@ function OperationsArtwork() {
     {/* The display sits farther back and clear of the shelter roof. */}
     <StationDisplay compact /><StationDisplay />
     <Planter x={48} y={330} width={72} pink /><Planter x={550} y={345} width={70} pink />
-    <ParkedBicycle x={126} y={395} /><Bench x={286} y={391} /><Lamp x={648} y={380} />
+    <Bench x={286} y={391} /><Lamp x={648} y={380} />
     <path d="M208 396h18v-24h-18Z" fill="#8ca38c" /><ellipse cx="217" cy="372" rx="9" ry="3" fill="#6f8977" />
   </svg>
 }
