@@ -622,3 +622,8 @@ These samples are derived caches; original goals and snapshot contracts are unch
 v8.17 local 2,000-agent worker benchmark: about 77 ticks/s with scheduled work
 (80 required for 4×), about 65 with contact/sensors. Browser render FPS is unmeasured;
 the 2,000-agent 4×/60 FPS performance target remains unmet in this benchmark.
+
+Playback speed is a worker-session preference: reset, rewind/seek and loading a
+new scenario preserve the selected multiplier. They clear playback debt and pause
+as usual; loading also uses the new scene's timestep. A new worker starts at 1×.
+The speed selector and actual worker pacing therefore remain in sync.

@@ -83,7 +83,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
           case 'load':
           case 'reset':
             if (command.type === 'load') { simulationId = command.simulationId; dt = command.compiled.scene.model.dt }
-            stop(); completed = messages.some((m) => m.type === 'metrics' && m.completed === true); owedTicks = 0; playbackAllowance = 0; tickCostMs = 0; multiplier = 1; last = clock.now(); lastDensityAt = last; break
+            stop(); completed = messages.some((m) => m.type === 'metrics' && m.completed === true); owedTicks = 0; playbackAllowance = 0; tickCostMs = 0; last = clock.now(); lastDensityAt = last; break
           case 'resume':
             if (!playing && !completed) { last = clock.now(); playing = true; stopLoop = clock.every(1000 / 60, pulse) }
             break

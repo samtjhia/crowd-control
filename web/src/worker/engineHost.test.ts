@@ -31,7 +31,7 @@ function setup(stepCostMs = 0, withDensity = false, completeAt = Infinity) {
   const host = createEngineHost(bindings, (message) => received.push(message), clock)
   let sequence = 0
   let playbackSpeed = 1
-  const send = (type: 'pause' | 'resume' | 'reset' | 'speed', multiplier = 1) => { if (type === 'speed') playbackSpeed = multiplier; if (type === 'reset') playbackSpeed = 1; host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: `control-${++sequence}`, type, ...(type === 'speed' ? { multiplier } : {}) }) }
+  const send = (type: 'pause' | 'resume' | 'reset' | 'speed', multiplier = 1) => { if (type === 'speed') playbackSpeed = multiplier; host.send({ schemaVersion: 1, simulationId: 'engine-demo', commandId: `control-${++sequence}`, type, ...(type === 'speed' ? { multiplier } : {}) }) }
   host.send(load)
   const drain = (target: number) => { for (let i = 0; tick < target && i < 10000; i++) clock.elapse(50 / playbackSpeed); assert.equal(tick, target) }
   return { host, send, drain, clock, batches, received, tick: () => tick, destroyed: () => destroyed }
@@ -166,5 +166,35 @@ test('prepared venue dt=0.1 also recovers at 8× after an expensive alarm', () =
   assert.ok(before <= 2)
   for (let i = 0; i < 60; i++) s.clock.elapse(1000 / 60)
   assert.equal(s.tick() - before, 80, 'one second advances eight simulated seconds at the venue timestep')
+  s.host.dispose()
+})
+
+
+test('selected speed survives reset, seek and loading a scenario with a different timestep', () => {
+  const s = setup()
+  s.send('speed', 8)
+  for (const command of [
+    { schemaVersion: 1, simulationId: 'engine-demo', commandId: 'reset-speed', type: 'reset' },
+    { schemaVersion: 1, simulationId: 'engine-demo', commandId: 'seek-speed', type: 'seek', time: 0 },
+    structuredClone(load),
+  ] as WorkerCommand[]) {
+    s.host.send(command)
+    assert.equal(s.tick(), 0)
+    assert.equal(s.clock.callback, undefined)
+    s.send('resume')
+    s.clock.elapse(12.5)
+    assert.equal(s.tick(), 2, `${command.type} must retain 8× rather than silently resuming at 1×`)
+    s.send('pause')
+  }
+  const other = structuredClone(load)
+  assert.equal(other.type, 'load')
+  if (other.type !== 'load') throw new Error('expected load fixture')
+  other.compiled.scene.model.dt = 0.1
+  other.compiled.resolvedModel.dt = 0.1
+  s.host.send(other)
+  assert.equal(s.received.at(-1)?.type, 'ack')
+  s.send('resume')
+  s.clock.elapse(12.5)
+  assert.equal(s.tick(), 1, '8× uses the new scene timestep')
   s.host.dispose()
 })

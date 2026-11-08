@@ -188,3 +188,8 @@ report-generation POSTs with HTTP 403. FALSE restores the normal features; keys 
 still required. Invalid values fail startup/build. Restart dev servers after edits;
 rebuild the frontend and restart the API for deployments. Cached report reads and
 ordinary simulation, editor, saved-scenario and run APIs do not invoke Gemini.
+
+Playback speed is a worker-session preference: reset, rewind/seek and loading a
+new scenario preserve the selected multiplier. They clear playback debt and pause
+as usual; loading also uses the new scene's timestep. A new worker starts at 1×.
+The speed selector and actual worker pacing therefore remain in sync.
