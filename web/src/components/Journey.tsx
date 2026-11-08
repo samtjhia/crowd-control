@@ -1,11 +1,12 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { buildJourneyGeometry, type JourneyGeometry } from './journeyGeometry'
 import { CAMPUS_COURTYARD, TRAIL_COLOR, projectCampusPoint, trailWidth } from './campusFrame'
+import { RoadmapProgress } from './RoadmapProgress'
 import { JourneyContext } from './journeyFlow'
 import { PlazaLandscape, type StorySite } from './PlazaLandscape'
 
 
-export function Journey({ children }: { children: ReactNode }) {
+export function Journey({ children, reduced }: { children: ReactNode; reduced: boolean }) {
   const wrapper = useRef<HTMLDivElement>(null)
   const curbMask = useId().replace(/:/g, '')
   const [sites, setSites] = useState<StorySite[]>([])
@@ -38,8 +39,9 @@ export function Journey({ children }: { children: ReactNode }) {
       <path className="route-curb" d={geometry.path} fill="none" stroke="#dce6cd" strokeWidth={trailWidth(geometry.width) + 5} strokeLinecap="butt" mask={`url(#${curbMask})`} />
       <circle className="route-entry-blend" cx={geometry.curves[0].start.x} cy={geometry.curves[0].start.y} r={trailWidth(geometry.width) / 2} fill={TRAIL_COLOR} />
       <path className="main-crowd-route" d={geometry.path} fill="none" stroke={TRAIL_COLOR} strokeWidth={trailWidth(geometry.width)} strokeLinecap="butt" />
-      <path d={`M${geometry.handoff ? geometry.handoff.x + geometry.handoff.width / 2 - trailWidth(geometry.width) / 2 : 0} ${geometry.handoff ? geometry.handoff.y + 55 : 0}h${trailWidth(geometry.width)}`} stroke="#d8d0bb" strokeWidth="5" />
+
     </svg>}
+    {geometry && sites.length === 3 && <RoadmapProgress geometry={geometry} sites={sites} reduced={reduced} />}
     {children}
   </div></JourneyContext.Provider>
 }

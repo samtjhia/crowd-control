@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CampusCrowd, FallingCrowd, StoryCrowd } from './components/AmbientCrowd'
+import { CampusCrowd, StoryCrowd } from './components/AmbientCrowd'
 import { Icon } from './components/Icons'
 import { ScenarioExplorer } from './components/ScenarioExplorer'
 import { CampusScene } from './components/CampusScene'
@@ -7,6 +7,7 @@ import { SkySimulation } from './components/SkySimulation'
 import { OperationsPavilion, DecisionGarden } from './components/StoryLocations'
 import { CampusPlaza } from './components/CampusPlaza'
 import { CityScenery } from './components/CityScenery'
+import { RoadmapHandoff } from './components/RoadmapHandoff'
 import { Journey } from './components/Journey'
 import { useTextEntrances } from './components/useTextEntrances'
 import { WhyItMatters } from './components/WhyItMatters'
@@ -27,7 +28,7 @@ function App() {
   return <>
     <a className="skip-link" href="#scenarios">Skip to scenarios</a>
     <main ref={textEntrances}>
-      <Journey>
+      <Journey reduced={reduced}>
       <section className="hero" id="top" aria-labelledby="hero-title">
         <header className="navigation"><Brand /></header>
         <SkySimulation reduced={reduced} />
@@ -41,7 +42,7 @@ function App() {
         <OperationsPavilion reduced={reduced} />
         <DecisionGarden reduced={reduced} />
       </section>
-      <div className="crowd-handoff" aria-hidden="true"><FallingCrowd reduced={reduced} playing /></div>
+      <div className="crowd-handoff"><RoadmapHandoff reduced={reduced} /></div>
       </Journey>
       <WhyItMatters reduced={reduced} />
       <ScenarioExplorer reduced={reduced} />

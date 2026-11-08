@@ -21,10 +21,10 @@ export function buildJourneyGeometry(width: number, height: number, campus: Box,
       a: i === 0 ? { x: start.x, y: start.y + handle } : { x: start.x + (end.x - before.x) / 6, y: start.y + (end.y - before.y) / 6 },
       b: i === points.length - 2 ? { x: end.x, y: end.y - 55 } : { x: end.x - (after.x - start.x) / 6, y: end.y - (after.y - start.y) / 6 }, end })
   }
-  // The same paved strip continues onto the ledge before the crowd falls.
+  // Continue the same route beneath the pedestrian passage at the handoff.
   if (handoff) {
     const start = curves[curves.length - 1].end
-    const end = { x: handoff.x + handoff.width / 2, y: handoff.y + 55 }
+    const end = { x: handoff.x + handoff.width / 2, y: handoff.y + Math.min(95, handoff.height * .44) }
     curves.push({ start, a: { x: start.x, y: start.y + 18 }, b: { x: end.x, y: end.y - 18 }, end })
   }
   const samples: Point[] = [curves[0].start]

@@ -80,7 +80,6 @@ h1, h2 { font-family: 'Manrope', sans-serif; font-weight: 500; letter-spacing: -
 .text-link { display: inline-flex; align-items: center; gap: 17px; font-size: 12px; font-weight: 500; color: var(--green); margin-top: 9px; }
 .text-link:hover { color: #204e34; }
 .crowd-handoff { position: relative; height: 220px; max-width: 1240px; margin: 0 auto; }
-.falling-crowd { display: block; width: 100%; height: 100%; }
 .explore-section { max-width: 1240px; margin: 0 auto; padding: 65px 30px 80px; scroll-margin-top: 15px; }
 .section-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; margin-bottom: 43px; }
 .section-heading h2 { font-size: clamp(34px, 3.6vw, 49px); line-height: 1.14; margin-bottom: 0; }
@@ -438,8 +437,6 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
  .garden-copy { width: 62%; }
 }
 
-/* The landing uses the same route layer; pedestrians stay above its paving. */
-.falling-crowd { position: relative; z-index: 2; }
 
 /* Thin manufactured faces with a visible return, rather than heavy flat frames. */
 .operations-location h2 { top: 32%; }
@@ -494,4 +491,35 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
  .campus-plaza h2 { top: 26%; font-size: clamp(12px, 3.5vw, 20px); }
  .operations-location h2 { font-size: clamp(11px, 3vw, 18px); }
  .plaza-copy { width: 80%; }
+}
+
+/* Scroll wayfinding lives on the road; ordinary document scrolling stays native. */
+.roadmap-progress { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; pointer-events: none; transition: color 300ms ease-out; }
+.roadmap-trace-track { stroke: #a2b58a; stroke-width: 1.5; opacity: .25; }
+.roadmap-trace { stroke: currentColor; stroke-width: 3; stroke-linecap: round; opacity: .8; }
+.roadmap-waypoints { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.roadmap-waypoint { position: absolute; display: grid; place-items: center; width: 44px; height: 44px; transform: translate(-50%, -50%); pointer-events: auto; color: var(--waypoint-color); text-decoration: none; }
+.roadmap-waypoint-number { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #91a583; border-radius: 50%; background: #f8f3e7; color: #59744f; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background 200ms ease-out, border-color 200ms ease-out, color 200ms ease-out; }
+.roadmap-waypoint-name { position: absolute; top: 43px; font-size: 11px; line-height: 1.4; font-weight: 550; color: #4d6948; }
+.roadmap-waypoint[data-state='current'] .roadmap-waypoint-number { background: var(--waypoint-color); border-color: var(--waypoint-color); color: #fffdf3; }
+.roadmap-waypoint[data-state='visited'] .roadmap-waypoint-number { border-color: var(--waypoint-color); color: var(--waypoint-color); background: #e5edda; }
+.roadmap-waypoint:hover .roadmap-waypoint-number { border-color: var(--waypoint-color); background: #d7e3c8; color: var(--waypoint-color); }
+.roadmap-waypoint:focus-visible { outline-offset: 3px; border-radius: 50%; }
+.crowd-handoff { height: 220px; }
+.handoff-ground, .handoff-crowd, .handoff-gateway { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.handoff-ground { z-index: 1; }
+.handoff-crowd { z-index: 2; }
+.handoff-gateway { z-index: 3; }
+.handoff-link { display: inline-flex; align-items: center; gap: 12px; position: absolute; top: 169px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 500; color: #3c6445; padding: 7px 2px; z-index: 4; text-decoration: underline; text-underline-offset: 5px; }
+.handoff-link:hover { color: #1f5432; }
+@media (max-width: 700px) {
+ .roadmap-waypoint-name { display: none; }
+ .roadmap-waypoint:focus-visible .roadmap-waypoint-name { display: block; right: 45px; top: 13px; padding: 3px 7px; background: #f8f3e7; }
+ .crowd-handoff { height: 170px; }
+ .handoff-link { top: 129px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .roadmap-progress, .roadmap-waypoint-number { transition: none; }
+ .roadmap-runner { display: none; }
+ .roadmap-trace { opacity: .28; }
 }
