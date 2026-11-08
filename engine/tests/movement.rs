@@ -444,3 +444,68 @@ fn nearby_people_on_one_side_do_not_disable_passing_on_the_open_side() {
         "completed"
     );
 }
+
+#[test]
+fn a_new_clump_is_bypassed_in_an_open_room_without_portals() {
+    let mut walker = agent("walker", 3.5, 5.5, "east");
+    walker["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});
+    let mut agents = vec![walker];
+    let mut stopped = vec![];
+    for column in 0..2 {
+        for row in 0..3 {
+            let id = format!("cluster-{column}-{row}");
+            let mut a = agent(
+                &id,
+                6.5 + column as f64 * 0.6,
+                4.9 + row as f64 * 0.6,
+                "east",
+            );
+            a["components"] =
+                json!({"physical":{"radius":0.25},"navigation":{"preferredSpeed":0.1}});
+            agents.push(a);
+            stopped.push(id);
+        }
+    }
+    for unnamed in [false, true] {
+        let mut v = input(agents.clone());
+        if unnamed {
+            for cell in v["compiled"]["scene"]["map"]["grid"]["zoneIndex"]
+                .as_array_mut()
+                .unwrap()
+            {
+                if *cell == json!(1) {
+                    *cell = json!(0);
+                }
+            }
+        }
+        let mut e = load(v);
+        step(&mut e, 10);
+        let mut c = command("apply_request");
+        c["request"] = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"late-blockage","operations":[{"op":"assign_goal","targets":{"ids":stopped},"mode":"replace","goal":{"kind":"wait","duration":600}}]});
+        assert_eq!(send(&mut e, c)[0]["type"], "ack");
+        step(&mut e, 20);
+        let s = snapshot(&mut e);
+        let walker = s["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "walker")
+            .unwrap();
+        assert!(
+            (y(walker) - 5.5).abs() > 0.2,
+            "choose open space before joining the new clump: {walker}"
+        );
+        step(&mut e, 800);
+        let s = snapshot(&mut e);
+        let walker = s["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "walker")
+            .unwrap();
+        assert_eq!(
+            walker["currentGoal"]["status"], "completed",
+            "retain the destination after passing"
+        );
+    }
+}

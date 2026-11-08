@@ -549,7 +549,7 @@ test('Wasm rewind across scheduled work and live changes matches native Rust', a
   const load = JSON.parse(readFileSync(new URL('../../contract/fixtures/engine-load.json', import.meta.url), 'utf8'))
   const bindings = await engine(), handle = bindings.create_engine()
   const h = (type: string, extra = {}) => ({ schemaVersion: 1, simulationId: 'engine-demo', commandId: type, type, ...extra })
-  const commands = [load, h('run_to', { time: 12 }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'colour', operations: [{ op: 'set', targets: { ids: ['a2'] }, values: { appearance: { fill: '#00FF00' } } }] } }),
+  const commands = [load, h('run_to', { time: 8 }), h('apply_request', { request: { schemaVersion: 1, simulationId: 'engine-demo', requestId: 'colour', operations: [{ op: 'set', targets: { ids: ['a2'] }, values: { appearance: { fill: '#00FF00' } } }] } }),
     h('run_to', { time: 40 }), h('seek', { time: 4.13 }), h('snapshot', { snapshotId: 'before-alarm' }),
     h('run_to', { time: 40 }), h('snapshot', { snapshotId: 'replayed' })]
   try {

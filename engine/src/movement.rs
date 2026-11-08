@@ -234,6 +234,8 @@ pub fn advance(
                 active[i] = false;
                 continue;
             };
+            let target =
+                nav.traffic_waypoint(grid, &agents[i], i, &target, remaining, &mut work)?;
             let a = &agents[i];
             let me = old[i];
             let delta = V::of(&target).sub(me.p);

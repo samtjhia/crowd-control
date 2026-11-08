@@ -603,3 +603,22 @@ hackers choose tables using seeded random selection, work for 300 seconds after
 arrival, then wander. Snack visitors roam after their three service/wander cycles.
 These are explicit scenario goals; the engine does not change nearest selection
 or turn arbitrary completed goals into wandering.
+
+General traffic steering (v8.17): every moving agent rechecks its route each engine
+tick, including ordinary reach, wander, follow, avoid and travel toward activities.
+It compares nearby bypasses using distance-to-goal and the local walking-speed
+deficit relative to its desired pace. Clear traffic keeps the original route.
+This works on maps with no portals and on unnamed walkable floor; gate-specific
+approach routing remains available. A bypass must reduce remaining goal cost,
+stay in the current floor zone and pass body-clearance checks. It cannot cross a
+portal to evade admission rules. Agents finish nearby waypoints before detouring,
+so door-entry waits and arrival transitions cannot be skipped or orbited.
+
+Queue tickets, occupied interaction slots, reaction delays and explicit dwell
+waits retain their order/timers. Crowds are sampled once per tick; stored sample
+positions/speeds exclude the subject's own contribution even across substeps.
+These samples are derived caches; original goals and snapshot contracts are unchanged.
+
+v8.17 local 2,000-agent worker benchmark: about 77 ticks/s with scheduled work
+(80 required for 4×), about 65 with contact/sensors. Browser render FPS is unmeasured;
+the 2,000-agent 4×/60 FPS performance target remains unmet in this benchmark.

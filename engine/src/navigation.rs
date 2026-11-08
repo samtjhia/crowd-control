@@ -57,6 +57,10 @@ pub struct Navigator {
     bodies: Vec<Body>,
     visible: Vec<Option<(Point, Point)>>,
     crowd_prefix: Vec<u32>,
+    crowd_subjects: Vec<(usize, u32, f64)>,
+    crowd_count_prefix: Vec<u32>,
+    crowd_speed_prefix: Vec<f64>,
+    crowd_min_speed: f64,
 }
 #[derive(Debug, Clone)]
 pub struct Intent {
@@ -174,6 +178,7 @@ pub fn line_in_zone(grid: &GridData, from: &Point, to: &Point, zone: usize) -> b
             && (x as usize) < grid.width
             && (y as usize) < grid.height
             && grid.zone_index[y as usize * grid.width + x as usize] as usize == zone
+            && (zone != 0 || grid.portal_index[y as usize * grid.width + x as usize] == 0)
     };
     for _ in 0..grid.width + grid.height + 2 {
         if !valid(x, y) {
@@ -973,25 +978,47 @@ impl Navigator {
         metrics: &mut crate::metrics::Metrics,
         contact: Option<(&crate::contact::Config, &mut crate::contact::State)>,
     ) -> Result<(), Failure> {
-        if grid.portal_ids.len() > 1 {
-            let stride = grid.width + 1;
-            self.crowd_prefix.resize(stride * (grid.height + 1), 0);
-            self.crowd_prefix.fill(0);
-            for a in agents
-                .iter()
-                .filter(|a| a.departed_at.is_none() && a.components.physical.blocks_movement)
-            {
-                let cell = index(grid, &a.position);
-                self.crowd_prefix[(cell / grid.width + 1) * stride + cell % grid.width + 1] +=
-                    crowd_weight(a);
-            }
-            for y in 1..=grid.height {
-                let mut row = 0;
-                for x in 1..=grid.width {
-                    row += self.crowd_prefix[y * stride + x];
-                    self.crowd_prefix[y * stride + x] =
-                        row + self.crowd_prefix[(y - 1) * stride + x];
-                }
+        let stride = grid.width + 1;
+        self.crowd_prefix.resize(stride * (grid.height + 1), 0);
+        self.crowd_prefix.fill(0);
+        self.crowd_count_prefix
+            .resize(stride * (grid.height + 1), 0);
+        self.crowd_count_prefix.fill(0);
+        self.crowd_speed_prefix
+            .resize(stride * (grid.height + 1), 0.0);
+        self.crowd_speed_prefix.fill(0.0);
+        self.crowd_subjects
+            .resize(agents.len(), (usize::MAX, 0, 0.0));
+        self.crowd_subjects.fill((usize::MAX, 0, 0.0));
+        self.crowd_min_speed = f64::INFINITY;
+        for (i, a) in agents
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.departed_at.is_none() && a.components.physical.blocks_movement)
+        {
+            let cell = index(grid, &a.position);
+            let weight = crowd_weight(a);
+            let walking_speed = geometry::norm(a.velocity.x.0, a.velocity.y.0);
+            self.crowd_min_speed = self.crowd_min_speed.min(walking_speed);
+            self.crowd_subjects[i] = (cell, weight, walking_speed);
+            let entry = (cell / grid.width + 1) * stride + cell % grid.width + 1;
+            self.crowd_count_prefix[entry] += 1;
+            self.crowd_speed_prefix[entry] += walking_speed;
+            self.crowd_prefix[(cell / grid.width + 1) * stride + cell % grid.width + 1] += weight;
+        }
+        for y in 1..=grid.height {
+            let mut row = 0;
+            let mut count_row = 0;
+            let mut speed_row = 0.0;
+            for x in 1..=grid.width {
+                count_row += self.crowd_count_prefix[y * stride + x];
+                speed_row += self.crowd_speed_prefix[y * stride + x];
+                self.crowd_count_prefix[y * stride + x] =
+                    count_row + self.crowd_count_prefix[(y - 1) * stride + x];
+                self.crowd_speed_prefix[y * stride + x] =
+                    speed_row + self.crowd_speed_prefix[(y - 1) * stride + x];
+                row += self.crowd_prefix[y * stride + x];
+                self.crowd_prefix[y * stride + x] = row + self.crowd_prefix[(y - 1) * stride + x];
             }
         }
         crate::movement::advance(self, grid, agents, dt, tick, metrics, contact)
@@ -1054,7 +1081,13 @@ impl Navigator {
             true
         }
     }
-    fn crowd_in(&self, grid: &GridData, bounds: [f64; 4], subject: &AgentRuntime) -> f64 {
+    fn crowd_in(
+        &self,
+        grid: &GridData,
+        bounds: [f64; 4],
+        subject: usize,
+        desired_speed: Option<f64>,
+    ) -> f64 {
         if self.crowd_prefix.is_empty() {
             return 0.0;
         }
@@ -1072,15 +1105,155 @@ impl Navigator {
             .ceil()
             .clamp(0.0, grid.height as f64) as usize;
         let stride = grid.width + 1;
-        let count = self.crowd_prefix[y1 * stride + x1] + self.crowd_prefix[y0 * stride + x0]
-            - self.crowd_prefix[y0 * stride + x1]
-            - self.crowd_prefix[y1 * stride + x0];
-        let cell = index(grid, &subject.position);
-        let inside = subject.components.physical.blocks_movement
-            && (x0..x1).contains(&(cell % grid.width))
-            && (y0..y1).contains(&(cell / grid.width));
-        f64::from(count.saturating_sub(if inside { crowd_weight(subject) } else { 0 }))
+        let (cell, weight, walking_speed) =
+            self.crowd_subjects
+                .get(subject)
+                .copied()
+                .unwrap_or((usize::MAX, 0, 0.0));
+        let inside =
+            (x0..x1).contains(&(cell % grid.width)) && (y0..y1).contains(&(cell / grid.width));
+        let prefix = if desired_speed.is_some() {
+            &self.crowd_count_prefix
+        } else {
+            &self.crowd_prefix
+        };
+        let count = prefix[y1 * stride + x1] + prefix[y0 * stride + x0]
+            - prefix[y0 * stride + x1]
+            - prefix[y1 * stride + x0];
+        if let Some(pace) = desired_speed {
+            if pace == 0.0 {
+                return 0.0;
+            }
+            let speed = &self.crowd_speed_prefix;
+            let total_speed = speed[y1 * stride + x1] + speed[y0 * stride + x0]
+                - speed[y0 * stride + x1]
+                - speed[y1 * stride + x0];
+            let count = count.saturating_sub(u32::from(inside));
+            let deficit =
+                f64::from(count) - (total_speed - if inside { walking_speed } else { 0.0 }) / pace;
+            return if deficit > 1e-7 { deficit * 4.0 } else { 0.0 };
+        }
+        f64::from(count.saturating_sub(if inside { weight } else { 0 }))
     }
+
+    fn crowd_along(
+        &self,
+        grid: &GridData,
+        from: &Point,
+        to: &Point,
+        radius: f64,
+        subject: usize,
+        desired_speed: Option<f64>,
+    ) -> f64 {
+        let samples = ((distance(from, to) / (2.0 * radius)).ceil() as usize).clamp(1, 12);
+        (1..=samples)
+            .map(|sample| {
+                let t = sample as f64 / samples as f64;
+                let x = from.x.0 + (to.x.0 - from.x.0) * t;
+                let y = from.y.0 + (to.y.0 - from.y.0) * t;
+                self.crowd_in(
+                    grid,
+                    [
+                        x - 2.0 * radius,
+                        y - 2.0 * radius,
+                        x + 2.0 * radius,
+                        y + 2.0 * radius,
+                    ],
+                    subject,
+                    desired_speed,
+                )
+            })
+            .sum()
+    }
+    pub fn traffic_waypoint(
+        &self,
+        grid: &GridData,
+        a: &AgentRuntime,
+        i: usize,
+        target: &Point,
+        remaining: f64,
+        work: &mut usize,
+    ) -> Result<Point, Failure> {
+        let cell = index(grid, &a.position);
+        let zone = grid.zone_index[cell] as usize;
+        if grid.portal_index[cell] != 0
+            || a.queue_ref.is_some()
+            || a.interaction_ref.is_some()
+            || self.crowd_min_speed + 1e-7 >= speed(a)
+        {
+            return Ok(target.clone());
+        }
+        let d = distance(&a.position, target);
+        let radius = a.components.physical.radius.0;
+        let forward = (speed(a) * 2.0).max(6.0 * radius).min(remaining);
+        if d <= radius || forward <= grid.cell_size * 1e-7 {
+            return Ok(target.clone());
+        }
+        let dx = (target.x.0 - a.position.x.0) / d;
+        let dy = (target.y.0 - a.position.y.0) / d;
+        let route = self.routes[i].as_ref().unwrap();
+        let field = route.key.as_ref().map(|key| &self.fields[key]);
+        let to_goal = |p: &Point| {
+            field.map_or_else(
+                || distance(p, route.direct.as_ref().unwrap()),
+                |f| f.distance[index(grid, p)],
+            )
+        };
+        let original_cost = to_goal(&a.position);
+        let admissible = |p: &Point| {
+            p.x.0 >= radius
+                && p.y.0 >= radius
+                && p.x.0 + radius <= grid.width as f64 * grid.cell_size
+                && p.y.0 + radius <= grid.height as f64 * grid.cell_size
+                && line_in_zone(grid, &a.position, p, zone)
+                && to_goal(p) < original_cost
+        };
+        let straight = Point {
+            x: Number(a.position.x.0 + dx * forward),
+            y: Number(a.position.y.0 + dy * forward),
+        };
+        if self.crowd_along(grid, &a.position, &straight, radius, i, Some(speed(a))) == 0.0
+            && self.crowd_along(grid, &a.position, target, radius, i, Some(speed(a))) == 0.0
+        {
+            return Ok(target.clone());
+        }
+        let baseline = if admissible(&straight)
+            && geometry::clear(grid, &self.bodies, &a.position, &straight, radius, work)?
+        {
+            &straight
+        } else {
+            target
+        };
+        let crowd = self.crowd_along(grid, &a.position, baseline, radius, i, Some(speed(a)));
+        if crowd == 0.0 {
+            return Ok(target.clone());
+        }
+        let mut best = target.clone();
+        let mut cost = distance(&a.position, baseline) + to_goal(baseline) + crowd * 2.0 * radius;
+        for side in [-1.0, 1.0, -2.0, 2.0, -4.0, 4.0, -6.0, 6.0] {
+            let lateral = side * 2.0 * radius;
+            let point = Point {
+                x: Number(a.position.x.0 + dx * forward - dy * lateral),
+                y: Number(a.position.y.0 + dy * forward + dx * lateral),
+            };
+            if !admissible(&point) {
+                continue;
+            }
+            let candidate = distance(&a.position, &point)
+                + to_goal(&point)
+                + self.crowd_along(grid, &a.position, &point, radius, i, Some(speed(a)))
+                    * 2.0
+                    * radius;
+            if candidate < cost - grid.cell_size * 1e-7
+                && geometry::clear(grid, &self.bodies, &a.position, &point, radius, work)?
+            {
+                best = point;
+                cost = candidate;
+            }
+        }
+        Ok(best)
+    }
+
     fn opening_waypoint(
         &self,
         grid: &GridData,
@@ -1320,29 +1493,13 @@ impl Navigator {
                         back.max(front),
                     ]
                 };
-                let congestion = self.crowd_in(grid, bounds, a);
+                let congestion = self.crowd_in(grid, bounds, i, None);
                 let switch = a.navigation.target_point.as_ref().map_or(0.0, |saved| {
                     let old = if horizontal { saved.y.0 } else { saved.x.0 };
                     (lateral - old).abs() * 0.2
                 });
-                let mut approach = 0.0;
                 let length = distance(&a.position, p);
-                let samples = ((length / (2.0 * radius)).ceil() as usize).clamp(1, 12);
-                for sample in 1..=samples {
-                    let t = sample as f64 / samples as f64;
-                    let px = a.position.x.0 + (p.x.0 - a.position.x.0) * t;
-                    let py = a.position.y.0 + (p.y.0 - a.position.y.0) * t;
-                    approach += self.crowd_in(
-                        grid,
-                        [
-                            px - 2.0 * radius,
-                            py - 2.0 * radius,
-                            px + 2.0 * radius,
-                            py + 2.0 * radius,
-                        ],
-                        a,
-                    );
-                }
+                let approach = self.crowd_along(grid, &a.position, p, radius, i, None);
                 length
                     + if local {
                         distance(p, &destination)
