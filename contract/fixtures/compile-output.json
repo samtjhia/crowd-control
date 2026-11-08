@@ -1,0 +1,499 @@
+{
+  "scene": {
+    "schemaVersion": 1,
+    "simulationId": "worked-demo",
+    "seed": 42,
+    "model": {
+      "units": "model",
+      "dt": 0.1
+    },
+    "map": {
+      "units": "model",
+      "cellSize": 1,
+      "width": 24,
+      "height": 6,
+      "rooms": [
+        {
+          "id": "hall",
+          "x": 1,
+          "y": 1,
+          "width": 10,
+          "height": 4,
+          "label": "Hall",
+          "appearance": {
+            "fill": "#DBEAFE",
+            "labelVisible": true
+          }
+        },
+        {
+          "id": "foyer",
+          "x": 12,
+          "y": 1,
+          "width": 5,
+          "height": 4,
+          "label": "Foyer",
+          "appearance": {
+            "fill": "#FEF3C7",
+            "labelVisible": true
+          }
+        },
+        {
+          "id": "outside",
+          "x": 18,
+          "y": 1,
+          "width": 5,
+          "height": 4,
+          "label": "Outside",
+          "appearance": {
+            "fill": "#DCFCE7",
+            "labelVisible": true
+          }
+        }
+      ],
+      "portals": [
+        {
+          "id": "hall_door",
+          "connects": [
+            "hall",
+            "foyer"
+          ],
+          "x": 11,
+          "y": 2,
+          "width": 1,
+          "height": 2,
+          "open": true,
+          "appearance": {
+            "fill": "#86EFAC"
+          }
+        },
+        {
+          "id": "exit",
+          "connects": [
+            "foyer",
+            "outside"
+          ],
+          "x": 17,
+          "y": 2,
+          "width": 1,
+          "height": 2,
+          "open": true,
+          "appearance": {
+            "fill": "#86EFAC"
+          },
+          "tags": [
+            "exit"
+          ]
+        }
+      ],
+      "rows": [
+        "########################",
+        "#HHHHHHHHHH#FFFFF#OOOOO#",
+        "#HHHHHHHHHHDFFFFFEOOOOO#",
+        "#HHHHHHHHHHDFFFFFEOOOOO#",
+        "#HHHHHHHHHH#FFFFF#OOOOO#",
+        "########################"
+      ],
+      "legend": {
+        "H": "hall",
+        "F": "foyer",
+        "O": "outside",
+        "D": "hall_door",
+        "E": "exit"
+      },
+      "source": {
+        "mode": "generate",
+        "accuracy": "approximate"
+      }
+    },
+    "profiles": {
+      "person": {
+        "radius": 0.5,
+        "preferredSpeed": 1,
+        "appearance": {
+          "stroke": "#0F172A",
+          "strokeWidthPx": 1,
+          "opacity": 1
+        }
+      }
+    },
+    "controllers": {
+      "mingle": {
+        "kind": "wander",
+        "insideZone": "hall"
+      },
+      "enter_then_mingle": {
+        "kind": "sequence",
+        "goals": [
+          {
+            "kind": "reach",
+            "targetZone": "hall"
+          },
+          {
+            "kind": "wander",
+            "insideZone": "hall"
+          }
+        ]
+      },
+      "leave": {
+        "kind": "reach",
+        "targetZone": "outside",
+        "selection": "lowest-cost",
+        "departOnArrival": true
+      }
+    },
+    "agents": [
+      {
+        "id": "a1",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 1.5,
+        "y": 1.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a2",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 3.5,
+        "y": 1.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a3",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 5.5,
+        "y": 1.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a4",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 7.5,
+        "y": 1.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a5",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 9.5,
+        "y": 1.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a6",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 1.5,
+        "y": 3.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a7",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 3.5,
+        "y": 3.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      {
+        "id": "a8",
+        "tags": [
+          "attendee"
+        ],
+        "profile": "person",
+        "x": 5.5,
+        "y": 3.5,
+        "controller": "mingle",
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      }
+    ],
+    "jobs": [
+      {
+        "at": 10,
+        "operations": [
+          {
+            "op": "spawn",
+            "count": 2,
+            "zone": "foyer",
+            "profile": "person",
+            "tags": [
+              "attendee",
+              "late"
+            ],
+            "controller": "enter_then_mingle",
+            "appearance": {
+              "symbol": "square",
+              "fill": "#7C3AED"
+            }
+          }
+        ],
+        "id": "late-arrivals"
+      },
+      {
+        "at": 30,
+        "operations": [
+          {
+            "op": "emit",
+            "event": "alarm"
+          }
+        ],
+        "id": "alarm"
+      }
+    ],
+    "rules": [
+      {
+        "event": "alarm",
+        "match": {
+          "tags": [
+            "attendee"
+          ]
+        },
+        "controller": "leave",
+        "mode": "replace",
+        "once": true,
+        "id": "leave-on-alarm"
+      }
+    ],
+    "versions": {
+      "compiler": "chain-example-v1",
+      "model": "example-v1",
+      "random": "lcg32-v1"
+    }
+  },
+  "resolvedModel": {
+    "id": "example",
+    "version": "example-v1",
+    "units": "model",
+    "dt": 0.1,
+    "defaultAgent": {
+      "physical": {
+        "radius": 0.5,
+        "blocksMovement": true,
+        "movable": true
+      },
+      "navigation": {
+        "preferredSpeed": 1,
+        "maximumSpeed": 1.5,
+        "acceleration": 2,
+        "personalSpace": 1
+      },
+      "behavior": {
+        "reactionDelay": 0,
+        "routeCompliance": 1,
+        "avoidanceStrength": 1,
+        "groupCohesion": 0,
+        "goalPersistence": 1
+      },
+      "mobility": {
+        "speedMultiplier": 1
+      }
+    },
+    "layout": {
+      "bodyDiameter": 1,
+      "spacingDiameters": 2,
+      "preferredAspect": 2,
+      "doorBodyWidths": 2
+    },
+    "contact": {
+      "solverVersion": "fixture-contact-v1",
+      "referenceLoad": 100,
+      "forceUnits": "model-force",
+      "parameters": {
+        "stiffness": 10
+      }
+    }
+  },
+  "inventory": [
+    {
+      "id": "hall",
+      "kind": "zone",
+      "label": "Hall",
+      "tags": [],
+      "componentNames": []
+    },
+    {
+      "id": "foyer",
+      "kind": "zone",
+      "label": "Foyer",
+      "tags": [],
+      "componentNames": []
+    },
+    {
+      "id": "outside",
+      "kind": "zone",
+      "label": "Outside",
+      "tags": [],
+      "componentNames": []
+    },
+    {
+      "id": "hall_door",
+      "kind": "portal",
+      "tags": [],
+      "componentNames": [
+        "portal"
+      ]
+    },
+    {
+      "id": "exit",
+      "kind": "portal",
+      "tags": [
+        "exit"
+      ],
+      "componentNames": [
+        "portal"
+      ]
+    },
+    {
+      "id": "a1",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a5",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a6",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a7",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    },
+    {
+      "id": "a8",
+      "kind": "agent",
+      "tags": [
+        "attendee"
+      ],
+      "componentNames": [
+        "physical",
+        "navigation",
+        "behavior",
+        "mobility"
+      ]
+    }
+  ]
+}

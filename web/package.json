@@ -4,15 +4,25 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "npm run build --workspace @crowd-control/contract",
-    "dev": "vite",
+    "predev": "npm run build --workspace @crowd-control/compiler",
+    "dev": "vite --port 5173 --strictPort",
+    "prebuild": "npm run build --workspace @crowd-control/compiler",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pretest": "npm run build --workspace @crowd-control/compiler",
+    "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@auth0/auth0-react": "^2.30.0",
+    "@crowd-control/compiler": "*",
     "@crowd-control/contract": "*",
+    "@crowd-control/history": "*",
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "lucide-react": "^0.577.0",
+    "pixi.js": "^8.22.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "demo",
+  "commandId": "command-17",
+  "type": "apply_request",
+  "request": {
+    "schemaVersion": 1,
+    "simulationId": "demo",
+    "requestId": "close-east-1",
+    "operations": [
+      {
+        "op": "set",
+        "targets": {
+          "ids": [
+            "east_door"
+          ]
+        },
+        "values": {
+          "components": {
+            "portal": {
+              "open": false
+            }
+          }
+        }
+      }
+    ]
+  }
+}

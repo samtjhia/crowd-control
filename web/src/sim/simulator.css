@@ -1,0 +1,1075 @@
+/*
+ * Crowd Control simulator. The map is a full-screen sage workspace (the landing page's
+ * world); white, neutral, rounded cards float over it for the panels and controls.
+ * Panels slide with transforms only, so opening one never re-lays-out or resizes the map.
+ * Everything is scoped under .sim / sim-* so it never collides with the landing CSS.
+ */
+.sim {
+  /* Workspace: the landing page's green world. */
+  --workspace: #e8ece0;
+  --green: #357650;
+  --green-hover: #265e3d;
+  --blue: #597dab;
+  --rose: #b75f74;
+  --amber: #c08a3e;
+  /* Cards: white and neutral, so they stand apart from the map. */
+  --card: #ffffff;
+  --text: #1e2420;
+  --muted: #6b706a;
+  --faint: #8f938d;
+  --hair: #ececea;
+  --well: #f5f5f2;
+  --well-strong: #ebebe7;
+  --shadow: 0 1px 2px rgb(20 30 20 / 0.05), 0 12px 32px rgb(20 30 20 / 0.09);
+  --radius: 18px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --slide: 360ms;
+  /* Floating layout; SimulatorApp.tsx uses the same numbers to fit the map. */
+  --gap: 12px;
+  --left-w: 320px;
+  --right-w: 340px;
+  --top-h: 52px;
+  --bottom-h: 86px;
+  --inset-l: var(--gap);
+  --inset-r: var(--gap);
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--workspace);
+  color: var(--text);
+  font: 13px/1.55 'DM Sans Variable', 'DM Sans', sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+}
+
+.sim.has-left { --inset-l: calc(var(--gap) * 2 + var(--left-w)); }
+.sim.has-right { --inset-r: calc(var(--gap) * 2 + var(--right-w)); }
+
+/* Zero-specificity resets, so every component rule below wins. */
+:where(.sim) :where(h1, h2, h3, p, dl, dd, ol, ul) { margin: 0; }
+:where(.sim) :where(ol, ul) { padding: 0; list-style: none; }
+.sim :is(h2, .sim-chat-title, .sim-brand, .sim-clock) { font-family: 'Manrope Variable', 'Manrope', sans-serif; }
+.sim ::selection { background: #d0e6ba; }
+.sim :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sim * { scrollbar-width: thin; scrollbar-color: #d5d6d1 transparent; }
+.sim button { font: inherit; color: inherit; }
+/* A plain baseline for every button here (no browser bevel or padding); component styles override it. */
+:where(.sim) :where(button) { padding: 0; border: 0; border-radius: 0; background: none; cursor: pointer; }
+:where(.sim) :where(button:disabled) { cursor: default; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.sim-muted { color: var(--muted); }
+
+/* ---- Workspace ---- */
+
+.sim-stage { position: absolute; inset: 0; }
+.sim-canvas { position: absolute; inset: 0; }
+.sim-canvas canvas { display: block; touch-action: none; cursor: grab; }
+.sim-canvas canvas:active { cursor: grabbing; }
+
+.sim-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.map-markers { position: absolute; inset: 0; pointer-events: none; }
+.map-marker { position: absolute; display: flex; transform: translate(-50%, -50%); }
+.map-marker-above { transform: translate(-50%, calc(-100% - 6px)); }
+.map-marker .status-icon { box-shadow: 0 0 0 2px #ffffff, 0 2px 6px rgb(20 30 20 / 0.2); }
+
+/* Pulse opacity only: animating a map-sized shadow repaints the whole viewport. */
+.map-pulse {
+  position: absolute;
+  border: 3px solid var(--ring);
+  box-shadow: inset 0 0 45px 12px color-mix(in srgb, var(--ring) 35%, transparent), 0 0 24px var(--ring);
+  border-radius: 6px;
+  opacity: 0;
+  animation: map-pulse 2.4s var(--ease) 1 both;
+}
+
+.status-ring-closed { --ring: var(--rose); }
+.status-ring-warning { --ring: var(--amber); }
+.status-ring-exit { --ring: var(--green); }
+.status-ring-instruction { --ring: var(--blue); }
+
+@keyframes map-pulse {
+  0%, 30%, 60%, 100% { opacity: 0; }
+  10%, 40%, 70% { opacity: 1; }
+}
+
+/* ...and stays as a badge on the map's top-left corner. */
+.map-notices {
+  position: absolute;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  transform: translate(-6px, calc(-100% - 8px));
+}
+
+.map-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #ffffff, 0 2px 8px rgb(20 30 20 / 0.18);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: notice-in 400ms var(--ease) 1.6s both;
+}
+
+.map-notice .status-icon { background: transparent; }
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.9); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-pulse { display: none; }
+  .map-notice { animation: none; }
+}
+
+/* ---- Floating cards ---- */
+
+.sim-float {
+  position: absolute;
+  border: 1px solid rgb(20 30 20 / 0.06);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+/* Bars that span the free space between the panels follow them as they slide. */
+.sim-topbar,
+.sim-playback {
+  left: var(--inset-l);
+  right: var(--inset-r);
+  transition: left var(--slide) var(--ease), right var(--slide) var(--ease);
+}
+
+.sim-topbar {
+  top: var(--gap);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--top-h);
+  padding: 0 10px 0 16px;
+  border-radius: 14px;
+}
+
+.sim-brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+/* The brand mark itself is shared: site/site.css (.cc-mark). */
+
+.sim-scenario {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--hair);
+  color: var(--muted);
+}
+
+/* A native select, so keyboard, screen readers and phones get the platform picker. */
+.sim-scenario-picker {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.sim-scenario-picker select {
+  appearance: none;
+  margin: 0;
+  padding: 4px 26px 4px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: var(--well);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sim-scenario-picker select:hover { border-color: var(--muted); }
+.sim-scenario-picker select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sim-scenario-picker svg { position: absolute; right: 9px; color: var(--muted); pointer-events: none; }
+
+.sim-scenario-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--well);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sim-tag-alarm { background: #f8e8ec; color: #96364e; }
+
+.sim-draw-mode {
+  top: calc(var(--gap) * 2 + var(--top-h));
+  right: var(--inset-r);
+  display: flex;
+  padding: 3px;
+  border-radius: 11px;
+  transition: right var(--slide) var(--ease);
+}
+
+.sim .sim-draw-mode button {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.sim .sim-draw-mode button:hover { color: var(--text); }
+.sim .sim-draw-mode button[aria-checked='true'] { background: var(--well-strong); color: var(--text); font-weight: 600; }
+
+/*
+ * Map tools: a floating bar centred over the free map space, just above the playback bar.
+ * It follows the panels as they slide, like the bars it sits between.
+ */
+.sim-tools {
+  bottom: calc(var(--gap) * 2 + var(--bottom-h));
+  left: calc(var(--inset-l) + (100% - var(--inset-l) - var(--inset-r)) / 2);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 14px;
+  transform: translateX(-50%);
+  transition: left var(--slide) var(--ease);
+}
+
+.sim-tool { display: flex; align-items: center; gap: 2px; }
+.sim-tools-divider { width: 1px; height: 22px; margin: 0 5px; background: var(--hair); }
+
+.sim .sim-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.sim .sim-tools kbd {
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--well);
+  color: var(--faint);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sim .sim-tools button:hover { background: var(--well); color: var(--text); }
+.sim .sim-tools button[aria-checked='true'] { background: var(--green); color: #ffffff; font-weight: 600; }
+.sim .sim-tools button[aria-checked='true'] kbd { background: rgb(255 255 255 / 0.18); color: #ffffff; }
+.sim .sim-tools button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+.sim-zoom {
+  right: var(--inset-r);
+  bottom: calc(var(--gap) * 2 + var(--bottom-h));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  transition: right var(--slide) var(--ease);
+}
+
+.sim .sim-icon-btn {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out;
+}
+
+.sim .sim-icon-btn:hover:not(:disabled) { background: var(--well); color: var(--text); }
+.sim .sim-icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---- Side panels: full-height floating cards that slide in and out ---- */
+
+.sim-panel {
+  top: var(--gap);
+  bottom: var(--gap);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform var(--slide) var(--ease), opacity var(--slide) var(--ease);
+  will-change: transform;
+  z-index: 3;
+}
+
+.sim-panel-left { left: var(--gap); width: var(--left-w); }
+.sim-panel-right { right: var(--gap); width: var(--right-w); }
+.sim:not(.has-left) .sim-panel-left { transform: translateX(calc(-100% - var(--gap) - 16px)); opacity: 0.6; }
+.sim:not(.has-right) .sim-panel-right { transform: translateX(calc(100% + var(--gap) + 16px)); opacity: 0.6; }
+
+.sim-panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 10px 0 20px;
+}
+
+.sim-panel-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+
+.sim-panel-body { flex: 1; min-height: 0; overflow-y: auto; }
+
+.sim-section { padding: 16px 20px; border-top: 1px solid var(--hair); }
+
+.sim-section h3,
+.sim-legend summary {
+  margin-bottom: 12px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/*
+ * Panel handles sit at the panel's vertical middle. Open: a tab on the panel's inner edge
+ * (closes it). Closed: the same tab at the screen edge (reopens it). They slide together.
+ */
+.sim .sim-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgb(20 30 20 / 0.06);
+  background: var(--card);
+  box-shadow: 3px 3px 10px rgb(20 30 20 / 0.07);
+  color: var(--faint);
+  cursor: pointer;
+  transition: transform var(--slide) var(--ease), color 160ms ease-out, width 160ms ease-out;
+}
+
+.sim .sim-handle:hover { width: 22px; color: var(--text); }
+
+.sim .sim-handle-left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 9px 9px 0;
+  transform: translate(calc(var(--gap) + var(--left-w) - 1px), -50%);
+}
+
+.sim .sim-handle-right {
+  right: 0;
+  border-right: 0;
+  border-radius: 9px 0 0 9px;
+  box-shadow: -3px 3px 10px rgb(20 30 20 / 0.07);
+  transform: translate(calc(-1 * (var(--gap) + var(--right-w) - 1px)), -50%);
+}
+
+.sim:not(.has-left) .sim-handle-left,
+.sim:not(.has-right) .sim-handle-right { transform: translate(0, -50%); }
+
+.sim-zoom-divider { height: 1px; margin: 3px 6px; background: var(--hair); }
+.sim .sim-zoom .sim-icon-btn[aria-pressed='true'] { background: var(--well-strong); color: var(--text); }
+
+/* ---- Playback bar ---- */
+
+.sim-playback {
+  bottom: var(--gap);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--bottom-h);
+  padding: 0 18px 0 12px;
+}
+
+.sim-transport { display: flex; flex: none; align-items: center; gap: 4px; }
+
+.sim .sim-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  min-width: 96px;
+  margin-right: 4px;
+  padding: 0 18px 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--green);
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, transform 120ms ease-out;
+}
+
+.sim .sim-play:hover:not(:disabled) { background: var(--green-hover); }
+.sim .sim-play:active:not(:disabled) { transform: scale(0.97); }
+.sim .sim-play:disabled { opacity: 0.4; cursor: default; }
+
+.sim-speed {
+  display: flex;
+  margin-left: 6px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--well);
+}
+
+.sim .sim-speed button {
+  min-width: 36px;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.sim .sim-speed button:hover:not(:disabled) { color: var(--text); }
+.sim .sim-speed button[aria-checked='true'] { background: var(--card); box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); color: var(--text); font-weight: 600; }
+.sim .sim-speed button:disabled { opacity: 0.4; cursor: default; }
+
+.sim-clock { flex: none; min-width: 74px; font-size: 18px; font-weight: 600; letter-spacing: -0.03em; }
+
+/* ---- Timeline ---- */
+
+.timeline { flex: 1; min-width: 160px; padding-top: 14px; }
+.timeline-track { position: relative; height: 4px; border-radius: 999px; background: var(--well-strong); }
+.timeline-elapsed { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--green); }
+
+.timeline-marker {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--card);
+  transform: translate(-50%, -50%);
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(20 30 20 / 0.2);
+  transform: translate(-50%, -50%);
+}
+
+.timeline-ticks { position: relative; height: 16px; margin-top: 8px; color: var(--faint); font-size: 10px; }
+.timeline-ticks li { position: absolute; transform: translateX(-50%); }
+.timeline-ticks li:first-child { transform: none; }
+.timeline-ticks li.is-end { transform: translateX(-100%); }
+.timeline-ticks li.is-covered { visibility: hidden; }
+
+/* ---- Status colours (map, timeline, events) ---- */
+
+.status-icon { display: inline-grid; flex: none; place-items: center; border-radius: 50%; color: #ffffff; }
+.status-exit { background: var(--green); }
+.status-warning { background: var(--amber); }
+.status-closed { background: var(--rose); }
+.status-instruction { background: var(--blue); }
+
+/* ---- Assistant ---- */
+
+.sim-chat { display: flex; flex-direction: column; height: 100%; }
+.sim-chat-empty { flex: 1; padding: 8px 20px 20px; }
+.sim-chat-title { margin-bottom: 6px; font-size: 18px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.3; }
+
+.sim-suggestions { display: grid; gap: 8px; margin-top: 20px; }
+
+.sim-suggestions li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--well);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sim-prompt-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.sim-composer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  background: var(--well);
+}
+
+.sim-composer input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; }
+.sim-composer input:focus { outline: none; }
+.sim-composer input::placeholder { color: var(--faint); }
+
+.sim .sim-send {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
+  color: #ffffff;
+}
+
+.sim .sim-send:disabled { opacity: 0.3; }
+
+/* ---- Assistant conversation ---- */
+
+.sim .sim-suggestions button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sim .sim-suggestions li:has(button:hover) { background: var(--well-strong); }
+/* The avatar centres on the first line of text, even when a long suggestion wraps. */
+.sim .sim-suggestions button .sim-prompt-avatar { margin-top: -3px; }
+
+.sim-messages { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding: 8px 20px 12px; }
+
+.sim-message {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sim-message-you { align-self: flex-end; border-bottom-right-radius: 4px; background: var(--green); color: #ffffff; }
+.sim-message-assistant { align-self: flex-start; border-bottom-left-radius: 4px; background: var(--well); }
+.sim-message.is-error { background: #f8e8ec; color: #96364e; }
+
+.sim-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.sim-thinking svg { animation: sim-spin 900ms linear infinite; }
+@keyframes sim-spin { to { transform: rotate(360deg); } }
+
+.sim-proposal { display: grid; gap: 6px; width: 100%; max-width: 100%; border: 1px solid var(--hair); background: var(--card); }
+.sim-proposal-title { font-weight: 600; }
+.sim-proposal ul { display: grid; gap: 3px; padding-left: 16px; list-style: disc; }
+.sim-proposal-note { color: #96364e; font-size: 12px; }
+.sim-proposal-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.sim-proposal-state { display: flex; align-items: center; gap: 6px; color: var(--green); font-weight: 500; }
+.sim-proposal-state.is-muted { color: var(--muted); }
+
+.sim-chat-form { display: grid; flex: none; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid var(--hair); }
+.sim-chat-form .sim-composer { margin: 0; align-items: flex-end; padding: 4px 4px 4px 12px; }
+
+.sim-composer textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  min-height: 32px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  line-height: 20px;
+  resize: none;
+  field-sizing: content;
+}
+
+.sim-composer textarea:focus { outline: none; }
+.sim-composer textarea::placeholder { color: var(--faint); }
+
+.sim-ask-kind { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--well); }
+
+.sim .sim-ask-kind button {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sim .sim-ask-kind button[aria-checked='true'] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+.sim-where { display: flex; align-items: center; gap: 8px; padding: 0 4px; color: var(--muted); font-size: 12px; }
+.sim-where select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.sim-where select:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+/* Which scenario the conversation is about; each scenario has its own. */
+.sim-chat-about {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 20px 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--muted);
+  font-size: 12px;
+}
+.sim-chat-about p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-chat-about strong { color: var(--text); font-weight: 600; }
+.sim .sim-chat-about .sim-link { flex: none; font-size: 12px; }
+.sim-keep-venue { display: flex; align-items: center; gap: 7px; padding: 0 4px; color: var(--muted); font-size: 12px; line-height: 16px; }
+.sim-keep-venue input { width: 14px; height: 14px; margin: 0; accent-color: var(--green); }
+
+/* ---- Overview and events ---- */
+
+.sim-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sim-stats div { padding: 10px 12px; border-radius: 12px; background: var(--well); }
+.sim-stats dt { color: var(--muted); font-size: 11px; }
+.sim-stats dd { font-family: 'Manrope Variable', 'Manrope', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: -0.04em; }
+.sim-stats dd.is-warning { color: #9a6524; }
+
+.sim-stat-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-weight: 500; }
+
+.sim-events li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 0;
+}
+
+.sim-event-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.45; }
+.sim-event-title { font-weight: 500; }
+.sim-events time { color: var(--faint); font-size: 11px; }
+
+.sim-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8e8ec;
+  color: #96364e;
+  font-weight: 500;
+}
+
+/* ---- Selection and changes ---- */
+
+.sim-selected { display: grid; gap: 10px; }
+.sim-selected-name { font-weight: 600; }
+.sim-facts { display: grid; gap: 4px; }
+.sim-facts div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 10px; }
+.sim-facts dt { color: var(--muted); }
+/* What a point of interest is, under its name; dangers in the same red as their map badge. */
+.sim-place-kind { margin-top: -8px; color: var(--muted); font-size: 12px; }
+.sim-place-kind.is-hazard { color: #b91c1c; font-weight: 600; }
+.sim-reasons { display: grid; gap: 4px; }
+.sim-reasons-title { color: var(--muted); }
+.sim-reasons ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; }
+.sim-reasons li { line-height: 1.4; }
+
+.sim .sim-action {
+  justify-self: start;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms ease-out;
+}
+
+.sim .sim-action:hover { background: var(--green-hover); }
+
+.sim-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-selected-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+.sim .sim-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.sim .sim-link:hover { color: var(--text); }
+.sim .sim-action:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+.sim-changes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.sim-changes li:last-child { border-bottom: 0; }
+.sim-changes time { flex: none; color: var(--faint); font-size: 11px; }
+
+/* ---- Density ---- */
+
+.sim-density { display: grid; gap: 12px; }
+
+.sim .sim-switch {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sim .sim-switch kbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--well);
+  color: var(--faint);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sim-switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--well-strong);
+  transition: background-color 160ms ease-out;
+}
+
+.sim-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(20 30 20 / 0.25);
+  transition: transform 160ms ease-out;
+}
+
+.sim .sim-switch[aria-checked='true'] .sim-switch-track { background: var(--green); }
+.sim .sim-switch[aria-checked='true'] .sim-switch-thumb { transform: translateX(14px); }
+.sim .sim-switch:focus-visible .sim-switch-track { outline: 2px solid var(--green); outline-offset: 2px; }
+
+.sim-density-peak { line-height: 1.45; }
+.sim-density-value { font-family: 'Manrope Variable', 'Manrope', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -0.03em; }
+.sim-density-band { font-weight: 600; }
+
+.sim-density-legend { display: grid; gap: 4px; padding: 0; list-style: none; }
+.sim-density-legend li { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 10px; }
+.sim-density-swatch { width: 14px; height: 14px; border-radius: 4px; }
+
+.sim-density-gradient { height: 10px; border-radius: 999px; }
+.sim-density-scale { display: flex; justify-content: space-between; margin-top: -6px; font-size: 11px; }
+.sim-density-note { font-size: 11.5px; line-height: 1.45; }
+
+/* ---- Legend ---- */
+
+.sim-legend summary { display: flex; align-items: center; gap: 8px; margin-bottom: 0; list-style: none; cursor: pointer; }
+.sim-legend summary::-webkit-details-marker { display: none; }
+
+.sim-legend summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 200ms var(--ease);
+}
+
+.sim-legend[open] summary::after { transform: rotate(45deg); }
+.sim-legend-list { display: grid; gap: 9px; margin-top: 14px; }
+.sim-legend-list li { display: flex; align-items: center; gap: 10px; }
+.sim-shortcuts { display: grid; gap: 6px; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.sim-shortcuts div { display: grid; grid-template-columns: 96px 1fr; gap: 8px; }
+
+.sim kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: var(--well);
+  color: var(--text);
+  font: 500 11px 'DM Sans Variable', 'DM Sans', sans-serif;
+}
+
+/* ---- Narrow screens: panels overlay the map ---- */
+
+.sim-scrim { display: none; }
+
+@media (max-width: 999px) {
+  .sim.has-left,
+  .sim.has-right { --inset-l: var(--gap); --inset-r: var(--gap); }
+  .sim { --left-w: min(340px, calc(100vw - 64px)); --right-w: min(340px, calc(100vw - 64px)); }
+
+  .sim.has-left .sim-scrim,
+  .sim.has-right .sim-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: block;
+    border: 0;
+    background: rgb(20 30 20 / 0.18);
+  }
+
+  .sim-scenario-detail { display: none; }
+  .sim-playback { flex-wrap: wrap; gap: 6px 12px; height: auto; padding: 10px 14px; }
+  .timeline { flex-basis: 100%; padding-top: 2px; }
+  .sim-zoom { bottom: 150px; }
+  .sim-tools { bottom: 150px; }
+  .sim .sim-tools button span,
+  .sim .sim-tools kbd { display: none; }
+  .sim .sim-tools button { padding: 0 10px; }
+}
+
+@media (max-width: 520px) {
+  .sim .sim-speed button { min-width: 30px; }
+  .sim .sim-play { min-width: 0; padding: 0 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sim *,
+  .sim *::before,
+  .sim *::after { transition-duration: 0ms !important; }
+}
+
+/* ---- Points the person marked: lettered pins, tip on the spot ---- */
+.map-points { position: absolute; inset: 0; pointer-events: none; }
+.sim .map-point {
+  position: absolute;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  background: var(--blue);
+  box-shadow: 0 3px 8px rgb(20 30 20 / 0.28);
+  color: #ffffff;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate(0, -100%) rotate(-45deg);
+  transform-origin: 0 100%;
+  transition: background 140ms var(--ease), box-shadow 140ms var(--ease);
+}
+.sim .map-point span { font: 700 11px/1 'Manrope Variable', 'Manrope', sans-serif; transform: rotate(45deg); }
+.sim .map-point:hover { background: #4a6c98; }
+.sim .map-point.is-selected { background: #2f6feb; box-shadow: 0 0 0 4px rgb(47 111 235 / 0.25), 0 3px 8px rgb(20 30 20 / 0.28); }
+.sim .map-point:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sim-point-tip { color: var(--muted); }
+.sim-point-tip q { color: var(--text); font-style: normal; }
+
+/* What a "why" answer was based on: the events it cites, under the answer. */
+.sim-evidence { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 12px; }
+.sim-evidence span { color: var(--text); font-weight: 600; }
+
+/* Right panel tabs: Simulation | Analysis, in the panel's header. */
+.sim-panel-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--well); }
+.sim .sim-panel-tabs button {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 8px;
+  color: var(--muted);
+  font: 600 13px/1 'Manrope Variable', 'Manrope', sans-serif;
+  letter-spacing: -0.01em;
+}
+.sim .sim-panel-tabs button:hover { color: var(--text); }
+.sim .sim-panel-tabs button[aria-selected='true'] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+
+/* Analysis: the safety report for the run on screen. */
+.sim-analysis { display: grid; gap: 12px; padding: 4px 20px 20px; }
+.sim-analysis-start { justify-items: start; padding-top: 8px; }
+.sim-analysis-title { font: 600 16px/1.3 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; }
+.sim-analysis-note { padding: 8px 20px; }
+.sim-analysis-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.sim-analysis-actions .sim-link { display: inline-flex; align-items: center; gap: 5px; }
+.sim-analysis .sim-action svg.sim-spin { animation: sim-spin 900ms linear infinite; }
+.sim-analysis .report-head h1 { font: 650 18px/1.25 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; }
+.sim-analysis .report-body h2 { font: 600 14px/1.3 'Manrope Variable', 'Manrope', sans-serif; }
+.sim-analysis ol, .sim-analysis ul { list-style: none; }
+
+/* A blank start: no map yet, a note in the middle of the canvas. */
+.sim-blank {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(420px, calc(100% - 48px));
+  padding: 22px 24px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  transform: translate(-50%, -50%);
+}
+.sim-blank-title { margin-bottom: 6px !important; color: var(--text); font: 600 18px/1.3 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; }
+
+/* Rename or delete the person's own scenario, beside the picker. */
+.sim-scenario-menu { position: relative; flex: none; }
+.sim-scenario-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  width: 260px;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+.sim .sim-scenario-pop > button { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; text-align: left; }
+.sim .sim-scenario-pop > button:hover { background: var(--well); }
+.sim .sim-scenario-pop > button.is-danger { color: #96364e; }
+.sim .sim-scenario-pop > button.is-danger:hover { background: #f8e8ec; }
+.sim-scenario-pop form, .sim-scenario-pop > div { display: grid; gap: 8px; padding: 6px; }
+.sim-scenario-pop label { color: var(--muted); font-size: 12px; }
+.sim-scenario-pop input { height: 34px; padding: 0 10px; border: 1px solid var(--hair); border-radius: 9px; font: inherit; }
+.sim-scenario-pop input:focus-visible { outline: 2px solid var(--green); outline-offset: 0; }
+.sim-scenario-pop-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.sim .sim-action.is-danger { background: #a1324c; }
+.sim .sim-action.is-danger:hover { background: #87283f; }
+
+.sim-debug {
+  position: absolute; z-index: 50; left: 12px; bottom: 84px;
+  display: grid; gap: 3px; padding: 9px 12px;
+  background: #fff; color: #172033; border: 1px solid #9aa9a0; border-radius: 6px;
+  font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
+}
+
+.sim-complete {
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--top-h) + var(--gap) * 2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: #b42336;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 4px 20px #b4233640;
+  pointer-events: none;
+}
+.sim-complete { background: var(--green); }
+
+.timeline-seek { position: absolute; inset: -10px 0; width: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.timeline-track:focus-within { outline: 2px solid var(--green); outline-offset: 8px; }
+.timeline-seek:disabled { cursor: default; }
+.timeline-jump { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 11px; }
+.sim .timeline-jump input { width: 78px; padding: 2px 5px; border: 1px solid var(--hair); border-radius: 4px; background: var(--well); }
+.sim .timeline-jump button { padding: 2px 6px; border-radius: 4px; background: var(--well-strong); }
+
+@media (max-width: 767px) { .sim-transport { flex-wrap: wrap; } }

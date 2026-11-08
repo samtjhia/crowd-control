@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Crowd Control — HackTrent 2026",
+  "description": "Crowd Control \u2014 HackTrent 2026",
   "engines": {
     "node": ">=24",
     "npm": ">=10"
@@ -16,12 +16,17 @@
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @crowd-control/web",
+    "dev": "npm run build:wasm && npm run build --workspace @crowd-control/compiler && node scripts/dev.mjs",
     "dev:server": "npm run dev --workspace @crowd-control/server",
-    "build": "npm run build --workspaces && cargo build --workspace",
-    "check": "npm run build --workspace @crowd-control/contract && npm run typecheck --workspaces && cargo fmt --all --check && cargo check --workspace",
+    "build": "npm run build:wasm && npm run build --workspaces && cargo build --workspace",
+    "build:wasm": "node engine/scripts/build-wasm.mjs",
+    "bench:engine": "npm run build --workspace @crowd-control/contract && npm run build:wasm && cargo build --release -p crowd-control-engine --example movement_bench && node engine/scripts/benchmark.ts",
+    "test:wasm": "npm run build --workspace @crowd-control/compiler && npm run build:wasm && cargo build -p crowd-control-engine --example protocol && node --test engine/test/wasm.test.ts",
+    "check": "npm run build --workspace @crowd-control/compiler && npm run typecheck --workspaces && cargo fmt --all --check && cargo check --workspace",
     "lint": "npm run lint --workspace @crowd-control/web",
-    "test": "cargo test --workspace"
+    "test": "npm run test:dev && npm run test --workspace @crowd-control/contract && npm run test --workspace @crowd-control/history && npm run test --workspace @crowd-control/server && npm run test --workspace @crowd-control/compiler && npm run test --workspace @crowd-control/web && cargo test --workspace && node --test engine/test/native.test.mjs",
+    "dev:web": "npm run build:wasm && npm run dev --workspace @crowd-control/web",
+    "test:dev": "node --test scripts/dev.test.mjs"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

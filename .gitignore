@@ -1,9 +1,11 @@
 docs
+graphify-out
 
 node_modules/
 dist/
 target/
 engine/pkg/
+web/public/engine/*.wasm
 *.tsbuildinfo
 *.log
 .DS_Store
@@ -11,9 +13,15 @@ engine/pkg/
 .env.*
 !.env.example
 node_modules
+graphify-out/
 
 .agents/
 .claude/
 .codex/
 .cursor/
 .impeccable/
+
+# Auth0 credentials
+.auth0-mcp-state.json
+
+.auth0-mcp-writes.log

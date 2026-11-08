@@ -1,0 +1,17 @@
+{$SITE_ADDRESS:localhost} {
+	root * /srv
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy server:3001
+	}
+
+	handle /health* {
+		reverse_proxy server:3001
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

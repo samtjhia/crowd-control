@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "worked-demo",
+  "seed": 42,
+  "layout": {
+    "mode": "generate",
+    "spaces": [
+      {
+        "id": "hall",
+        "label": "Hall",
+        "areaWeight": 2,
+        "appearance": {
+          "fill": "#DBEAFE",
+          "labelVisible": true
+        }
+      },
+      {
+        "id": "foyer",
+        "label": "Foyer",
+        "areaWeight": 1,
+        "appearance": {
+          "fill": "#FEF3C7",
+          "labelVisible": true
+        }
+      },
+      {
+        "id": "outside",
+        "label": "Outside",
+        "areaWeight": 1,
+        "appearance": {
+          "fill": "#DCFCE7",
+          "labelVisible": true
+        }
+      }
+    ],
+    "connections": [
+      {
+        "id": "hall_door",
+        "connects": [
+          "hall",
+          "foyer"
+        ],
+        "appearance": {
+          "fill": "#86EFAC"
+        }
+      },
+      {
+        "id": "exit",
+        "connects": [
+          "foyer",
+          "outside"
+        ],
+        "tags": [
+          "exit"
+        ],
+        "appearance": {
+          "fill": "#86EFAC"
+        }
+      }
+    ]
+  },
+  "initialOperations": [
+    {
+      "op": "spawn",
+      "template": {
+        "kind": "agent",
+        "tags": [
+          "attendee"
+        ],
+        "appearance": {
+          "symbol": "triangle",
+          "fill": "#2563EB"
+        }
+      },
+      "count": 8,
+      "placement": {
+        "inside": {
+          "ids": [
+            "hall"
+          ]
+        }
+      }
+    },
+    {
+      "op": "assign_goal",
+      "targets": {
+        "tags": [
+          "attendee"
+        ]
+      },
+      "goal": {
+        "kind": "wander",
+        "inside": {
+          "ids": [
+            "hall"
+          ]
+        }
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "op": "schedule",
+      "id": "late-arrivals",
+      "at": 10,
+      "operations": [
+        {
+          "op": "spawn",
+          "template": {
+            "kind": "agent",
+            "tags": [
+              "attendee",
+              "late"
+            ],
+            "appearance": {
+              "symbol": "square",
+              "fill": "#7C3AED"
+            }
+          },
+          "count": 2,
+          "placement": {
+            "inside": {
+              "ids": [
+                "foyer"
+              ]
+            }
+          }
+        },
+        {
+          "op": "assign_goal",
+          "targets": {
+            "tags": [
+              "late"
+            ]
+          },
+          "goal": {
+            "kind": "sequence",
+            "goals": [
+              {
+                "kind": "reach",
+                "target": {
+                  "ids": [
+                    "hall"
+                  ]
+                }
+              },
+              {
+                "kind": "wander",
+                "inside": {
+                  "ids": [
+                    "hall"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "schedule",
+      "id": "alarm",
+      "at": 30,
+      "operations": [
+        {
+          "op": "emit",
+          "event": {
+            "name": "alarm"
+          }
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "op": "define_rule",
+      "id": "leave-on-alarm",
+      "when": {
+        "kind": "event",
+        "name": "alarm"
+      },
+      "once": true,
+      "operations": [
+        {
+          "op": "assign_goal",
+          "targets": {
+            "tags": [
+              "attendee"
+            ]
+          },
+          "mode": "replace",
+          "goal": {
+            "kind": "reach",
+            "target": {
+              "ids": [
+                "outside"
+              ]
+            },
+            "selection": "lowest-cost",
+            "departOnArrival": true
+          }
+        }
+      ]
+    }
+  ]
+}

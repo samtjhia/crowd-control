@@ -1,0 +1,210 @@
+/*
+ * Site-wide pieces shared by every page: the brand mark, the account menu, and the header of
+ * the pages outside the simulator. The palette is the simulator's green world (simulator.css),
+ * as global tokens so pages outside .sim can use it too.
+ */
+:root {
+  --cc-workspace: #e8ece0;
+  --cc-green: #357650;
+  --cc-green-hover: #265e3d;
+  --cc-green-soft: #e3eedd;
+  --cc-blue: #597dab;
+  --cc-rose: #b75f74;
+  --cc-rose-soft: #f8e8ec;
+  --cc-amber: #c08a3e;
+  --cc-amber-soft: #f6ecdb;
+  --cc-card: #ffffff;
+  --cc-text: #1e2420;
+  --cc-muted: #646962;
+  --cc-faint: #8f938d;
+  --cc-hair: #ececea;
+  --cc-well: #f5f5f2;
+  --cc-well-strong: #ebebe7;
+  --cc-shadow: 0 1px 2px rgb(20 30 20 / 0.05), 0 12px 32px rgb(20 30 20 / 0.09);
+  --cc-radius: 18px;
+  --cc-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --cc-body: 'DM Sans Variable', 'DM Sans', sans-serif;
+  --cc-display: 'Manrope Variable', 'Manrope', sans-serif;
+}
+
+/* ---- Brand mark: six little people, leaning into the crowd ---- */
+
+.cc-mark {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(3, 3px);
+  gap: 3px;
+  margin: 3px 2px 0 2px;
+  transform: rotate(-12deg);
+}
+.cc-mark i { position: relative; width: 3px; height: 8px; border-radius: 3px; background: var(--cc-green); }
+.cc-mark i::before { content: ''; position: absolute; top: -4px; width: 3px; height: 3px; border-radius: 50%; background: inherit; }
+.cc-mark i:nth-child(2), .cc-mark i:nth-child(5) { background: #89a581; }
+.cc-mark i:nth-child(3) { background: #7898b5; }
+.cc-mark i:nth-child(4) { background: #c58a9a; }
+
+.cc-brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--cc-text);
+  font: 650 15px/1 var(--cc-display);
+  letter-spacing: -0.04em;
+  text-decoration: none;
+}
+
+/* ---- Account menu: an avatar button with a small popover ---- */
+
+.cc-account { position: relative; flex: none; font-family: var(--cc-body); }
+.cc-account .cc-account-button {
+  position: relative;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 50%;
+  background: var(--cc-green-soft);
+  color: var(--cc-green-hover);
+  cursor: pointer;
+  font: 650 12px/1 var(--cc-body);
+  letter-spacing: 0.02em;
+  transition: box-shadow 160ms var(--cc-ease);
+}
+.cc-account .cc-account-button:hover { box-shadow: 0 0 0 3px var(--cc-well-strong); }
+.cc-account .cc-account-button:focus-visible { outline: 2px solid var(--cc-green); outline-offset: 2px; }
+.cc-account .cc-account-button img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+/* Whether this run is saving: a small dot on the avatar, green when saved, amber when not. */
+.cc-account-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--cc-card);
+  border-radius: 50%;
+  background: var(--cc-green);
+}
+.cc-account-dot.is-failed { background: var(--cc-amber); }
+.cc-account-dot.is-saving { background: var(--cc-faint); }
+
+.cc-account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  width: 260px;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--cc-hair);
+  border-radius: 14px;
+  background: var(--cc-card);
+  box-shadow: var(--cc-shadow);
+  color: var(--cc-text);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  animation: cc-menu-in 160ms var(--cc-ease);
+}
+@keyframes cc-menu-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .cc-account-menu { animation: none; } }
+
+.cc-account-who { display: grid; gap: 1px; padding: 8px 10px 10px; border-bottom: 1px solid var(--cc-hair); margin-bottom: 4px; }
+.cc-account-name { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.cc-account-email { overflow: hidden; color: var(--cc-muted); text-overflow: ellipsis; white-space: nowrap; }
+.cc-account-status { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 4px; padding: 8px 10px; border-radius: 10px; background: var(--cc-well); color: var(--cc-muted); }
+.cc-account-status.is-failed { background: var(--cc-amber-soft); color: #7a4f12; }
+.cc-account-status svg { flex: none; margin-top: 2px; }
+
+.cc-account-menu a,
+.cc-account-menu button.cc-account-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--cc-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+.cc-account-menu a:hover,
+.cc-account-menu button.cc-account-item:hover { background: var(--cc-well); }
+.cc-account-menu a[aria-current='page'] { color: var(--cc-green); font-weight: 600; }
+.cc-account-menu :focus-visible { outline: 2px solid var(--cc-green); outline-offset: -2px; }
+.cc-account-menu svg { flex: none; color: var(--cc-muted); }
+.cc-account-sep { height: 1px; margin: 4px 0; background: var(--cc-hair); }
+
+/* ---- Header for the pages outside the simulator ---- */
+
+.cc-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  width: min(100% - 32px, 1120px);
+  margin: 12px auto 0;
+  padding: 10px 12px 10px 18px;
+  border-radius: var(--cc-radius);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: var(--cc-shadow);
+  backdrop-filter: saturate(1.4) blur(10px);
+}
+.cc-nav { display: flex; flex: 1; gap: 4px; min-width: 0; }
+.cc-nav a {
+  padding: 7px 12px;
+  border-radius: 10px;
+  color: var(--cc-muted);
+  font-size: 14px;
+  font-weight: 550;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 140ms var(--cc-ease), color 140ms var(--cc-ease);
+}
+.cc-nav a:hover { background: var(--cc-well); color: var(--cc-text); }
+.cc-nav a[aria-current='page'] { background: var(--cc-green-soft); color: var(--cc-green-hover); }
+.cc-nav a:focus-visible { outline: 2px solid var(--cc-green); outline-offset: 2px; }
+.cc-nav-short { display: none; }
+
+@media (max-width: 640px) {
+  .cc-header { gap: 12px; padding-left: 14px; }
+  .cc-header .cc-brand span { display: none; }
+  .cc-nav { overflow-x: auto; scrollbar-width: none; }
+  .cc-nav a { padding: 7px 10px; font-size: 13px; }
+  .cc-nav-long { display: none; }
+  .cc-nav-short { display: inline; }
+}
+
+/* ---- Page links inside the simulator's and editor's top bars ---- */
+.cc-pagelinks { display: flex; flex: none; align-items: center; gap: 2px; }
+.cc-pagelinks a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: var(--cc-muted);
+  font: 550 13px/1 var(--cc-body);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 140ms var(--cc-ease), color 140ms var(--cc-ease);
+}
+.cc-pagelinks a:hover { background: var(--cc-well); color: var(--cc-text); }
+.cc-pagelinks a:focus-visible { outline: 2px solid var(--cc-green); outline-offset: 2px; }
+/* Narrow screens keep the icons; the account menu lists the pages by name too. */
+@media (max-width: 1180px) {
+  .cc-pagelinks span { display: none; }
+  .cc-pagelinks a { padding: 0 8px; }
+}

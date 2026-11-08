@@ -1,0 +1,1972 @@
+use crate::{
+    core::{Failure, unsupported},
+    geometry::{self, Body, distance},
+    grid::GridData,
+    protocol::*,
+    random,
+};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+};
+
+// Congestion cost rises when people stop; these weights never change collision geometry or metrics.
+fn crowd_weight(a: &AgentRuntime) -> u32 {
+    if geometry::norm(a.velocity.x.0, a.velocity.y.0)
+        < a.components.navigation.preferred_speed.0 * 0.25
+    {
+        4
+    } else {
+        1
+    }
+}
+const NONE: u32 = u32::MAX;
+type PortalInfo = (u32, u32, bool, f64, [f64; 4]);
+const DIRS: [(isize, isize); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+#[derive(Debug, Clone)]
+struct Clearance {
+    walk: Vec<bool>,
+    edges: Vec<u8>,
+}
+#[derive(Debug, Clone)]
+struct Field {
+    id: Id,
+    seeds: Vec<usize>,
+    distance: Vec<f64>,
+    next: Vec<u32>,
+    hops: Vec<u32>,
+    first_portal: Vec<u32>,
+}
+#[derive(Debug, Clone)]
+struct Route {
+    key: Option<(u64, Id)>,
+    direct: Option<Point>,
+    stop: f64,
+    blocked: bool,
+}
+#[derive(Debug, Clone, Default)]
+pub struct Navigator {
+    pub prepared: bool,
+    clearance: BTreeMap<u64, Clearance>,
+    fields: BTreeMap<(u64, Id), Field>,
+    routes: Vec<Option<Route>>,
+    cells: usize,
+    work: usize,
+    portal_info: Vec<Option<PortalInfo>>,
+    intents: Vec<Option<Intent>>,
+    bodies: Vec<Body>,
+    visible: Vec<Option<(Point, Point)>>,
+    crowd_prefix: Vec<u32>,
+    crowd_subjects: Vec<(usize, u32, f64)>,
+    crowd_count_prefix: Vec<u32>,
+    crowd_speed_prefix: Vec<f64>,
+    crowd_min_speed: f64,
+}
+#[derive(Debug, Clone)]
+pub struct Intent {
+    pub goal: GoalSpec,
+    pub point: Option<Point>,
+    pub local: bool,
+}
+fn field_targets(g: &GoalSpec) -> Vec<Id> {
+    let ids = candidates(g);
+    if matches!(g.kind, GoalKind::Avoid) {
+        ids.into_iter().take(1).collect()
+    } else {
+        ids
+    }
+}
+fn cache_key(intent: &Intent, target: &Id, grid: &GridData, positions: &BTreeMap<Id, Point>) -> Id {
+    if intent.point.is_none()
+        && !positions.contains_key(target)
+        && matches!(
+            intent.goal.kind,
+            GoalKind::Reach | GoalKind::Wait | GoalKind::Wander
+        )
+    {
+        return target.clone();
+    }
+    let moving: Vec<_> = candidates(&intent.goal)
+        .iter()
+        .filter_map(|id| positions.get(id).map(|p| (id.clone(), index(grid, p))))
+        .collect();
+    Id(crate::world::fingerprint(&serde_json::json!([
+        target,
+        candidates(&intent.goal),
+        intent.point.as_ref().map(|p| index(grid, p)),
+        intent.goal.kind,
+        intent.goal.distance,
+        moving
+    ])))
+}
+#[derive(Clone, Copy)]
+struct Entry {
+    cost: f64,
+    cell: usize,
+}
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        self.cell == other.cell && self.cost == other.cost
+    }
+}
+impl Eq for Entry {}
+impl PartialOrd for Entry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Entry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .cost
+            .total_cmp(&self.cost)
+            .then_with(|| other.cell.cmp(&self.cell))
+    }
+}
+
+pub fn candidates(goal: &GoalSpec) -> Vec<Id> {
+    goal.target_ids
+        .clone()
+        .unwrap_or_else(|| {
+            vec![
+                goal.target_zone
+                    .as_ref()
+                    .or(goal.target_entity_id.as_ref())
+                    .unwrap()
+                    .clone(),
+            ]
+        })
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+pub fn speed(agent: &AgentRuntime) -> f64 {
+    let goal = crate::goals::leaf(agent).unwrap();
+    (agent.components.navigation.preferred_speed.0 * (1.0 + goal.urgency.map_or(0.0, |u| u.0)))
+        .min(agent.components.navigation.maximum_speed.0)
+        * agent.components.mobility.speed_multiplier.0
+}
+pub fn center(grid: &GridData, i: usize) -> Point {
+    Point {
+        x: Number((i % grid.width) as f64 * grid.cell_size + grid.cell_size / 2.0),
+        y: Number((i / grid.width) as f64 * grid.cell_size + grid.cell_size / 2.0),
+    }
+}
+pub fn line_in_zone(grid: &GridData, from: &Point, to: &Point, zone: usize) -> bool {
+    let mut x = (from.x.0 / grid.cell_size).floor() as isize;
+    let mut y = (from.y.0 / grid.cell_size).floor() as isize;
+    let ex = (to.x.0 / grid.cell_size).floor() as isize;
+    let ey = (to.y.0 / grid.cell_size).floor() as isize;
+    let dx = to.x.0 - from.x.0;
+    let dy = to.y.0 - from.y.0;
+    let sx = dx.signum() as isize;
+    let sy = dy.signum() as isize;
+    let mut tx = if dx == 0.0 {
+        f64::INFINITY
+    } else {
+        ((x + isize::from(sx > 0)) as f64 * grid.cell_size - from.x.0) / dx
+    };
+    let mut ty = if dy == 0.0 {
+        f64::INFINITY
+    } else {
+        ((y + isize::from(sy > 0)) as f64 * grid.cell_size - from.y.0) / dy
+    };
+    let valid = |x: isize, y: isize| {
+        x >= 0
+            && y >= 0
+            && (x as usize) < grid.width
+            && (y as usize) < grid.height
+            && grid.zone_index[y as usize * grid.width + x as usize] as usize == zone
+            && (zone != 0 || grid.portal_index[y as usize * grid.width + x as usize] == 0)
+    };
+    for _ in 0..grid.width + grid.height + 2 {
+        if !valid(x, y) {
+            return false;
+        }
+        if x == ex && y == ey {
+            return true;
+        }
+        if tx < ty {
+            x += sx;
+            tx += grid.cell_size / dx.abs();
+        } else if ty < tx {
+            y += sy;
+            ty += grid.cell_size / dy.abs();
+        } else {
+            if !valid(x + sx, y) || !valid(x, y + sy) {
+                return false;
+            }
+            x += sx;
+            y += sy;
+            tx += grid.cell_size / dx.abs();
+            ty += grid.cell_size / dy.abs();
+        }
+    }
+    false
+}
+pub fn index(grid: &GridData, p: &Point) -> usize {
+    (p.y.0 / grid.cell_size).floor() as usize * grid.width
+        + (p.x.0 / grid.cell_size).floor() as usize
+}
+fn neighbour(grid: &GridData, i: usize, dir: usize) -> Option<usize> {
+    let (dx, dy) = DIRS[dir];
+    let x = (i % grid.width).checked_add_signed(dx)?;
+    let y = (i / grid.width).checked_add_signed(dy)?;
+    (x < grid.width && y < grid.height).then_some(y * grid.width + x)
+}
+fn target_distances(
+    grid: &GridData,
+    map: &Map,
+    positions: &BTreeMap<Id, Point>,
+    id: &Id,
+) -> Vec<f64> {
+    if let Some(p) = positions.get(id) {
+        return (0..grid.blocked.len())
+            .map(|i| distance(&center(grid, i), p))
+            .collect();
+    }
+    if let Some(e) = map.entities().iter().find(|e| &e.id == id) {
+        if e.shape.is_some() {
+            return (0..grid.blocked.len())
+                .map(|i| crate::shapes::distance(e, &center(grid, i)))
+                .collect();
+        }
+    }
+    let z = grid.zone_ids.iter().position(|v| v.as_ref() == Some(id));
+    let p = grid.portal_ids.iter().position(|v| v.as_ref() == Some(id));
+    let mut d = vec![f64::INFINITY; grid.blocked.len()];
+    let mut queue = VecDeque::new();
+    for i in 0..d.len() {
+        if z.is_some_and(|z| grid.zone_index[i] as usize == z)
+            || p.is_some_and(|p| grid.portal_index[i] as usize == p)
+        {
+            d[i] = 0.0;
+            queue.push_back(i);
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        let x = i % grid.width;
+        let y = i / grid.width;
+        for dy in -1isize..=1 {
+            for dx in -1isize..=1 {
+                if let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy)) {
+                    if nx < grid.width && ny < grid.height {
+                        let j = ny * grid.width + nx;
+                        if !d[j].is_finite() {
+                            d[j] = d[i] + grid.cell_size;
+                            queue.push_back(j);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    d
+}
+fn portals(grid: &GridData, map: &Map) -> Vec<Option<PortalInfo>> {
+    let zone_indices: BTreeMap<&Id, u32> = grid
+        .zone_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.as_ref().map(|id| (id, i as u32)))
+        .collect();
+    let all = map.all_portals().unwrap();
+    let by_id: BTreeMap<&Id, &Portal> = all.iter().map(|p| (&p.id, p)).collect();
+    grid.portal_ids
+        .iter()
+        .map(|id| {
+            id.as_ref().map(|id| {
+                let p = by_id[id];
+                (
+                    zone_indices[&p.connects[0]],
+                    zone_indices[&p.connects[1]],
+                    p.one_way.unwrap_or(false),
+                    p.traversal_time.map_or(0.0, |t| t.0),
+                    [p.x.0, p.y.0, p.width.0, p.height.0],
+                )
+            })
+        })
+        .collect()
+}
+fn allowed(
+    grid: &GridData,
+    p: &[Option<PortalInfo>],
+    from: usize,
+    to: usize,
+) -> Result<bool, Failure> {
+    let a = grid.portal_index[from];
+    let b = grid.portal_index[to];
+    if a == b {
+        return Ok(true);
+    }
+    if a != 0 && b != 0 {
+        return Err(unsupported(
+            "Distinct portal regions need an intervening zoned floor",
+        ));
+    }
+    let portal = p[if a != 0 { a } else { b } as usize].unwrap();
+    let zone = grid.zone_index[if a == 0 { from } else { to }];
+    if zone != portal.0 && zone != portal.1 {
+        return Err(unsupported(
+            "Portal entry/exit needs its declared adjacent zone membership",
+        ));
+    }
+    Ok(!portal.2
+        || if a == 0 {
+            zone == portal.0
+        } else {
+            zone == portal.1
+        })
+}
+
+// Continuous positions at wall tangencies can lie in a cell whose centre lacks clearance.
+fn entry(
+    grid: &GridData,
+    field: &Field,
+    p: &Point,
+    radius: f64,
+    bodies: &[Body],
+    portals: &[Option<PortalInfo>],
+    work: &mut usize,
+) -> Result<Option<usize>, Failure> {
+    let cell = index(grid, p);
+    let x = cell % grid.width;
+    let y = cell / grid.width;
+    let mut best: Option<(f64, usize)> = None;
+    for cy in y.saturating_sub(1)..=(y + 1).min(grid.height - 1) {
+        for cx in x.saturating_sub(1)..=(x + 1).min(grid.width - 1) {
+            let i = cy * grid.width + cx;
+            if field.distance[i].is_finite()
+                && allowed(grid, portals, cell, i).unwrap_or(false)
+                && geometry::clear(grid, bodies, p, &center(grid, i), radius, work)?
+            {
+                let cost = distance(p, &center(grid, i)) + field.distance[i];
+                if best.is_none_or(|b| cost < b.0) {
+                    best = Some((cost, i));
+                }
+            }
+        }
+    }
+    Ok(best.map(|b| b.1))
+}
+
+fn same_terrain(
+    grid: &GridData,
+    from: usize,
+    to: usize,
+    work: &mut usize,
+) -> Result<bool, Failure> {
+    let x = from % grid.width;
+    let y = from / grid.width;
+    let nx = to % grid.width;
+    let ny = to / grid.width;
+    let same = (y.min(ny)..=y.max(ny)).all(|cy| {
+        (x.min(nx)..=x.max(nx)).all(|cx| {
+            *work += 1;
+            let i = cy * grid.width + cx;
+            grid.traversal_cost[i] == grid.traversal_cost[from]
+                && grid.terrain_speed_multiplier[i] == grid.terrain_speed_multiplier[from]
+        })
+    });
+    if *work > 64_000_000 {
+        return Err((
+            "RESOURCE_LIMIT",
+            "Navigation lookahead work budget exceeded".into(),
+        ));
+    }
+    Ok(same)
+}
+
+impl Navigator {
+    fn reserve(&mut self, size: usize) -> Result<(), Failure> {
+        if self.cells.saturating_add(size) > 4_000_000 {
+            return Err((
+                "RESOURCE_LIMIT",
+                "Navigation cache cell budget exceeded".into(),
+            ));
+        }
+        self.cells += size;
+        Ok(())
+    }
+    fn clearance(
+        &mut self,
+        grid: &GridData,
+        map: &Map,
+        bodies: &[Body],
+        radius: f64,
+    ) -> Result<(), Failure> {
+        let key = radius.to_bits();
+        if self.clearance.contains_key(&key) {
+            return Ok(());
+        }
+        self.reserve(grid.blocked.len())?;
+        let mut c = Clearance {
+            walk: vec![false; grid.blocked.len()],
+            edges: vec![0; grid.blocked.len()],
+        };
+        for i in 0..c.walk.len() {
+            if grid.blocked[i] == 0 {
+                let p = center(grid, i);
+                c.walk[i] = geometry::clear(grid, bodies, &p, &p, radius, &mut self.work)?;
+            }
+        }
+        let portal_info = portals(grid, map);
+        for i in 0..c.walk.len() {
+            if !c.walk[i] {
+                continue;
+            }
+            for dir in 0..4 {
+                if let Some(j) = neighbour(grid, i, dir) {
+                    // A step the portal rules don't allow (e.g. straight from one door into a
+                    // touching door, as drawn floor plans can have) is simply not an edge,
+                    // as in the steering and permits checks; it must not reject the whole map.
+                    if c.walk[j]
+                        && allowed(grid, &portal_info, i, j).unwrap_or(false)
+                        && geometry::clear(
+                            grid,
+                            bodies,
+                            &center(grid, i),
+                            &center(grid, j),
+                            radius,
+                            &mut self.work,
+                        )?
+                    {
+                        c.edges[i] |= 1 << dir;
+                    }
+                }
+            }
+        }
+        self.clearance.insert(key, c);
+        Ok(())
+    }
+    fn field(
+        &mut self,
+        grid: &GridData,
+        radius: f64,
+        target: &Id,
+        version: u64,
+        intent: &Intent,
+        actual: &Id,
+        map: &Map,
+        positions: &BTreeMap<Id, Point>,
+    ) -> Result<(), Failure> {
+        let key = (radius.to_bits(), target.clone());
+        if self.fields.contains_key(&key) {
+            return Ok(());
+        }
+        self.reserve(grid.blocked.len())?;
+        let clear = &self.clearance[&key.0];
+        let hash = target.0.bytes().fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+        });
+        let id = Id(format!("flow-{version}-{:016x}-{hash:016x}", key.0));
+        if self.fields.values().any(|f| f.id == id) {
+            return Err(("RESOURCE_LIMIT", "Flow identifier collision".into()));
+        }
+        let mut f = Field {
+            id,
+            seeds: vec![],
+            distance: vec![f64::INFINITY; grid.blocked.len()],
+            next: vec![NONE; grid.blocked.len()],
+            hops: vec![0; grid.blocked.len()],
+            first_portal: vec![NONE; grid.blocked.len()],
+        };
+        let hazards: Vec<_> = if matches!(intent.goal.kind, GoalKind::Avoid) {
+            candidates(&intent.goal)
+                .iter()
+                .map(|id| target_distances(grid, map, positions, id))
+                .collect()
+        } else {
+            vec![]
+        };
+        self.work = self
+            .work
+            .saturating_add(grid.blocked.len().saturating_mul(1 + hazards.len()));
+        if self.work > 64_000_000 {
+            return Err((
+                "RESOURCE_LIMIT",
+                "Navigation target work budget exceeded".into(),
+            ));
+        }
+        let zone = grid
+            .zone_ids
+            .iter()
+            .position(|id| id.as_ref() == Some(actual));
+        let portal = grid
+            .portal_ids
+            .iter()
+            .position(|id| id.as_ref() == Some(actual));
+        let upstream = if matches!(intent.goal.kind, GoalKind::Queue) {
+            map.all_portals()?
+                .iter()
+                .find(|p| &p.id == actual && p.one_way == Some(true))
+                .and_then(|p| {
+                    grid.zone_ids
+                        .iter()
+                        .position(|z| z.as_ref() == Some(&p.connects[0]))
+                })
+        } else {
+            None
+        };
+        let mut visible = None;
+        if matches!(intent.goal.kind, GoalKind::Queue | GoalKind::Interact)
+            || (!matches!(intent.goal.kind, GoalKind::Avoid)
+                && zone.is_none()
+                && portal.is_none()
+                && intent.point.is_none()
+                && !positions.contains_key(actual))
+        {
+            let distances = target_distances(grid, map, positions, actual);
+            let mut cells = vec![false; grid.blocked.len()];
+            for i in 0..cells.len() {
+                if clear.walk[i] && distances[i] <= grid.cell_size * 1.5 + radius {
+                    cells[i] = crate::shapes::approachable(
+                        grid,
+                        map,
+                        actual,
+                        &center(grid, i),
+                        radius,
+                        &mut self.work,
+                    )?;
+                }
+            }
+            visible = Some(cells);
+        }
+        let seeds: Vec<usize> = (0..f.next.len())
+            .filter(|i| {
+                if !clear.walk[*i] {
+                    return false;
+                }
+                if !hazards.is_empty() {
+                    return hazards
+                        .iter()
+                        .all(|d| d[*i] + 1e-9 >= intent.goal.distance.unwrap().0);
+                }
+                if let Some(point) = &intent.point {
+                    let range = if matches!(intent.goal.kind, GoalKind::Follow) {
+                        (intent.goal.distance.unwrap().0
+                            - grid.cell_size * std::f64::consts::FRAC_1_SQRT_2)
+                            .max(0.0)
+                    } else {
+                        0.0
+                    };
+                    return geometry::distance(&center(grid, *i), point)
+                        <= range.max(grid.cell_size * 1e-7);
+                }
+                if matches!(intent.goal.kind, GoalKind::Queue) {
+                    return visible.as_ref().unwrap()[*i]
+                        && upstream.is_none_or(|z| grid.zone_index[*i] as usize == z)
+                        && !zone.is_some_and(|z| grid.zone_index[*i] as usize == z)
+                        && !portal.is_some_and(|z| grid.portal_index[*i] as usize == z);
+                }
+                if let Some(z) = zone {
+                    return grid.zone_index[*i] as usize == z;
+                }
+                if let Some(p) = portal {
+                    return grid.portal_index[*i] as usize == p;
+                }
+                visible.as_ref().is_some_and(|v| v[*i])
+            })
+            .collect();
+        for i in &seeds {
+            f.distance[*i] = 0.0;
+            f.next[*i] = *i as u32;
+            if grid.portal_index[*i] != 0 {
+                f.first_portal[*i] = *i as u32;
+            }
+        }
+        f.seeds = seeds.clone();
+        let uniform = grid
+            .traversal_cost
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| clear.walk[*i])
+            .map(|(_, v)| *v)
+            .try_fold(None, |last: Option<f32>, v| {
+                if last.is_none_or(|old| old == v) {
+                    Ok(Some(v))
+                } else {
+                    Err(())
+                }
+            })
+            .is_ok();
+        let edge_cost = |from: usize, to: usize| {
+            grid.cell_size
+                * (f64::from(grid.traversal_cost[from]) + f64::from(grid.traversal_cost[to]))
+                / 2.0
+        };
+        if uniform {
+            let mut queue: VecDeque<usize> = seeds.into();
+            while let Some(to) = queue.pop_front() {
+                for dir in 0..4 {
+                    if let Some(from) = neighbour(grid, to, dir) {
+                        let reverse = (dir + 2) % 4;
+                        if clear.edges[from] & (1 << reverse) == 0 || f.next[from] != NONE {
+                            continue;
+                        }
+                        let cost = edge_cost(from, to);
+                        let distance = f.distance[to] + cost;
+                        if cost <= 0.0 || !distance.is_finite() {
+                            return Err((
+                                "RESOURCE_LIMIT",
+                                "Navigation cost exceeds numeric range".into(),
+                            ));
+                        }
+                        f.distance[from] = distance;
+                        f.next[from] = to as u32;
+                        f.first_portal[from] = if grid.portal_index[from] != 0 {
+                            from as u32
+                        } else {
+                            f.first_portal[to]
+                        };
+                        f.hops[from] = f.hops[to] + 1;
+                        queue.push_back(from);
+                    }
+                }
+            }
+        } else {
+            let mut heap: BinaryHeap<Entry> = seeds
+                .into_iter()
+                .map(|cell| Entry { cost: 0.0, cell })
+                .collect();
+            while let Some(Entry { cost, cell: to }) = heap.pop() {
+                if cost != f.distance[to] {
+                    continue;
+                }
+                for dir in 0..4 {
+                    if let Some(from) = neighbour(grid, to, dir) {
+                        if clear.edges[from] & (1 << ((dir + 2) % 4)) == 0 {
+                            continue;
+                        }
+                        let edge = edge_cost(from, to);
+                        let candidate = cost + edge;
+                        if edge <= 0.0 || !candidate.is_finite() {
+                            return Err((
+                                "RESOURCE_LIMIT",
+                                "Navigation cost exceeds numeric range".into(),
+                            ));
+                        }
+                        if candidate < f.distance[from] {
+                            f.distance[from] = candidate;
+                            f.next[from] = to as u32;
+                            f.first_portal[from] = if grid.portal_index[from] != 0 {
+                                from as u32
+                            } else {
+                                f.first_portal[to]
+                            };
+                            f.hops[from] = f.hops[to] + 1;
+                            heap.push(Entry {
+                                cost: candidate,
+                                cell: from,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        self.fields.insert(key, f);
+        Ok(())
+    }
+    pub fn prepare(
+        &mut self,
+        grid: &GridData,
+        map: &Map,
+        agents: &mut [AgentRuntime],
+        version: u64,
+        dt: f64,
+        intents: Vec<Option<Intent>>,
+    ) -> Result<(), Failure> {
+        let positions: BTreeMap<Id, Point> = agents
+            .iter()
+            .filter(|a| a.departed_at.is_none())
+            .map(|a| (a.id.clone(), a.position.clone()))
+            .collect();
+        let mut live = BTreeSet::new();
+        for (a, intent) in agents.iter().zip(&intents) {
+            if let Some(intent) = intent {
+                if !intent.local {
+                    for id in field_targets(&intent.goal) {
+                        live.insert((
+                            a.components.physical.radius.0.to_bits(),
+                            cache_key(intent, &id, grid, &positions),
+                        ));
+                    }
+                }
+            }
+        }
+        self.fields.retain(|key, _| live.contains(key));
+        self.cells =
+            self.fields.len() * grid.blocked.len() + self.clearance.len() * grid.blocked.len();
+        self.work = 0;
+        self.intents = intents;
+        self.portal_info = portals(grid, map);
+        let bodies: Vec<Body> = agents
+            .iter()
+            .filter(|a| {
+                a.components.physical.blocks_movement
+                    && (a.components.mobility.speed_multiplier.0 == 0.0
+                        || !a.components.physical.movable)
+            })
+            .map(|a| Body {
+                x: a.position.x.0,
+                y: a.position.y.0,
+                radius: a.components.physical.radius.0,
+            })
+            .collect();
+        // Build shared body clearance at load, rather than on the first alarm-time route.
+        if let Some(first) = agents.first() {
+            let radius = first.components.physical.radius.0;
+            if agents
+                .iter()
+                .all(|a| a.components.physical.radius.0 == radius)
+            {
+                self.clearance(grid, map, &bodies, radius)?;
+            }
+        }
+        self.bodies = bodies.clone();
+        self.routes = vec![None; agents.len()];
+        self.visible = vec![None; agents.len()];
+        for (i, a) in agents.iter_mut().enumerate() {
+            let old_version = a.navigation.map_version.0 as u64;
+            a.navigation.map_version = Counter(version as f64);
+            if a.departed_at.is_some() {
+                continue;
+            }
+            let Some(goal) = a.current_goal.as_ref() else {
+                continue;
+            };
+            if goal.status == "completed" || goal.status == "failed" {
+                continue;
+            }
+            if a.components.mobility.speed_multiplier.0 == 0.0 {
+                a.state = "immobile".into();
+                a.current_goal.as_mut().unwrap().status = "suspended".into();
+                continue;
+            }
+            if !a.components.physical.movable {
+                a.state = "blocked".into();
+                a.state_reason = Some("body-not-movable".into());
+                continue;
+            }
+            let travel = speed(a) * dt;
+            if !travel.is_finite() || (travel / grid.cell_size).ceil() * 4.0 + 8.0 > 256.0 {
+                return Err((
+                    "RESOURCE_LIMIT",
+                    "Movement travel per tick exceeds the subdivision budget".into(),
+                ));
+            }
+            let Some(intent) = self.intents[i].clone() else {
+                continue;
+            };
+            a.current_goal
+                .as_mut()
+                .unwrap()
+                .execution
+                .as_mut()
+                .unwrap()
+                .phase = "travel".into();
+            let radius = a.components.physical.radius.0;
+            if intent.local {
+                a.navigation.target_point = intent.point.clone();
+                a.navigation.flow_field_id = None;
+                a.state = "moving".into();
+                self.routes[i] = Some(Route {
+                    key: None,
+                    direct: intent.point.clone(),
+                    stop: intent.goal.stop_distance.map_or(0.0, |d| d.0),
+                    blocked: false,
+                });
+                continue;
+            }
+            self.clearance(grid, map, &bodies, radius)?;
+            let ids = field_targets(&intent.goal);
+            let retained = a
+                .navigation
+                .target_entity_id
+                .as_ref()
+                .filter(|id| ids.contains(id))
+                .cloned();
+            let chosen = if let Some(id) = retained {
+                self.field(
+                    grid,
+                    radius,
+                    &cache_key(&intent, &id, grid, &positions),
+                    version,
+                    &intent,
+                    &id,
+                    map,
+                    &positions,
+                )?;
+                id
+            } else {
+                for id in &ids {
+                    self.field(
+                        grid,
+                        radius,
+                        &cache_key(&intent, id, grid, &positions),
+                        version,
+                        &intent,
+                        id,
+                        map,
+                        &positions,
+                    )?;
+                }
+                let selection = intent.goal.selection.unwrap_or_default();
+                match selection {
+                    Selection::Random if ids.len() > 1 => {
+                        ids[(u64::from(random::next(&mut a.random_state)) * ids.len() as u64
+                            / 4_294_967_296) as usize]
+                            .clone()
+                    }
+                    Selection::Nearest => {
+                        let mut best = (f64::INFINITY, ids[0].clone());
+                        for id in &ids {
+                            let field = &self.fields
+                                [&(radius.to_bits(), cache_key(&intent, id, grid, &positions))];
+                            self.work = self.work.saturating_add(field.seeds.len());
+                            if self.work > 64_000_000 {
+                                return Err((
+                                    "RESOURCE_LIMIT",
+                                    "Destination selection exceeds navigation work budget".into(),
+                                ));
+                            }
+                            let d = field
+                                .seeds
+                                .iter()
+                                .map(|i| distance(&a.position, &center(grid, *i)))
+                                .fold(f64::INFINITY, f64::min);
+                            if d < best.0 {
+                                best = (d, id.clone());
+                            }
+                        }
+                        best.1
+                    }
+                    _ => ids
+                        .iter()
+                        .min_by(|x, y| {
+                            self.fields
+                                [&(radius.to_bits(), cache_key(&intent, x, grid, &positions))]
+                                .distance[index(grid, &a.position)]
+                            .total_cmp(
+                                &self.fields
+                                    [&(radius.to_bits(), cache_key(&intent, y, grid, &positions))]
+                                    .distance[index(grid, &a.position)],
+                            )
+                            .then_with(|| x.cmp(y))
+                        })
+                        .unwrap()
+                        .clone(),
+                }
+            };
+            let key = (
+                radius.to_bits(),
+                cache_key(&intent, &chosen, grid, &positions),
+            );
+            let field = &self.fields[&key];
+            let cell = index(grid, &a.position);
+            let mut blocked = !field.distance[cell].is_finite()
+                && entry(
+                    grid,
+                    field,
+                    &a.position,
+                    radius,
+                    &bodies,
+                    &self.portal_info,
+                    &mut self.work,
+                )?
+                .is_none();
+            if !blocked && field.distance[cell].is_finite() {
+                let saved = a.navigation.target_point.as_ref();
+                let keep = if let Some(p) = saved {
+                    let to = index(grid, p);
+                    let on_route = (old_version == version
+                        && a.navigation.flow_field_id.as_ref() == Some(&field.id))
+                        || to == cell
+                        || field.next[cell] == to as u32;
+                    on_route
+                        && self.clearance[&radius.to_bits()].walk[to]
+                        && geometry::clear(grid, &bodies, &a.position, p, radius, &mut self.work)?
+                        && geometry::clear(
+                            grid,
+                            &bodies,
+                            p,
+                            &center(grid, to),
+                            radius,
+                            &mut self.work,
+                        )?
+                } else {
+                    false
+                };
+                if !keep {
+                    a.navigation.target_point = None;
+                    a.timers.wait_remaining = Nonnegative(0.0);
+                    let goal_center = center(grid, cell);
+                    let epsilon = grid.cell_size * 1e-9;
+                    if distance(&a.position, &goal_center) > epsilon {
+                        let options = [
+                            goal_center.clone(),
+                            Point {
+                                x: goal_center.x,
+                                y: a.position.y,
+                            },
+                            Point {
+                                x: a.position.x,
+                                y: goal_center.y,
+                            },
+                        ];
+                        let mut approach = None;
+                        for p in options {
+                            if distance(&a.position, &p) > epsilon
+                                && geometry::clear(
+                                    grid,
+                                    &bodies,
+                                    &a.position,
+                                    &p,
+                                    radius,
+                                    &mut self.work,
+                                )?
+                                && geometry::clear(
+                                    grid,
+                                    &bodies,
+                                    &p,
+                                    &goal_center,
+                                    radius,
+                                    &mut self.work,
+                                )?
+                            {
+                                approach = Some(p);
+                                break;
+                            }
+                        }
+                        blocked = approach.is_none();
+                        a.navigation.target_point = approach;
+                    }
+                }
+            }
+            a.navigation.target_entity_id = Some(chosen);
+            a.navigation.flow_field_id = Some(field.id.clone());
+            a.current_goal.as_mut().unwrap().status = "active".into();
+            a.state = if a.timers.reaction_remaining.0 > 0.0 {
+                "reacting"
+            } else if blocked {
+                "blocked"
+            } else {
+                "moving"
+            }
+            .into();
+            a.state_reason = blocked.then(|| "unreachable-at-current-topology".into());
+            if blocked {
+                a.velocity = Point {
+                    x: Number(0.0),
+                    y: Number(0.0),
+                };
+            }
+            self.routes[i] = Some(Route {
+                key: Some(key),
+                direct: None,
+                stop: intent.goal.stop_distance.map_or(0.0, |d| d.0),
+                blocked,
+            });
+        }
+        self.prepared = true;
+        Ok(())
+    }
+    pub fn step(
+        &mut self,
+        grid: &GridData,
+        agents: &mut [AgentRuntime],
+        dt: f64,
+        tick: u64,
+        metrics: &mut crate::metrics::Metrics,
+        contact: Option<(&crate::contact::Config, &mut crate::contact::State)>,
+    ) -> Result<(), Failure> {
+        let stride = grid.width + 1;
+        self.crowd_prefix.resize(stride * (grid.height + 1), 0);
+        self.crowd_prefix.fill(0);
+        self.crowd_count_prefix
+            .resize(stride * (grid.height + 1), 0);
+        self.crowd_count_prefix.fill(0);
+        self.crowd_speed_prefix
+            .resize(stride * (grid.height + 1), 0.0);
+        self.crowd_speed_prefix.fill(0.0);
+        self.crowd_subjects
+            .resize(agents.len(), (usize::MAX, 0, 0.0));
+        self.crowd_subjects.fill((usize::MAX, 0, 0.0));
+        self.crowd_min_speed = f64::INFINITY;
+        for (i, a) in agents
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.departed_at.is_none() && a.components.physical.blocks_movement)
+        {
+            let cell = index(grid, &a.position);
+            let weight = crowd_weight(a);
+            let walking_speed = geometry::norm(a.velocity.x.0, a.velocity.y.0);
+            self.crowd_min_speed = self.crowd_min_speed.min(walking_speed);
+            self.crowd_subjects[i] = (cell, weight, walking_speed);
+            let entry = (cell / grid.width + 1) * stride + cell % grid.width + 1;
+            self.crowd_count_prefix[entry] += 1;
+            self.crowd_speed_prefix[entry] += walking_speed;
+            self.crowd_prefix[(cell / grid.width + 1) * stride + cell % grid.width + 1] += weight;
+        }
+        for y in 1..=grid.height {
+            let mut row = 0;
+            let mut count_row = 0;
+            let mut speed_row = 0.0;
+            for x in 1..=grid.width {
+                count_row += self.crowd_count_prefix[y * stride + x];
+                speed_row += self.crowd_speed_prefix[y * stride + x];
+                self.crowd_count_prefix[y * stride + x] =
+                    count_row + self.crowd_count_prefix[(y - 1) * stride + x];
+                self.crowd_speed_prefix[y * stride + x] =
+                    speed_row + self.crowd_speed_prefix[(y - 1) * stride + x];
+                row += self.crowd_prefix[y * stride + x];
+                self.crowd_prefix[y * stride + x] = row + self.crowd_prefix[(y - 1) * stride + x];
+            }
+        }
+        crate::movement::advance(self, grid, agents, dt, tick, metrics, contact)
+    }
+    pub fn progress_cost(&self, grid: &GridData, a: &AgentRuntime, i: usize) -> f64 {
+        let Some(route) = &self.routes[i] else {
+            return f64::INFINITY;
+        };
+        if let Some(point) = &route.direct {
+            return distance(&a.position, point);
+        }
+        let field = &self.fields[route.key.as_ref().unwrap()];
+        if let Some(point) = &a.navigation.target_point {
+            let to = index(grid, point);
+            if field.distance[to].is_finite() {
+                return distance(&a.position, point) + field.distance[to];
+            }
+        }
+        field.distance[index(grid, &a.position)]
+    }
+    pub fn ready(&self, a: &mut AgentRuntime, i: usize, dt: f64) -> bool {
+        if a.components.mobility.speed_multiplier.0 == 0.0 {
+            a.state = "immobile".into();
+            a.velocity = Point {
+                x: Number(0.0),
+                y: Number(0.0),
+            };
+            return false;
+        }
+        let Some(route) = &self.routes[i] else {
+            return false;
+        };
+        if a.current_goal
+            .as_ref()
+            .is_none_or(|g| g.status == "completed" || g.status == "failed")
+        {
+            return false;
+        }
+        let state = if a.timers.reaction_remaining.0 > 0.0 {
+            a.timers.reaction_remaining.0 = countdown(a.timers.reaction_remaining.0, dt);
+            Some("reacting")
+        } else if route.blocked {
+            Some("blocked")
+        } else if a.timers.wait_remaining.0 > 0.0 {
+            a.timers.wait_remaining.0 = countdown(a.timers.wait_remaining.0, dt);
+            Some("waiting")
+        } else {
+            None
+        };
+        if let Some(state) = state {
+            a.state = state.into();
+            a.velocity = Point {
+                x: Number(0.0),
+                y: Number(0.0),
+            };
+            false
+        } else {
+            a.state = "moving".into();
+            a.state_reason = None;
+            true
+        }
+    }
+    fn crowd_in(
+        &self,
+        grid: &GridData,
+        bounds: [f64; 4],
+        subject: usize,
+        desired_speed: Option<f64>,
+    ) -> f64 {
+        if self.crowd_prefix.is_empty() {
+            return 0.0;
+        }
+        let [left, top, right, bottom] = bounds;
+        let x0 = (left / grid.cell_size)
+            .floor()
+            .clamp(0.0, grid.width as f64) as usize;
+        let y0 = (top / grid.cell_size)
+            .floor()
+            .clamp(0.0, grid.height as f64) as usize;
+        let x1 = (right / grid.cell_size)
+            .ceil()
+            .clamp(0.0, grid.width as f64) as usize;
+        let y1 = (bottom / grid.cell_size)
+            .ceil()
+            .clamp(0.0, grid.height as f64) as usize;
+        let stride = grid.width + 1;
+        let (cell, weight, walking_speed) =
+            self.crowd_subjects
+                .get(subject)
+                .copied()
+                .unwrap_or((usize::MAX, 0, 0.0));
+        let inside =
+            (x0..x1).contains(&(cell % grid.width)) && (y0..y1).contains(&(cell / grid.width));
+        let prefix = if desired_speed.is_some() {
+            &self.crowd_count_prefix
+        } else {
+            &self.crowd_prefix
+        };
+        let count = prefix[y1 * stride + x1] + prefix[y0 * stride + x0]
+            - prefix[y0 * stride + x1]
+            - prefix[y1 * stride + x0];
+        if let Some(pace) = desired_speed {
+            if pace == 0.0 {
+                return 0.0;
+            }
+            let speed = &self.crowd_speed_prefix;
+            let total_speed = speed[y1 * stride + x1] + speed[y0 * stride + x0]
+                - speed[y0 * stride + x1]
+                - speed[y1 * stride + x0];
+            let count = count.saturating_sub(u32::from(inside));
+            let deficit =
+                f64::from(count) - (total_speed - if inside { walking_speed } else { 0.0 }) / pace;
+            return if deficit > 1e-7 { deficit * 4.0 } else { 0.0 };
+        }
+        f64::from(count.saturating_sub(if inside { weight } else { 0 }))
+    }
+
+    fn crowd_along(
+        &self,
+        grid: &GridData,
+        from: &Point,
+        to: &Point,
+        radius: f64,
+        subject: usize,
+        desired_speed: Option<f64>,
+    ) -> f64 {
+        let samples = ((distance(from, to) / (2.0 * radius)).ceil() as usize).clamp(1, 12);
+        (1..=samples)
+            .map(|sample| {
+                let t = sample as f64 / samples as f64;
+                let x = from.x.0 + (to.x.0 - from.x.0) * t;
+                let y = from.y.0 + (to.y.0 - from.y.0) * t;
+                self.crowd_in(
+                    grid,
+                    [
+                        x - 2.0 * radius,
+                        y - 2.0 * radius,
+                        x + 2.0 * radius,
+                        y + 2.0 * radius,
+                    ],
+                    subject,
+                    desired_speed,
+                )
+            })
+            .sum()
+    }
+    pub fn traffic_waypoint(
+        &self,
+        grid: &GridData,
+        a: &AgentRuntime,
+        i: usize,
+        target: &Point,
+        remaining: f64,
+        work: &mut usize,
+    ) -> Result<Point, Failure> {
+        let cell = index(grid, &a.position);
+        let zone = grid.zone_index[cell] as usize;
+        if grid.portal_index[cell] != 0
+            || a.queue_ref.is_some()
+            || a.interaction_ref.is_some()
+            || self.crowd_min_speed + 1e-7 >= speed(a)
+        {
+            return Ok(target.clone());
+        }
+        let d = distance(&a.position, target);
+        let radius = a.components.physical.radius.0;
+        let forward = (speed(a) * 2.0).max(6.0 * radius).min(remaining);
+        if d <= radius || forward <= grid.cell_size * 1e-7 {
+            return Ok(target.clone());
+        }
+        let dx = (target.x.0 - a.position.x.0) / d;
+        let dy = (target.y.0 - a.position.y.0) / d;
+        let route = self.routes[i].as_ref().unwrap();
+        let field = route.key.as_ref().map(|key| &self.fields[key]);
+        let to_goal = |p: &Point| {
+            field.map_or_else(
+                || distance(p, route.direct.as_ref().unwrap()),
+                |f| f.distance[index(grid, p)],
+            )
+        };
+        let original_cost = to_goal(&a.position);
+        let admissible = |p: &Point| {
+            p.x.0 >= radius
+                && p.y.0 >= radius
+                && p.x.0 + radius <= grid.width as f64 * grid.cell_size
+                && p.y.0 + radius <= grid.height as f64 * grid.cell_size
+                && line_in_zone(grid, &a.position, p, zone)
+                && to_goal(p) < original_cost
+        };
+        let straight = Point {
+            x: Number(a.position.x.0 + dx * forward),
+            y: Number(a.position.y.0 + dy * forward),
+        };
+        if self.crowd_along(grid, &a.position, &straight, radius, i, Some(speed(a))) == 0.0
+            && self.crowd_along(grid, &a.position, target, radius, i, Some(speed(a))) == 0.0
+        {
+            return Ok(target.clone());
+        }
+        let baseline = if admissible(&straight)
+            && geometry::clear(grid, &self.bodies, &a.position, &straight, radius, work)?
+        {
+            &straight
+        } else {
+            target
+        };
+        let crowd = self.crowd_along(grid, &a.position, baseline, radius, i, Some(speed(a)));
+        if crowd == 0.0 {
+            return Ok(target.clone());
+        }
+        let mut best = target.clone();
+        let mut cost = distance(&a.position, baseline) + to_goal(baseline) + crowd * 2.0 * radius;
+        for side in [-1.0, 1.0, -2.0, 2.0, -4.0, 4.0, -6.0, 6.0] {
+            let lateral = side * 2.0 * radius;
+            let point = Point {
+                x: Number(a.position.x.0 + dx * forward - dy * lateral),
+                y: Number(a.position.y.0 + dy * forward + dx * lateral),
+            };
+            if !admissible(&point) {
+                continue;
+            }
+            let candidate = distance(&a.position, &point)
+                + to_goal(&point)
+                + self.crowd_along(grid, &a.position, &point, radius, i, Some(speed(a)))
+                    * 2.0
+                    * radius;
+            if candidate < cost - grid.cell_size * 1e-7
+                && geometry::clear(grid, &self.bodies, &a.position, &point, radius, work)?
+            {
+                best = point;
+                cost = candidate;
+            }
+        }
+        Ok(best)
+    }
+
+    fn opening_waypoint(
+        &self,
+        grid: &GridData,
+        a: &AgentRuntime,
+        i: usize,
+        work: &mut usize,
+    ) -> Result<Option<(Point, f64)>, Failure> {
+        if grid.portal_ids.len() <= 1 {
+            return Ok(None);
+        }
+        let route = self.routes[i].as_ref().unwrap();
+        if route.stop != 0.0
+            || self.intents[i]
+                .as_ref()
+                .is_none_or(|intent| !matches!(intent.goal.kind, GoalKind::Reach))
+        {
+            return Ok(None);
+        }
+        let field = &self.fields[route.key.as_ref().unwrap()];
+        let radius = a.components.physical.radius.0;
+        let mut cursor = index(grid, &a.position);
+        if !field.distance[cursor].is_finite() {
+            let Some(anchor) = entry(
+                grid,
+                field,
+                &a.position,
+                radius,
+                &self.bodies,
+                &self.portal_info,
+                work,
+            )?
+            else {
+                return Ok(None);
+            };
+            cursor = anchor;
+        }
+        let first = field.first_portal[cursor];
+        if first == NONE {
+            return Ok(None);
+        }
+        cursor = first as usize;
+        let portal = grid.portal_index[cursor];
+        if portal == 0 {
+            return Ok(None);
+        }
+        let terminal =
+            a.navigation.target_entity_id.as_ref() == grid.portal_ids[portal as usize].as_ref();
+        let (_, _, _, delay, [x, y, width, height]) = self.portal_info[portal as usize].unwrap();
+        if delay > 0.0 && grid.portal_index[index(grid, &a.position)] != portal {
+            return Ok(None);
+        }
+        let mut exit = None;
+        for _ in 0..32 {
+            if terminal {
+                exit = Some((cursor, cursor));
+                break;
+            }
+            let next = field.next[cursor];
+            if next == NONE || next == cursor as u32 {
+                return Ok(None);
+            }
+            if grid.portal_index[next as usize] != portal {
+                exit = Some((cursor, next as usize));
+                break;
+            }
+            cursor = next as usize;
+        }
+        let Some((last, next)) = exit else {
+            return Ok(None);
+        };
+        let horizontal = if terminal {
+            let saved = a
+                .navigation
+                .target_point
+                .as_ref()
+                .filter(|p| grid.portal_index[index(grid, p)] == portal);
+            if let Some(p) = saved.filter(|p| {
+                (p.x.0 - x - width / 2.0).abs() > 1e-9 || (p.y.0 - y - height / 2.0).abs() > 1e-9
+            }) {
+                (p.x.0 - x - width / 2.0).abs() <= 1e-9
+            } else {
+                ((a.position.x.0 - x - width / 2.0) / width).abs()
+                    >= ((a.position.y.0 - y - height / 2.0) / height).abs()
+            }
+        } else {
+            last / grid.width == next / grid.width
+        };
+        let aperture = if horizontal { height } else { width };
+        // Narrow doors keep the existing approach; their width cannot support a broad front.
+        let current = index(grid, &a.position);
+        if aperture <= 4.0 * radius
+            && field.hops[current].saturating_sub(field.hops[first as usize]) > 8
+        {
+            return Ok(None);
+        }
+        let positive = if terminal {
+            if horizontal {
+                a.position.x.0 < x + width / 2.0
+            } else {
+                a.position.y.0 < y + height / 2.0
+            }
+        } else {
+            next > last
+        };
+        let sign = if positive { 1.0 } else { -1.0 };
+        let discharge = radius
+            + if field.distance[next] > 0.0 {
+                grid.cell_size
+            } else {
+                0.0
+            };
+        let (align, through) = if horizontal {
+            if height < 2.0 * radius {
+                return Ok(None);
+            }
+            let lo = y + radius;
+            let hi = y + height - radius;
+            if lo > hi {
+                return Ok(None);
+            }
+            let near = if positive { x } else { x + width };
+            let lateral = a.position.y.0.clamp(lo, hi);
+            let far = if positive { x + width } else { x };
+            (
+                Point {
+                    x: Number(if positive {
+                        a.position.x.0.max(near - radius)
+                    } else {
+                        a.position.x.0.min(near + radius)
+                    }),
+                    y: Number(lateral),
+                },
+                Point {
+                    x: Number(if terminal {
+                        x + width / 2.0
+                    } else {
+                        far + sign * discharge
+                    }),
+                    y: Number(lateral),
+                },
+            )
+        } else {
+            if width < 2.0 * radius {
+                return Ok(None);
+            }
+            let lo = x + radius;
+            let hi = x + width - radius;
+            if lo > hi {
+                return Ok(None);
+            }
+            let near = if positive { y } else { y + height };
+            let lateral = a.position.x.0.clamp(lo, hi);
+            let far = if positive { y + height } else { y };
+            (
+                Point {
+                    x: Number(lateral),
+                    y: Number(if positive {
+                        a.position.y.0.max(near - radius)
+                    } else {
+                        a.position.y.0.min(near + radius)
+                    }),
+                },
+                Point {
+                    x: Number(lateral),
+                    y: Number(if terminal {
+                        y + height / 2.0
+                    } else {
+                        far + sign * discharge
+                    }),
+                },
+            )
+        };
+        let mut candidates = Vec::with_capacity(17);
+        candidates.push((0.0, through.clone()));
+
+        let (lo, hi, lateral, near, longitudinal) = if horizontal {
+            (
+                y + radius,
+                y + height - radius,
+                a.position.y.0,
+                if positive { x } else { x + width },
+                a.position.x.0,
+            )
+        } else {
+            (
+                x + radius,
+                x + width - radius,
+                a.position.x.0,
+                if positive { y } else { y + height },
+                a.position.y.0,
+            )
+        };
+        if aperture >= 6.0 * radius
+            && (sign * (near - longitudinal) > 2.0 * radius || lateral < lo || lateral > hi)
+        {
+            let lanes = (((hi - lo) / (2.0 * radius)).ceil() as usize).clamp(1, 6);
+            for lane in 0..=lanes {
+                let lateral = lo + (hi - lo) * lane as f64 / lanes as f64;
+                let mut point = through.clone();
+                if horizontal {
+                    point.y = Number(lateral);
+                } else {
+                    point.x = Number(lateral);
+                }
+                candidates.push((0.0, point));
+            }
+            let lookahead = (speed(a) * 2.0).max(6.0 * radius);
+            let local = sign * (near - longitudinal) > lookahead + radius;
+            let destination = through.clone();
+            if local {
+                for (_, point) in &mut candidates {
+                    if horizontal {
+                        point.x = Number(longitudinal + sign * lookahead);
+                        point.y = Number(point.y.0.clamp(lateral - lookahead, lateral + lookahead));
+                    } else {
+                        point.y = Number(longitudinal + sign * lookahead);
+                        point.x = Number(point.x.0.clamp(lateral - lookahead, lateral + lookahead));
+                    }
+                }
+            }
+            let score = |p: &Point| {
+                let lateral = if horizontal { p.y.0 } else { p.x.0 };
+                let back = near - sign * 6.0 * radius;
+                let front = near + sign * 4.0 * radius;
+                let bounds = if horizontal {
+                    [
+                        back.min(front),
+                        lateral - 4.0 * radius,
+                        back.max(front),
+                        lateral + 4.0 * radius,
+                    ]
+                } else {
+                    [
+                        lateral - 4.0 * radius,
+                        back.min(front),
+                        lateral + 4.0 * radius,
+                        back.max(front),
+                    ]
+                };
+                let congestion = self.crowd_in(grid, bounds, i, None);
+                let switch = a.navigation.target_point.as_ref().map_or(0.0, |saved| {
+                    let old = if horizontal { saved.y.0 } else { saved.x.0 };
+                    (lateral - old).abs() * 0.2
+                });
+                let length = distance(&a.position, p);
+                let approach = self.crowd_along(grid, &a.position, p, radius, i, None);
+                length
+                    + if local {
+                        distance(p, &destination)
+                    } else {
+                        0.0
+                    }
+                    + (congestion + approach) * 2.0 * radius
+                    + switch
+            };
+            for (cost, point) in &mut candidates {
+                *cost = score(point);
+            }
+            candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
+        candidates.push((0.0, align));
+        for (_, mut point) in candidates {
+            // Approach a corner from open space instead of joining a queue tangent to its wall.
+            if aperture >= 6.0 * radius
+                && (lateral < lo || lateral > hi)
+                && sign * (near - longitudinal) > radius
+                && !geometry::line_clear(grid, &self.bodies, &a.position, &point, radius, work)?
+            {
+                let across = if horizontal { point.y.0 } else { point.x.0 };
+                let approach = near - sign * (across - lateral).abs().max(2.0 * radius);
+                if horizontal {
+                    point.x = Number(approach);
+                } else {
+                    point.y = Number(approach);
+                }
+            }
+            let distance = distance(&a.position, &point);
+            if distance > grid.cell_size * 1e-7
+                && point.x.0 >= radius
+                && point.y.0 >= radius
+                && point.x.0 + radius <= grid.width as f64 * grid.cell_size
+                && point.y.0 + radius <= grid.height as f64 * grid.cell_size
+                && {
+                    let steps = (distance / (grid.cell_size * 0.5)).ceil() as usize;
+                    let start = index(grid, &a.position);
+                    let mut allowed = true;
+                    for step in 1..=steps {
+                        let t = step as f64 / steps as f64;
+                        let cell = index(
+                            grid,
+                            &Point {
+                                x: Number(a.position.x.0 + (point.x.0 - a.position.x.0) * t),
+                                y: Number(a.position.y.0 + (point.y.0 - a.position.y.0) * t),
+                            },
+                        );
+                        if (grid.portal_index[cell] != 0 && grid.portal_index[cell] != portal)
+                            || (grid.zone_index[cell] != grid.zone_index[start]
+                                && grid.portal_index[cell] != portal
+                                && grid.zone_index[cell] != grid.zone_index[next])
+                            || grid.traversal_cost[cell] != grid.traversal_cost[start]
+                            || grid.terrain_speed_multiplier[cell]
+                                != grid.terrain_speed_multiplier[start]
+                        {
+                            allowed = false;
+                            break;
+                        }
+                    }
+                    allowed
+                }
+                && geometry::line_clear(grid, &self.bodies, &a.position, &point, radius, work)?
+            {
+                let to = index(grid, &point);
+                if field.distance[to].is_finite() {
+                    return Ok(Some((
+                        point,
+                        distance
+                            + if terminal {
+                                0.0
+                            } else {
+                                f64::from(field.hops[to]) * grid.cell_size
+                            },
+                    )));
+                }
+            }
+        }
+        Ok(None)
+    }
+    pub fn waypoint(
+        &mut self,
+        grid: &GridData,
+        a: &mut AgentRuntime,
+        i: usize,
+        work: &mut usize,
+    ) -> Result<Option<(Point, f64)>, Failure> {
+        let Some(route) = self.routes[i].as_ref() else {
+            return Ok(None);
+        };
+        // Finish entering the region instead of turning back toward a boundary cell centre.
+        if route.direct.is_none()
+            && self.intents[i]
+                .as_ref()
+                .is_some_and(|intent| matches!(intent.goal.kind, GoalKind::Reach))
+            && a.navigation.target_entity_id.is_some()
+            && a.navigation.target_entity_id == a.zone_id
+        {
+            let zone = grid.zone_index[index(grid, &a.position)];
+            let radius = a.components.physical.radius.0;
+            let contained = |point: &Point| {
+                let cells = grid.footprint(point.x.0, point.y.0, radius);
+                !cells.is_empty() && cells.iter().all(|&cell| grid.zone_index[cell] == zone)
+            };
+            if contained(&a.position) {
+                complete(a);
+                return Ok(None);
+            }
+            let spacing = radius.max(grid.cell_size) * 0.5;
+            for scale in [1.0, 2.0] {
+                for (x, y) in [
+                    (0.0, 1.0),
+                    (1.0, 0.0),
+                    (0.0, -1.0),
+                    (-1.0, 0.0),
+                    (1.0, 1.0),
+                    (1.0, -1.0),
+                    (-1.0, 1.0),
+                    (-1.0, -1.0),
+                ] {
+                    let point = Point {
+                        x: Number(a.position.x.0 + x * spacing * scale),
+                        y: Number(a.position.y.0 + y * spacing * scale),
+                    };
+                    if point.x.0 >= radius
+                        && point.y.0 >= radius
+                        && point.x.0 + radius <= grid.width as f64 * grid.cell_size
+                        && point.y.0 + radius <= grid.height as f64 * grid.cell_size
+                        && contained(&point)
+                        && self.permits_agent(grid, &a.position, &point, i)
+                        && geometry::clear(grid, &self.bodies, &a.position, &point, radius, work)?
+                    {
+                        let remaining = distance(&a.position, &point);
+                        a.navigation.target_point = Some(point.clone());
+                        return Ok(Some((point, remaining)));
+                    }
+                }
+            }
+        }
+        if let Some(point) = &route.direct {
+            let remaining = distance(&a.position, point) - route.stop;
+            if remaining <= grid.cell_size * 1e-7 {
+                complete(a);
+                return Ok(None);
+            }
+            return Ok(Some((point.clone(), remaining)));
+        }
+        let epsilon = grid.cell_size * 1e-7;
+        let cell = index(grid, &a.position);
+        if a.navigation
+            .target_entity_id
+            .as_ref()
+            .is_some_and(|id| grid.portal_ids.iter().flatten().any(|p| p == id))
+            && a.navigation.target_point.as_ref().is_some_and(|p| {
+                distance(&a.position, p) <= epsilon && grid.portal_index[index(grid, p)] != 0
+            })
+        {
+            complete(a);
+            return Ok(None);
+        }
+        if let Some((point, remaining)) = self.opening_waypoint(grid, a, i, work)? {
+            a.navigation.target_point = Some(point.clone());
+            return Ok(Some((point, remaining)));
+        }
+        let route = self.routes[i].as_ref().unwrap();
+        let field = &self.fields[route.key.as_ref().unwrap()];
+        if !field.distance[cell].is_finite() {
+            if let Some(i) = entry(
+                grid,
+                field,
+                &a.position,
+                a.components.physical.radius.0,
+                &self.bodies,
+                &self.portal_info,
+                work,
+            )? {
+                let target = center(grid, i);
+                let remaining =
+                    distance(&a.position, &target) + f64::from(field.hops[i]) * grid.cell_size;
+                a.navigation.target_point = Some(target.clone());
+                return Ok(Some((target, remaining)));
+            }
+            return Ok(None);
+        }
+        // Blend all downhill directions; a shared field should not funnel everyone onto cell centres.
+        if route.stop == 0.0 && field.hops[cell] > 8 && field.distance[cell].is_finite() {
+            let mut dx = 0.0;
+            let mut dy = 0.0;
+            for (dir, &(x, y)) in DIRS.iter().enumerate() {
+                if self.clearance[&a.components.physical.radius.0.to_bits()].edges[cell]
+                    & (1 << dir)
+                    == 0
+                {
+                    continue;
+                }
+                if let Some(next) = neighbour(grid, cell, dir) {
+                    let drop = (field.distance[cell] - field.distance[next]).max(0.0);
+                    dx += x as f64 * drop;
+                    dy += y as f64 * drop;
+                }
+            }
+            let length = geometry::norm(dx, dy);
+            if length > 0.0 && length.is_finite() {
+                let travel =
+                    (f64::from(field.hops[cell]) * grid.cell_size).min(grid.cell_size * 2.0);
+                let point = Point {
+                    x: Number(a.position.x.0 + dx / length * travel),
+                    y: Number(a.position.y.0 + dy / length * travel),
+                };
+                let width = grid.width as f64 * grid.cell_size;
+                let height = grid.height as f64 * grid.cell_size;
+                if point.x.0 >= 0.0 && point.y.0 >= 0.0 && point.x.0 < width && point.y.0 < height {
+                    let to = index(grid, &point);
+                    let delayed = (cell / grid.width).min(to / grid.width)
+                        ..=(cell / grid.width).max(to / grid.width);
+                    let no_delay = delayed.into_iter().all(|y| {
+                        ((cell % grid.width).min(to % grid.width)
+                            ..=(cell % grid.width).max(to % grid.width))
+                            .all(|x| {
+                                let p = grid.portal_index[y * grid.width + x];
+                                p == 0 || self.portal_info[p as usize].unwrap().3 == 0.0
+                            })
+                    });
+                    if no_delay
+                        && field.distance[to] < field.distance[cell]
+                        && same_terrain(grid, cell, to, work)?
+                        && geometry::clear(
+                            grid,
+                            &self.bodies,
+                            &a.position,
+                            &point,
+                            a.components.physical.radius.0,
+                            work,
+                        )?
+                    {
+                        let remaining = distance(&a.position, &point)
+                            + f64::from(field.hops[to]) * grid.cell_size
+                            - route.stop;
+                        if remaining <= epsilon {
+                            complete(a);
+                            return Ok(None);
+                        }
+                        a.navigation.target_point = Some(point.clone());
+                        return Ok(Some((point, remaining)));
+                    }
+                }
+            }
+        }
+        // Keep a visible lookahead until approached instead of rebuilding it every substep.
+        if let Some(target) = &a.navigation.target_point {
+            let to = index(grid, target);
+            // A point remaining on a previously checked ray needs no new geometry scan.
+            let certified = self.visible[i].as_ref().is_some_and(|(from, end)| {
+                end.x.0 == target.x.0
+                    && end.y.0 == target.y.0
+                    && geometry::point_segment(a.position.x.0, a.position.y.0, from, end)
+                        <= grid.cell_size * 1e-12
+            });
+            if field.distance[to] < field.distance[cell]
+                && distance(&a.position, target) > grid.cell_size * 2.0
+                && (certified
+                    || same_terrain(grid, cell, to, work)?
+                        && geometry::clear(
+                            grid,
+                            &self.bodies,
+                            &a.position,
+                            target,
+                            a.components.physical.radius.0,
+                            work,
+                        )?)
+            {
+                let remaining = distance(&a.position, target)
+                    + f64::from(field.hops[to]) * grid.cell_size
+                    - route.stop;
+                if remaining <= epsilon {
+                    complete(a);
+                    return Ok(None);
+                }
+                return Ok(Some((target.clone(), remaining)));
+            }
+        }
+        // Look ahead along the field so crowds do not compete for every cell centre.
+        let mut ahead = cell;
+        let mut visible = None;
+        for _ in 0..8 {
+            let next = field.next[ahead];
+            if next == NONE || next == ahead as u32 {
+                break;
+            }
+            let next = next as usize;
+            let portal = grid.portal_index[next];
+            if portal != 0
+                && portal != grid.portal_index[ahead]
+                && self.portal_info[portal as usize].unwrap().3 > 0.0
+            {
+                break;
+            }
+            let point = center(grid, next);
+            if same_terrain(grid, cell, next, work)?
+                && geometry::clear(
+                    grid,
+                    &self.bodies,
+                    &a.position,
+                    &point,
+                    a.components.physical.radius.0,
+                    work,
+                )?
+            {
+                visible = Some((point, next));
+            }
+            ahead = next;
+        }
+        if let Some((point, next)) = visible {
+            let remaining = distance(&a.position, &point)
+                + f64::from(field.hops[next]) * grid.cell_size
+                - route.stop;
+            if remaining <= epsilon {
+                complete(a);
+                return Ok(None);
+            }
+            self.visible[i] = Some((a.position.clone(), point.clone()));
+            a.navigation.target_point = Some(point.clone());
+            return Ok(Some((point, remaining)));
+        }
+        if a.navigation.target_point.as_ref().is_some_and(|target| {
+            let to = index(grid, target);
+            to != cell && field.next[cell] != to as u32
+        }) {
+            a.navigation.target_point = None;
+        }
+        if let Some(target) = a.navigation.target_point.as_ref() {
+            let to = index(grid, target);
+            let next = field.next[cell];
+            if next == cell as u32 && to != cell {
+                a.navigation.target_point = Some(center(grid, cell));
+            } else if to == cell && next != NONE && next != cell as u32 {
+                let p = grid.portal_index[next as usize];
+                let delayed = p != 0
+                    && p != grid.portal_index[cell]
+                    && self.portal_info[p as usize].unwrap().3 > 0.0;
+                let next_point = center(grid, next as usize);
+                // Follow the field through a cell without forcing crossing streams onto its center.
+                if !delayed
+                    && geometry::clear(
+                        grid,
+                        &[],
+                        &a.position,
+                        &next_point,
+                        a.components.physical.radius.0,
+                        work,
+                    )?
+                    && self.permits(grid, &a.position, &next_point)
+                {
+                    a.navigation.target_point = Some(next_point);
+                }
+            }
+        }
+        if a.navigation
+            .target_point
+            .as_ref()
+            .is_some_and(|p| distance(&a.position, p) <= epsilon)
+        {
+            a.navigation.target_point = None;
+        }
+        if a.navigation.target_point.is_none() {
+            let current = center(grid, cell);
+            if distance(&a.position, &current) > epsilon {
+                a.navigation.target_point = Some(current);
+            } else {
+                let next = field.next[cell];
+                if next == NONE {
+                    a.state = "blocked".into();
+                    a.state_reason = Some("unreachable-at-current-topology".into());
+                    a.velocity = Point {
+                        x: Number(0.0),
+                        y: Number(0.0),
+                    };
+                    return Ok(None);
+                }
+                if next == cell as u32 {
+                    complete(a);
+                    return Ok(None);
+                }
+                a.navigation.target_point = Some(center(grid, next as usize));
+                let portal = grid.portal_index[next as usize];
+                if portal != 0 && portal != grid.portal_index[cell] {
+                    let wait = self.portal_info[portal as usize].unwrap().3;
+                    if wait > 0.0 {
+                        a.timers.wait_remaining = Nonnegative(wait);
+                        a.state = "waiting".into();
+                        a.velocity = Point {
+                            x: Number(0.0),
+                            y: Number(0.0),
+                        };
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        let target = a.navigation.target_point.as_ref().unwrap();
+        let to = index(grid, target);
+        let remaining = distance(&a.position, target)
+            + distance(target, &center(grid, to))
+            + f64::from(field.hops[to]) * grid.cell_size;
+        let stop = route.stop;
+        if remaining <= stop + epsilon {
+            complete(a);
+            return Ok(None);
+        }
+        Ok(Some((target.clone(), remaining - stop)))
+    }
+    pub fn permits(&self, grid: &GridData, from: &Point, to: &Point) -> bool {
+        allowed(grid, &self.portal_info, index(grid, from), index(grid, to)).unwrap_or(false)
+    }
+    pub fn permits_agent(&self, grid: &GridData, from: &Point, to: &Point, i: usize) -> bool {
+        if self.intents[i].as_ref().is_some_and(|intent| intent.local) {
+            let zone = self.intents[i]
+                .as_ref()
+                .unwrap()
+                .goal
+                .inside_zone
+                .as_ref()
+                .unwrap();
+            let z = grid
+                .zone_ids
+                .iter()
+                .position(|v| v.as_ref() == Some(zone))
+                .unwrap();
+            if !line_in_zone(grid, from, to, z) {
+                return false;
+            }
+        }
+        self.permits(grid, from, to)
+    }
+    pub fn has_route(&self, i: usize) -> bool {
+        self.routes.get(i).is_some_and(Option::is_some)
+    }
+    #[cfg(test)]
+    pub fn field_count(&self) -> usize {
+        self.fields.len()
+    }
+}
+fn complete(a: &mut AgentRuntime) {
+    a.current_goal
+        .as_mut()
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .phase = "arrived".into();
+    a.state = "idle".into();
+    a.state_reason = None;
+    a.navigation.target_point = None;
+    a.navigation.flow_field_id = None;
+    a.velocity = Point {
+        x: Number(0.0),
+        y: Number(0.0),
+    };
+}
+fn countdown(remaining: f64, dt: f64) -> f64 {
+    if remaining <= dt * (1.0 + 1e-9) {
+        0.0
+    } else {
+        remaining - dt
+    }
+}

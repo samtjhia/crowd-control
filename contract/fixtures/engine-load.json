@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "simulationId": "engine-demo",
+  "commandId": "load-demo",
+  "type": "load",
+  "compiled": {
+    "scene": {
+      "schemaVersion": 1,
+      "simulationId": "engine-demo",
+      "seed": 42,
+      "clearance": {"cohortIds":["a1","a2","a3"],"startedAt":10},
+      "versions": {"compiler":"engine-input-example-v1","model":"movement-example-v1","random":"lcg32-v1"},
+      "model": {"units":"model","dt":0.05},
+      "map": {
+        "width":8,"height":4,"cellSize":1,"units":"model",
+        "source":{"mode":"generate","accuracy":"approximate"},
+        "rooms": [
+          {"id":"hall","x":1,"y":1,"width":2,"height":2,"appearance":{"fill":"#DBEAFE"}},
+          {"id":"outside","x":4,"y":1,"width":3,"height":2,"appearance":{"fill":"#DCFCE7"}}
+        ],
+        "portals": [{"id":"door","connects":["hall","outside"],"x":3,"y":2,"width":1,"height":1,"open":true}],
+        "rows":["########","#HH#OOO#","#HHDOOO#","########"],
+        "legend":{"H":"hall","O":"outside","D":"door"}
+      },
+      "profiles":{"person":{"radius":0.2,"preferredSpeed":1,"appearance":{"symbol":"circle","fill":"#2563EB"}}},
+      "controllers":{
+        "mingle":{"kind":"wander","insideZone":"hall"},
+        "leave":{"kind":"reach","targetZone":"outside","selection":"lowest-cost","departOnArrival":true}
+      },
+      "agents":[
+        {"id":"a1","tags":["attendee"],"profile":"person","x":1.5,"y":1.5,"controller":"mingle"},
+        {"id":"a2","tags":["attendee"],"profile":"person","x":2.5,"y":1.5,"controller":"mingle"}
+      ],
+      "jobs":[
+        {"id":"arrival","at":5,"operations":[{"op":"spawn","count":1,"zone":"hall","profile":"person","tags":["attendee"],"controller":"mingle"}]},
+        {"id":"alarm","at":10,"operations":[{"op":"emit","event":"alarm"}]}
+      ],
+      "rules":[{"id":"leave-on-alarm","event":"alarm","match":{"tags":["attendee"]},"controller":"leave","mode":"replace","once":true}]
+    },
+    "resolvedModel": {
+      "id":"movement-example","version":"movement-example-v1","units":"model","dt":0.05,
+      "defaultAgent":{
+        "physical":{"radius":0.2,"blocksMovement":true,"movable":true},
+        "navigation":{"preferredSpeed":1,"maximumSpeed":1.5,"acceleration":2,"personalSpace":0.1},
+        "behavior":{"reactionDelay":0,"routeCompliance":1,"avoidanceStrength":1,"groupCohesion":0,"goalPersistence":1},
+        "mobility":{"speedMultiplier":1}
+      },
+      "layout":{"bodyDiameter":0.4,"spacingDiameters":2,"preferredAspect":2,"doorBodyWidths":2}
+    },
+    "inventory":[
+      {"id":"hall","kind":"zone","tags":[],"componentNames":[]},
+      {"id":"outside","kind":"zone","tags":[],"componentNames":[]},
+      {"id":"door","kind":"portal","tags":[],"componentNames":["portal"]},
+      {"id":"a1","kind":"agent","tags":["attendee"],"componentNames":["physical","navigation","behavior","mobility"]},
+      {"id":"a2","kind":"agent","tags":["attendee"],"componentNames":["physical","navigation","behavior","mobility"]}
+    ]
+  },
+  "history":{"historyRevision":0,"records":[],"outcomes":[]}
+}
