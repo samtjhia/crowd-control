@@ -1,4 +1,4 @@
-import { TRAIL_COLOR, trailWidth } from './campusFrame'
+import { JOURNEY_GRASS, TRAIL_COLOR, trailWidth } from './campusFrame'
 import type { JourneyGeometry } from './journeyGeometry'
 
 export type StorySite = { x: number; y: number; width: number; height: number; content?: { x: number; y: number; width: number; height: number } }
@@ -16,6 +16,7 @@ export function PlazaLandscape({ geometry, sites }: { geometry: JourneyGeometry;
   const width = geometry.width, top = geometry.story.y, radius = trailWidth(width) / 2
   const nearest = (y: number) => geometry.points.reduce((found, point) => Math.abs(point.y - y) < Math.abs(found.y - y) ? point : found, geometry.points[0])
   return <g className="story-landscape" aria-hidden="true">
+    <rect className="journey-grass-base" x="0" y={geometry.campus.y} width={width} height={geometry.height - geometry.campus.y} fill={JOURNEY_GRASS} />
     {/* A shared landscape spans all three locations. The connected cream strip
         above it remains the original route, rendered with the original crowd. */}
     <path d={`M0 ${top}H${width}V${top + 135}Q${width * .82} ${top + 45} ${width * .65} ${top + 96}T${width * .27} ${top + 80}Q${width * .12} ${top + 25} 0 ${top + 80}Z`} fill="#eef1df" />

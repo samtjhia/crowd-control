@@ -1,11 +1,12 @@
+import { Airship } from './RoadmapDetails'
 import { useJourney } from './journeyFlow'
 import { trailWidth } from './campusFrame'
 
-function Building({ x, y, scale, width = 100, height = 150, color = '#d9e3d4', east }: { x: number; y: number; scale: number; width?: number; height?: number; color?: string; east: boolean }) {
+function Building({ x, y, scale, width = 100, height = 150, color = '#d9e3d4', roof = '#edf0e5', side = '#bdcbbb', east }: { x: number; y: number; scale: number; width?: number; height?: number; color?: string; roof?: string; side?: string; east: boolean }) {
   return <g className={`city-building ${east ? 'city-east' : 'city-west'}`} transform={`translate(${x} ${y}) scale(${scale})`}>
     <ellipse cx={width / 2 + 8} cy={height + 6} rx={width * .65} ry="12" fill="#d9e1cf" opacity=".65" />
-    <path d={`M0 0h${width}l22-15H22Z`} fill="#edf0e5" />
-    <path d={`M${width} 0l22-15v${height}l-22 15Z`} fill="#bdcbbb" />
+    <path d={`M0 0h${width}l22-15H22Z`} fill={roof} />
+    <path d={`M${width} 0l22-15v${height}l-22 15Z`} fill={side} />
     <rect width={width} height={height} fill={color} />
     {[22, 55, 88].filter(row => row < height - 15).map(row => <g key={row} fill="#abcbd2"><rect x="15" y={row} width="19" height="18" /><rect x={width - 35} y={row} width="19" height="18" /></g>)}
     <rect x={width / 2 - 11} y={height - 33} width="22" height="33" fill="#90a99d" />
@@ -34,14 +35,17 @@ export function CityScenery() {
     return { x: px, y: py }
   }
   const blocks = [
-    { x: 1090, y: 135, width: 100, height: 170, color: '#d9e3d4' },
-    { x: 1080, y: 330, width: 85, height: 110, color: '#e6d9cf' },
-    { x: 20, y: 1040, width: 85, height: 160, color: '#e4d8cf' },
+    { x: 1090, y: 135, width: 100, height: 170, color: '#bd8a74', roof: '#e6c3aa', side: '#976b60' },
+    { x: 1080, y: 330, width: 85, height: 110, color: '#a86b74', roof: '#d3a3a0', side: '#824d59' },
+    { x: 20, y: 1040, width: 85, height: 160, color: '#ba9475', roof: '#e7cdb2', side: '#966e58' },
     { x: 80, y: 1180, width: 65, height: 110, color: '#d9e3d4' },
-    { x: 1090, y: 1530, width: 100, height: 150, color: '#d8e4e4' },
+    { x: 1090, y: 1530, width: 100, height: 150, color: '#b17b6e', roof: '#dfbaa7', side: '#8d5b54' },
     { x: 1080, y: 1720, width: 80, height: 100, color: '#e9ded0' },
   ]
   const placed = blocks.map(block => ({ ...block, ...place(block.x, block.y, 15, block.width + 28, 15, block.height + 18), east: block.x > 620 }))
+  const airship = width < 700
+    ? { x: width * .36, y: height * .245 }
+    : place(1005, width < 1000 ? 630 : 535, 120, 125, 65, 65)
   return <svg className="city-scenery" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
     {/* No independent land slabs: the buildings share the world's existing
         ground, with small footpaths and contact shadows to anchor their feet. */}
@@ -66,5 +70,6 @@ export function CityScenery() {
       const point = place(x, y, 4, 36, 92, 3)
       return <g key={i} className={x > 620 ? 'city-east' : 'city-west'} transform={`translate(${point.x} ${point.y}) scale(${scale})`} stroke="#819783" strokeWidth="3" fill="none"><path d="M0 0v-65q0-12 13-12h12" /><path d="M17-77h19" strokeWidth="7" /></g>
     })}
+    <Airship x={airship.x} y={airship.y} scale={width < 700 ? .63 : scale * .95} />
   </svg>
 }

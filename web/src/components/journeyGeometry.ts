@@ -1,4 +1,4 @@
-import { campusFrame, trailEntryX } from './campusFrame'
+import { projectCampusPoint, trailEntryX } from './campusFrame'
 import type { Point } from './canvas'
 
 type Box = { x: number; y: number; width: number; height: number }
@@ -6,11 +6,10 @@ export type Cubic = { start: Point; a: Point; b: Point; end: Point }
 export type JourneyGeometry = { width: number; height: number; campus: Box; story: Box; handoff?: Box; curves: Cubic[]; points: Point[]; distances: number[]; length: number; path: string }
 
 export function buildJourneyGeometry(width: number, height: number, campus: Box, story: Box, handoff?: Box): JourneyGeometry {
-  const frame = campusFrame(campus.width, campus.height)
-  const project = (x: number, y: number) => ({ x: campus.x + frame.offsetX + x * frame.scale, y: campus.y + frame.offsetY + (frame.campusY + y * frame.campusScaleY) * frame.scale })
+  const project = (x: number, y: number) => projectCampusPoint(campus, x, y)
   const seam = { x: trailEntryX(width), y: story.y }
   const handle = Math.min(80, campus.height * .25)
-  const curves: Cubic[] = [{ start: project(760, 850), a: project(850, 935), b: { x: seam.x, y: seam.y - handle }, end: seam }]
+  const curves: Cubic[] = [{ start: project(700, 800), a: project(850, 880), b: { x: seam.x, y: seam.y - handle }, end: seam }]
   const at = (x: number, y: number) => ({ x: story.x + x * story.width, y: story.y + y * story.height })
   const points = width < 700
     ? [seam, at(.87, .32), at(.84, .7), at(.84, .91), at(.5, 1)]

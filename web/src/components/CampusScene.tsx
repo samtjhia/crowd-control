@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { campusFrame } from './campusFrame'
+import { CAMPUS_COURTYARD, JOURNEY_GRASS, campusFrame } from './campusFrame'
 
 // The campus is authored entirely as editable SVG geometry. The crowd uses the
 // same 1536 × 1024 world and the same lower-scene transform in AmbientCrowd.
@@ -77,6 +77,8 @@ export function CampusScene() {
   return <svg ref={svg} className="campus-art" viewBox="0 400 1536 624" preserveAspectRatio={frame.width < 700 ? "xMidYMax meet" : "xMidYMax slice"} role="img" aria-label="A geometric school campus" aria-describedby="campus-art-description">
     <desc id="campus-art-description">An angular pastel landscape with block-shaped trees, stepped seating, a pond and footbridge, a school, and paved paths for the walking crowd.</desc>
     <rect width="1536" height="1024" fill="#fbfaf8" />
+    {/* Continue the ground beneath the campus instead of exposing a white seam. */}
+    <rect className="campus-grass-extension" y={frame.campusY + 900 * frame.campusScaleY} width="1536" height="1024" fill={JOURNEY_GRASS} />
     <g transform={`translate(0 ${frame.campusY}) scale(1 ${frame.campusScaleY})`}>
       {/* Low rolling lawns frame the same walkable campus coordinates. */}
       <path d="M0 780Q130 612 300 578T610 470Q836 360 1030 356T1320 400Q1475 460 1536 690V922Q1390 998 1130 995L385 989Q130 982 0 917Z" fill="#c2db91" />
@@ -99,7 +101,7 @@ export function CampusScene() {
       {/* Paving is shared with the world coordinates used by the walkers. */}
       <path d="M175 916 285 876 370 863 445 844 488 815 502 767 520 725 580 692 660 670 740 642 790 610 812 580 812 550 812 530 822 515 845 502 880 490 920 482 960 475 995 466 1012 450" fill="none" stroke="#cbd6bd" strokeWidth="70" strokeLinejoin="miter" />
       <path d="M175 912 285 872 370 859 445 840 488 811 502 763 520 721 580 688 660 666 740 638 790 606 812 576 812 546 812 526 822 511 845 498 880 486 920 478 960 471 995 462 1012 446" fill="none" stroke="#fcf2e5" strokeWidth="62" strokeLinejoin="miter" />
-      <polygon points="490,726 620,668 742,680 820,723 900,785 932,845 820,905 675,904 540,861 484,807" fill="#fcf2e5" />
+      <polygon points={CAMPUS_COURTYARD.map(point => point.join(',')).join(' ')} fill="#fcf2e5" />
       <path d="M660 790 740 775 795 748 839 727 873 711" fill="none" stroke="#fcf2e5" strokeWidth="44" strokeLinejoin="miter" />
       {/* Amphitheatre: three angular risers behind a separate flat floor. */}
       <polygon points="272,617 401,574 521,609 521,625 402,592 288,633" fill="#f0e8d7" />

@@ -1,3 +1,4 @@
+import { Flowers, ParkedBicycle } from './RoadmapDetails'
 import { EnvironmentalDisplay } from './EnvironmentalDisplay'
 import { Tree, Shrubs } from './CampusPlaza'
 import { alongPath, drawPerson, useCanvas } from './canvas'
@@ -12,7 +13,7 @@ function Planter({ x, y, width = 110, pink = false }: { x: number; y: number; wi
     <path d={`M0 0 ${width}-17l39 13-${width} 22Z`} fill="#fffaf0" />
     <path d={`M0 0v25l39 18V18Z`} fill="#e7dfcd" /><path d={`M39 18 ${width + 39}-4v25L39 43Z`} fill="#d8d6bf" />
     <Shrubs x={35} y={-4} scale={.7} /><Shrubs x={width - 20} y={-14} scale={.7} />
-    {pink && <g fill="#e8bfc2"><ellipse cx={width / 2} cy="-10" rx="12" ry="8" /><ellipse cx={width / 2 + 15} cy="-14" rx="10" ry="7" /></g>}
+    {pink && <Flowers x={width / 2} y={-11} scale={.8} />}
   </g>
 }
 
@@ -76,8 +77,8 @@ function OperationsArtwork() {
     <path d="m495 209 35-6.2m52-9.2 38-6.7" stroke="#f7e6b7" strokeWidth="4" />
     {/* The display sits farther back and clear of the shelter roof. */}
     <StationDisplay compact /><StationDisplay />
-    <Planter x={48} y={330} width={72} pink /><Planter x={550} y={345} width={70} />
-    <Bench x={286} y={391} /><Lamp x={648} y={380} />
+    <Planter x={48} y={330} width={72} pink /><Planter x={550} y={345} width={70} pink />
+    <ParkedBicycle x={126} y={395} /><Bench x={286} y={391} /><Lamp x={648} y={380} />
     <path d="M208 396h18v-24h-18Z" fill="#8ca38c" /><ellipse cx="217" cy="372" rx="9" ry="3" fill="#6f8977" />
   </svg>
 }

@@ -45,9 +45,15 @@ function App() {
       </Journey>
       <WhyItMatters reduced={reduced} />
       <ScenarioExplorer reduced={reduced} />
-      <section className="closing"><h2>A little curiosity.<br /><span>A better way forward.</span></h2><p>For the school day, the big night,<br />and everyone in between.</p><a className="button button-green" href="#scenarios">Explore another possibility <Icon name="arrow" size={18} /></a></section>
+      <section className="closing" aria-labelledby="closing-title">
+        <h2 id="closing-title">Try a different setup.</h2>
+        <div className="closing-copy">
+          <p>Switch settings and customize the layout, crowd size, and exits to test different scenarios.</p>
+          <a className="text-link closing-link" href="#scenarios">Try it out <Icon name="arrow" size={20} /></a>
+        </div>
+      </section>
     </main>
-    <footer><Brand /><span>Built with curiosity at HackTrent 2026.</span><a href="https://github.com/samtjhia/crowd-control" target="_blank" rel="noreferrer">View on GitHub <Icon name="diagonal" size={14} /></a><p>Illustrative previews. Planning estimates, not certified safety analysis. Live AI simulation is not connected to this landing page.</p></footer>
+    <footer><Brand /><span>HackTrent 2026.</span><a href="https://github.com/samtjhia/crowd-control" target="_blank" rel="noreferrer">View on GitHub <Icon name="diagonal" size={14} /></a><p>Illustrative previews. Planning estimates, not certified safety analysis. Live AI simulation is not connected to this landing page.</p></footer>
   </>
 }
 

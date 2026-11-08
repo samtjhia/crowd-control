@@ -1,12 +1,13 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { buildJourneyGeometry, type JourneyGeometry } from './journeyGeometry'
-import { TRAIL_COLOR, trailWidth } from './campusFrame'
+import { CAMPUS_COURTYARD, TRAIL_COLOR, projectCampusPoint, trailWidth } from './campusFrame'
 import { JourneyContext } from './journeyFlow'
 import { PlazaLandscape, type StorySite } from './PlazaLandscape'
 
 
 export function Journey({ children }: { children: ReactNode }) {
   const wrapper = useRef<HTMLDivElement>(null)
+  const curbMask = useId().replace(/:/g, '')
   const [sites, setSites] = useState<StorySite[]>([])
   const [geometry, setGeometry] = useState<JourneyGeometry | null>(null)
   useLayoutEffect(() => {
@@ -29,7 +30,16 @@ export function Journey({ children }: { children: ReactNode }) {
   }, [])
   return <JourneyContext.Provider value={geometry}><div className="journey" ref={wrapper}>
     {geometry && sites.length > 0 && <svg className="journey-ground" viewBox={`0 0 ${geometry.width} ${geometry.height}`} aria-hidden="true"><PlazaLandscape geometry={geometry} sites={sites} /></svg>}
-    {geometry && <svg className="journey-trail" viewBox={`0 0 ${geometry.width} ${geometry.height}`} aria-hidden="true"><path className="route-curb" d={geometry.path} fill="none" stroke="#dce6cd" strokeWidth={trailWidth(geometry.width) + 5} strokeLinecap="butt" /><path className="main-crowd-route" d={geometry.path} fill="none" stroke={TRAIL_COLOR} strokeWidth={trailWidth(geometry.width)} strokeLinecap="butt" /><path d={`M${geometry.handoff ? geometry.handoff.x + geometry.handoff.width / 2 - trailWidth(geometry.width) / 2 : 0} ${geometry.handoff ? geometry.handoff.y + 55 : 0}h${trailWidth(geometry.width)}`} stroke="#d8d0bb" strokeWidth="5" /></svg>}
+    {geometry && <svg className="journey-trail" viewBox={`0 0 ${geometry.width} ${geometry.height}`} aria-hidden="true">
+      <defs><mask id={curbMask} maskUnits="userSpaceOnUse" x="0" y="0" width={geometry.width} height={geometry.height}>
+        <rect width={geometry.width} height={geometry.height} fill="white" />
+        <polygon points={CAMPUS_COURTYARD.map(([x, y]) => { const point = projectCampusPoint(geometry.campus, x, y); return `${point.x},${point.y}` }).join(' ')} fill="black" />
+      </mask></defs>
+      <path className="route-curb" d={geometry.path} fill="none" stroke="#dce6cd" strokeWidth={trailWidth(geometry.width) + 5} strokeLinecap="butt" mask={`url(#${curbMask})`} />
+      <circle className="route-entry-blend" cx={geometry.curves[0].start.x} cy={geometry.curves[0].start.y} r={trailWidth(geometry.width) / 2} fill={TRAIL_COLOR} />
+      <path className="main-crowd-route" d={geometry.path} fill="none" stroke={TRAIL_COLOR} strokeWidth={trailWidth(geometry.width)} strokeLinecap="butt" />
+      <path d={`M${geometry.handoff ? geometry.handoff.x + geometry.handoff.width / 2 - trailWidth(geometry.width) / 2 : 0} ${geometry.handoff ? geometry.handoff.y + 55 : 0}h${trailWidth(geometry.width)}`} stroke="#d8d0bb" strokeWidth="5" />
+    </svg>}
     {children}
   </div></JourneyContext.Provider>
 }

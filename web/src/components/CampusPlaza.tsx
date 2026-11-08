@@ -1,3 +1,4 @@
+import { Flowers } from './RoadmapDetails'
 import { EnvironmentalDisplay } from './EnvironmentalDisplay'
 import { drawPerson, useCanvas } from './canvas'
 
@@ -62,16 +63,16 @@ function PlazaArtwork() {
     <path d="m188 383 491-36v8l-491 36Z" fill="#dfd7c5" />
     {/* Retaining planters keep greenery off the pedestrian surface. */}
     <path d="m8 307 118-26 72 23-116 29Z" fill="#fdf9ee" /><path d="m8 307 74 26v29L8 337Z" fill="#e9e0cd" /><path d="m82 333 116-29v29L82 362Z" fill="#d9d4bc" />
-    <Shrubs x={58} y={310} scale={.8} /><Shrubs x={118} y={299} scale={.8} />
+    <Shrubs x={58} y={310} scale={.8} /><Shrubs x={118} y={299} scale={.8} /><Flowers x={67} y={301} scale={.8} /><Flowers x={124} y={289} scale={.65} />
     <path d="m534 289 96-17 58 20-98 22Z" fill="#fffaf0" /><path d="m534 289 56 25v26l-56-23Z" fill="#e9e0cd" /><path d="m590 314 98-22v25l-98 23Z" fill="#d9d4bc" />
-    <Shrubs x={575} y={291} scale={.7} /><Shrubs x={629} y={283} scale={.7} />
+    <Shrubs x={575} y={291} scale={.7} /><Shrubs x={629} y={283} scale={.7} /><Flowers x={594} y={276} scale={.75} />
     <Tree x={34} y={199} scale={.72} /><Tree x={660} y={239} scale={.72} /><Tree x={672} y={105} scale={.65} />
     <path d="m470 400 66-13 27 10-67 15Z" fill="#d1b68b" /><path d="M482 406v13m66-18v12" stroke="#ad997a" strokeWidth="4" />
     <g transform="translate(628 374)" fill="none" stroke="#628575" strokeWidth="3"><path d="M0 0v-66q0-12 13-12h12" /><path d="M17-78h20" strokeWidth="6" /></g>
     </g>
     <Tree x={58} y={350} scale={.82} /><Shrubs x={91} y={359} scale={.85} />
     <path d="m471 355 111-20 36 14-112 24Z" fill="#fff8e9" /><path d="m506 373 112-24v17l-112 25Z" fill="#dbd7c1" />
-    <Shrubs x={527} y={347} scale={.7} /><Shrubs x={579} y={339} scale={.7} />
+    <Shrubs x={527} y={347} scale={.7} /><Shrubs x={579} y={339} scale={.7} /><Flowers x={553} y={331} scale={.8} />
     <path d="m180 399 65-13 29 10-66 14Z" fill="#dcc59c" /><path d="M192 405v13m65-13v12" stroke="#ad997b" strokeWidth="4" />
   </svg>
 }
