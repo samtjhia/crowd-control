@@ -1,3 +1,4 @@
+import { GEMINI_ENABLED } from '../features.ts'
 import { Diagnostics } from './Diagnostics.tsx'
 import { Profiler, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import '@fontsource-variable/dm-sans'
@@ -95,7 +96,7 @@ const BLANK = '__new'
 
 /** The scenario named in the URL (`/sim?scenario=hillside-alley`), a blank start, else the worked example. */
 function initialScenarioId(): string {
-  if (new URLSearchParams(window.location.search).has('new')) return BLANK
+  if (GEMINI_ENABLED && new URLSearchParams(window.location.search).has('new')) return BLANK
   const requested = new URLSearchParams(window.location.search).get(SCENARIO_PARAM)
   const known = [...SCENARIOS, ...loadAssistant().scenarios]
   return known.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
@@ -172,19 +173,19 @@ export default function SimulatorApp() {
   const panelsRef = useRef<Panels | null>(null)
   const [panels, setPanels] = useState<Panels>(() => {
     const wide = window.innerWidth >= WIDE
-    return { left: wide, right: wide }
+    return { left: GEMINI_ENABLED && wide, right: wide }
   })
   const view = useSyncExternalStore(client.subscribe, client.getView)
   const incidents = useMemo(() => toIncidents(view.events), [view.events])
   const now = view.current?.frame.time ?? 0
   const ready = view.current !== null
   const alarm = incidents.find((incident) => incident.title === 'Alarm')
-  const toggle = (side: keyof Panels) => setPanels((p) => ({ ...p, [side]: !p[side] }))
+  const toggle = (side: keyof Panels) => setPanels((p) => side === 'left' && !GEMINI_ENABLED ? p : ({ ...p, [side]: !p[side] }))
   const anyPanelOpen = panels.left || panels.right
   /** Closes both panels for a clear view of the map; reopens both when both are closed. */
   const toggleBoth = () => setPanels((p) => {
     const open = !(p.left || p.right)
-    return { left: open, right: open }
+    return { left: GEMINI_ENABLED && open, right: open }
   })
 
   const [scenarioId, setScenarioId] = useState(initialScenarioId)
@@ -475,7 +476,7 @@ export default function SimulatorApp() {
           case 'r': case 'R': void client.reset(); return true
           case '[': setPanels((p) => ({ ...p, left: !p.left })); return true
           case ']': setPanels((p) => ({ ...p, right: !p.right })); return true
-          case '\\': setPanels((p) => { const open = !(p.left || p.right); return { left: open, right: open } }); return true
+          case '\\': setPanels((p) => { const open = !(p.left || p.right); return { left: GEMINI_ENABLED && open, right: open } }); return true
           case 'v': case 'V': setTool('select'); return true
           case 'b': case 'B': setTool('box'); return true
           case 'f': case 'F': setTool('trip'); return true
@@ -605,23 +606,23 @@ export default function SimulatorApp() {
 
       <PlaybackBar client={client} view={view} ready={ready} now={now} incidents={incidents} />
 
-      <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
+      {GEMINI_ENABLED && <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
         <AssistantPanel key={blank ? BLANK : scenario.id} scenarioId={blank ? BLANK : scenario.id} scenarioTitle={blank ? 'a new simulation' : scenario.title.replace(/^Assistant: /, '')} startWith={blank ? 'scenario' : 'change'} client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
-      </SidePanel>
+      </SidePanel>}
 
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}
         head={(
           <div className="sim-panel-tabs" role="tablist" aria-label="Right panel">
-            {(['simulation', 'analysis'] as const).map((tab) => (
+            {(['simulation', ...(GEMINI_ENABLED ? ['analysis' as const] : [])] as const).map((tab) => (
               <button key={tab} type="button" role="tab" id={`sim-tab-${tab}`} aria-selected={rightTab === tab} aria-controls={`sim-tabpanel-${tab}`} onClick={() => setRightTab(tab)}>
                 {tab === 'simulation' ? 'Simulation' : 'Analysis'}
               </button>
             ))}
           </div>
         )}>
-        <div role="tabpanel" id="sim-tabpanel-analysis" aria-labelledby="sim-tab-analysis" hidden={rightTab !== 'analysis'}>
+        {GEMINI_ENABLED && <div role="tabpanel" id="sim-tabpanel-analysis" aria-labelledby="sim-tab-analysis" hidden={rightTab !== 'analysis'}>
           <AnalysisPanel key={runId ?? 'none'} view={view} runId={runId} flush={flush} />
-        </div>
+        </div>}
         <div role="tabpanel" id="sim-tabpanel-simulation" aria-labelledby="sim-tab-simulation" hidden={rightTab !== 'simulation'}>
         <Overview view={view} />
         <Section title="Selected">

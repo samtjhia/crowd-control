@@ -1,3 +1,4 @@
+import { GEMINI_ENABLED } from '../features.ts'
 import { DoorOpen, MapPin, MousePointer2, PersonStanding, SquareDashedMousePointer, TriangleAlert } from 'lucide-react'
 import type { ScenarioPlan } from '@crowd-control/contract'
 import type { Pick } from '../render/hitTest.ts'
@@ -17,7 +18,7 @@ export type MapTool = 'select' | 'box' | 'point' | 'trip' | 'doors' | 'danger'
 const TOOLS: { id: MapTool; label: string; hint: string; key: string; Icon: typeof MousePointer2; group: 'choose' | 'change' }[] = [
   { id: 'select', label: 'Select', hint: 'Click a person, door, room or marked object to see it. Drag to pan; Shift-click or Shift-drag to select several', key: 'V', Icon: MousePointer2, group: 'choose' },
   { id: 'box', label: 'Box', hint: 'Drag a box to select the people and doors inside it; hold Shift to add to the selection', key: 'B', Icon: SquareDashedMousePointer, group: 'choose' },
-  { id: 'point', label: 'Point', hint: 'Click the floor to mark a point (A, B, C…), then mention it to the assistant: “put the check-in at point A”', key: 'P', Icon: MapPin, group: 'choose' },
+  { id: 'point', label: 'Point', hint: GEMINI_ENABLED ? 'Click the floor to mark a point (A, B, C…), then mention it to the assistant: “put the check-in at point A”' : 'Click the floor to mark a point (A, B, C…)', key: 'P', Icon: MapPin, group: 'choose' },
   { id: 'trip', label: 'Trip', hint: 'Click a person to make them fall, or to help them up', key: 'F', Icon: PersonStanding, group: 'change' },
   { id: 'doors', label: 'Doors', hint: 'Click a door to close it, or to open it again', key: 'D', Icon: DoorOpen, group: 'change' },
   { id: 'danger', label: 'Danger', hint: `Click the floor to place a danger: people within ${DANGER.m.notice} m move ${DANGER.m.keep} m away from it and stay clear`, key: 'X', Icon: TriangleAlert, group: 'change' },
@@ -62,7 +63,7 @@ export function SelectionDetails({ selection, view, plan, points, onAction, onCl
   if (selection.length === 0 || !scene) {
     return (
       <p className="sim-muted">
-        Click a person, door, room or marked object on the map (a blue dot marks things people use; red, a danger). Use Box (B) or Shift-drag to select several, Point (P) to mark spots for the assistant, and Trip (F), Doors (D) or Danger (X) to change things with one click.
+        Click a person, door, room or marked object on the map (a blue dot marks things people use; red, a danger). Use Box (B) or Shift-drag to select several, Point (P) to mark spots{GEMINI_ENABLED ? ' for the assistant' : ''}, and Trip (F), Doors (D) or Danger (X) to change things with one click.
       </p>
     )
   }
@@ -132,7 +133,7 @@ function pointDetails(id: string, points: readonly MapPoint[], scene: NonNullabl
         {doors[0] && <div><dt>Nearest door</dt><dd>{nameOf(scene, doors[0].item.id)}, {distance(doors[0].distance)}</dd></div>}
         {things[0] && <div><dt>Next to</dt><dd>{nameOf(scene, things[0].item.id)}</dd></div>}
       </dl>
-      <p className="sim-point-tip">Mention it to the assistant, like <q>put the check-in at point {point.id}</q> or <q>people come in by the door near point {point.id}</q>.</p>
+      {GEMINI_ENABLED && <p className="sim-point-tip">Mention it to the assistant, like <q>put the check-in at point {point.id}</q> or <q>people come in by the door near point {point.id}</q>.</p>}
     </>
   )
 }
@@ -224,7 +225,7 @@ function formatSize(value: number, units: 'm' | 'model') {
 /** Everything changed in this run, oldest first, with the simulation time it took effect. */
 export function ChangesList({ changes }: { changes: AppliedChange[] }) {
   if (changes.length === 0) {
-    return <p className="sim-muted">No changes yet. Falls, doors and dangers from the map, and changes from the assistant, are listed here.</p>
+    return <p className="sim-muted">No changes yet. Falls, doors and dangers from the map{GEMINI_ENABLED ? ', and changes from the assistant,' : ''} are listed here.</p>
   }
   return (
     <ol className="sim-changes">

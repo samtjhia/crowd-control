@@ -5,6 +5,9 @@ import { createAuth0TokenVerifier } from './auth.ts';
 import { deleteRun, deleteScenario, deleteVenue, listScenarios, saveScenario, getOwnedRuns, getRunAnalytics, getRunFacts, getRunReplay, getSavedReport, saveReport, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
 import { createReportWriter } from './report.ts';
+import { geminiEnabled, isGeminiGeneration } from './features.ts';
+
+const aiEnabled = geminiEnabled(process.env.PROD);
 
 const port = Number(process.env.PORT ?? 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -74,6 +77,13 @@ const server = createServer((request, response) => {
 async function handleRequest(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) {
   if (request.method === 'GET' && request.url === '/health') {
     sendJson(response, 200, { status: 'ok', schemaVersion: SCHEMA_VERSION });
+    return;
+  }
+
+  if (!aiEnabled && isGeminiGeneration(request.method, request.url)) {
+    const message = 'AI features are disabled in production.';
+    sendJson(response, 403, { ok: false, error: request.url?.split('?')[0] === '/api/plan'
+      ? { code: 'PLANNER_UNAVAILABLE', message, retryable: false } : message });
     return;
   }
 

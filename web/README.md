@@ -181,3 +181,10 @@ These samples are derived caches; original goals and snapshot contracts are unch
 v8.17 local 2,000-agent worker benchmark: about 77 ticks/s with scheduled work
 (80 required for 4×), about 65 with contact/sensors. Browser render FPS is unmeasured;
 the 2,000-agent 4×/60 FPS performance target remains unmet in this benchmark.
+
+Production feature flag: root `.env` accepts `PROD=TRUE` or `PROD=FALSE` (default).
+TRUE hides Gemini assistant/planner/report UI and makes the API reject planner and
+report-generation POSTs with HTTP 403. FALSE restores the normal features; keys are
+still required. Invalid values fail startup/build. Restart dev servers after edits;
+rebuild the frontend and restart the API for deployments. Cached report reads and
+ordinary simulation, editor, saved-scenario and run APIs do not invoke Gemini.

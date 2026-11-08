@@ -1,3 +1,4 @@
+import { GEMINI_ENABLED } from './features.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckSquare, FileText, LoaderCircle, MessageSquareText, Plus, Printer, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { RunSummariesSchema, type RunSummary } from '@crowd-control/contract'
@@ -58,10 +59,11 @@ function NewSimulation() {
             <Upload size={18} aria-hidden="true" />
             <span><strong>Upload a floor plan</strong><span>Trace your venue’s walls, rooms and doors, then run crowds on it.</span></span>
           </a>
-          <a href="/sim?new" role="menuitem">
+          {!GEMINI_ENABLED && <a href="/sim" role="menuitem"><Plus size={18} aria-hidden="true" /><span><strong>Sample simulation</strong><span>Run one of the prepared scenarios.</span></span></a>}
+          {GEMINI_ENABLED && <a href="/sim?new" role="menuitem">
             <MessageSquareText size={18} aria-hidden="true" />
             <span><strong>Just describe it</strong><span>Tell the assistant what happens; it uses one of our venues or makes up a building.</span></span>
-          </a>
+          </a>}
         </div>
       )}
     </div>
@@ -123,7 +125,7 @@ export default function HistoryApp() {
         <div className="hist-head">
           <div>
             <h1>Past runs</h1>
-            <p>Every simulation you’ve played, newest first, with its safety report. Start a new one from your own floor plan or just by describing it.</p>
+            <p>{GEMINI_ENABLED ? 'Every simulation you’ve played, newest first, with its safety report. Start a new one from your own floor plan or just by describing it.' : 'Every simulation you’ve played, newest first. Start a simulation from your own floor plan.'}</p>
           </div>
           <div className="hist-head-actions">
             <button type="button" className="hist-refresh" onClick={() => void loadRuns()} disabled={refreshing} aria-label="Refresh the list" title="Refresh the list">
@@ -178,7 +180,7 @@ function RunList({ runs, selected, onOpen, onRetry, onDelete }: {
     return (
       <div className="hist-empty">
         <h2>No runs yet</h2>
-        <p>Press <strong>New simulation</strong> to start one. Every run saves here as it plays, with the changes you make and its safety report.</p>
+        <p>Press <strong>New simulation</strong> to start one. Every run saves here as it plays, with the changes you make.</p>
       </div>
     )
   }
@@ -255,7 +257,7 @@ function RunList({ runs, selected, onOpen, onRetry, onDelete }: {
                 <span className="hist-run-when">{when(run.startedAt)}</span>
                 <span className="hist-run-meta">
                   {plural(run.interventionCount, 'change', 'changes')}
-                  {run.hasReport && <span className="hist-has-report"><FileText size={12} aria-hidden="true" /> Report</span>}
+                  {GEMINI_ENABLED && run.hasReport && <span className="hist-has-report"><FileText size={12} aria-hidden="true" /> Report</span>}
                 </span>
               </button>
               {!selecting && (confirming === run.runId ? (
@@ -297,7 +299,7 @@ function Details({ run, onDelete, onReported }: { run: RunSummary | null; onDele
   const metres = run ? runIdentity(run.simulationId).metres === true : false
 
   useEffect(() => {
-    if (!run) return
+    if (!run || !GEMINI_ENABLED) return
     let cancelled = false
     void loadReport(authFetch, run.runId)
       .then((saved) => { if (!cancelled) setReport(saved ? { state: 'ready', saved } : { state: 'none' }) })
@@ -305,7 +307,7 @@ function Details({ run, onDelete, onReported }: { run: RunSummary | null; onDele
     return () => { cancelled = true }
   }, [authFetch, run])
 
-  if (!run) return <p className="hist-placeholder">Choose a run to read its safety report, replay it, or delete it.</p>
+  if (!run) return <p className="hist-placeholder">{GEMINI_ENABLED ? 'Choose a run to read its safety report, replay it, or delete it.' : 'Choose a run to replay or delete it.'}</p>
 
   const write = async () => {
     setReport({ state: 'writing' })
@@ -331,7 +333,7 @@ function Details({ run, onDelete, onReported }: { run: RunSummary | null; onDele
         <p>{when(run.startedAt)} · {plural(run.interventionCount, 'change', 'changes')}</p>
         <div className="hist-detail-actions">
           {replayable(run) && <a className="hist-button" href={`/sim?replay=${encodeURIComponent(run.runId)}`}><RotateCcw size={15} aria-hidden="true" /> Replay</a>}
-          {report.state === 'ready' && <a className="hist-quiet" href={printable}><Printer size={14} aria-hidden="true" /> Print</a>}
+          {GEMINI_ENABLED && report.state === 'ready' && <a className="hist-quiet" href={printable}><Printer size={14} aria-hidden="true" /> Print</a>}
           {confirming ? (
             <span className="hist-confirm" role="group" aria-label="Confirm delete">
               <span>Delete this run and its report for good?</span>
@@ -345,6 +347,7 @@ function Details({ run, onDelete, onReported }: { run: RunSummary | null; onDele
         {deleting.error && <p className="hist-problem" role="alert">Couldn’t delete it: {deleting.error}</p>}
       </header>
 
+      {GEMINI_ENABLED && <>
       {report.state === 'loading' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading the report…</p>}
       {report.state === 'writing' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Writing the safety report… this usually takes 10 to 30 seconds.</p>}
       {report.state === 'none' && (
@@ -360,6 +363,7 @@ function Details({ run, onDelete, onReported }: { run: RunSummary | null; onDele
         </div>
       )}
       {report.state === 'ready' && <ReportView {...report.saved} compact />}
+      </>}
     </>
   )
 }

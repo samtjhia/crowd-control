@@ -54,6 +54,12 @@ requests to the local Node server. Authenticated `GET /api/runs` lists up to 50
 recent runs owned by the signed-in user, with metric and intervention counts;
 the `/history` page displays that list and selected-run analytics without
 replaying simulations.
+Set `PROD=FALSE` in the root `.env` to enable Gemini. `PROD=TRUE` hides the
+assistant, AI scenario creation/planner demo, and AI report controls, and rejects
+planner/report-generation requests on the API with HTTP 403. This flag is separate
+from `NODE_ENV`. Restart the development servers after changing it; deployments
+must set it for both the frontend build and API runtime, then rebuild/restart.
+
 To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
 `GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
 in chat. Set `DATABASE_URL` in the same root `.env` to enable Tiger Data.

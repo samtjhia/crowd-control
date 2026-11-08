@@ -1,3 +1,4 @@
+import { GEMINI_ENABLED } from './features.ts'
 import { Suspense, lazy, useEffect, useState } from 'react'
 import { useAuth0 } from '@auth0/auth0-react'
 import { RequireSignIn } from './AuthGate.tsx'
@@ -48,9 +49,9 @@ export default function Root() {
   if (path === '/' || path === '') return <Home />
   // The landing page for anyone, signed in or not (for showing it off while signed in).
   if (path.startsWith('/welcome')) return <Suspense fallback={null}><LandingApp /></Suspense>
-  const page = path.startsWith('/demo/planner') ? <PlannerApp />
+  const page = GEMINI_ENABLED && path.startsWith('/demo/planner') ? <PlannerApp />
     : path.startsWith('/history') ? <HistoryApp />
-    : path.startsWith('/report') ? <ReportApp />
+    : path.startsWith('/report') ? (GEMINI_ENABLED ? <ReportApp /> : <HistoryApp />)
     : path.startsWith('/plans') ? <PlansApp />
     : path.startsWith('/editor') ? <EditorApp />
     : path.startsWith('/demo/engine') ? <EngineApp />
