@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { useAuth0 } from '@auth0/auth0-react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useAuthFetch } from '../site/useAuthFetch.ts'
 import { Check, LoaderCircle, Play, RotateCcw, SendHorizontal, X } from 'lucide-react'
 import type { CreateInterventionRequest, InterventionSummary, InventoryItem, ScenarioPlan } from '@crowd-control/contract'
 import { describeOperations, describePlan, displayName } from '../planner/describe.ts'
 import type { SimulationClient, SimulationView } from '../worker/simulationClient.ts'
 import { askPlanner, buildRequest, capacityNote, explainRefusal, pinGoalTargets, placesNote, titleFrom, type AskKind } from './assistant.ts'
+import { formatClock } from './incidents.ts'
 import { placesInScene } from './places.ts'
-import { loadAssistant, saveMessages, type Message } from './assistantStore.ts'
+import { loadPoints, pointsKeyForLayout, pointsKeyForSource, pointsNote, preparedGeometry, sceneGeometry } from './points.ts'
+import { loadThread, recentChat, saveThread, type Message } from './assistantStore.ts'
 import type { VenueOption } from './scenario.ts'
 
 /** A message before it gets an ID (Omit applied to each kind of message separately). */
@@ -15,7 +17,14 @@ type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, 'id'> :
 const SUGGESTIONS: Record<AskKind, string[]> = {
   change: ['Close the exit for 30 seconds', 'Add 20 more people in the busiest room', 'At 20 seconds, close the main door'],
   scenario: ['200 people leave a concert through two exits after an alarm at 30 seconds', 'A fire drill: every classroom empties to the yards when the alarm sounds'],
+  why: ['Why did it get so crowded?', 'Why did people take so long to leave?', 'What happened after the alarm?'],
 }
+
+const KINDS: { kind: AskKind; label: string; placeholder: string; intro: string }[] = [
+  { kind: 'change', label: 'Change this run', placeholder: 'Describe a change…', intro: 'Describe a change to this run. You’ll see what it would do before anything changes.' },
+  { kind: 'scenario', label: 'New scenario', placeholder: 'Describe a scenario…', intro: 'Describe a whole scenario: the crowd, and what happens when. You’ll see the plan before it runs.' },
+  { kind: 'why', label: 'Ask why', placeholder: 'Ask about this run…', intro: 'Ask about what has happened in this run so far. The answer uses only its measurements and events.' },
+]
 
 /** "Make up a building" in the Where picker. */
 const GENERATE = 'generate'
@@ -23,13 +32,18 @@ const GENERATE = 'generate'
 type Props = {
   client: SimulationClient
   view: SimulationView
+  /** The scenario this conversation is about; each scenario has its own. */
+  scenarioId: string
+  scenarioTitle: string
   /** Venues a new scenario can use, and the one loaded now (null for a made-up building). */
   venues: VenueOption[]
   currentVenueId: string | null
   /** Tries to build a plan without loading it; returns why it can't be built, or null. */
   onCheckPlan: (plan: ScenarioPlan) => string | null
-  /** Compiles and loads a scenario the assistant wrote; returns an error message, or null when it is running. */
-  onRunPlan: (plan: ScenarioPlan, title: string) => string | null
+  /** Compiles and loads a scenario the assistant wrote; returns why it can't, or the new scenario's ID. */
+  onRunPlan: (plan: ScenarioPlan, title: string) => { error: string } | { id: string; reused: boolean }
+  /** Which kind of request the composer starts on: New scenario when there is no map yet. */
+  startWith?: AskKind
 }
 
 /**
@@ -39,20 +53,14 @@ type Props = {
  * be built the reason goes back to the planner once for a corrected plan. Applied changes go
  * through the same request path as the map's click tools, so they appear in the Changes list.
  */
-export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPlan, onRunPlan }: Props) {
-  const [messages, setMessages] = useState<Message[]>(() => loadAssistant().messages)
+export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues, currentVenueId, onCheckPlan, onRunPlan, startWith = 'change' }: Props) {
+  const [messages, setMessages] = useState<Message[]>(() => loadThread(scenarioId))
   const [text, setText] = useState('')
-  const [kind, setKind] = useState<AskKind>('change')
+  const [kind, setKind] = useState<AskKind>(startWith)
   const [where, setWhere] = useState<string>(currentVenueId ?? GENERATE)
   const [busy, setBusy] = useState(false)
-  // The planner API needs the signed-in person's Auth0 token, like the planner page sends.
-  const { getAccessTokenSilently } = useAuth0()
-  const authFetch = useCallback(async (url: string, init: RequestInit) => {
-    const token = await getAccessTokenSilently()
-    const headers = new Headers(init.headers)
-    headers.set('Authorization', `Bearer ${token}`)
-    return fetch(url, { ...init, headers })
-  }, [getAccessTokenSilently])
+  // The planner API needs the signed-in person's Auth0 token.
+  const authFetch = useAuthFetch()
   const nextId = useRef(messages.reduce((max, m) => Math.max(max, m.id), 0) + 1)
   const list = useRef<HTMLOListElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
@@ -60,7 +68,7 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
   // A new scenario defaults to wherever the simulator is now.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setWhere(currentVenueId ?? GENERATE) }, [currentVenueId])
-  useEffect(() => { saveMessages(messages) }, [messages])
+  useEffect(() => { saveThread(scenarioId, messages) }, [scenarioId, messages])
   useEffect(() => {
     list.current?.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' })
   }, [messages, busy])
@@ -84,10 +92,13 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
     const venue = venueFor(place)
     const capacity = venue ? capacityNote(venue.capacities) : ''
     const places = venue ? placesNote(venue.places) : ''
+    // Points marked on that venue ("point A"), described by area, doors and objects.
+    const marked = venue ? pointsNote(loadPoints(pointsKeyForLayout(venue.layout)), preparedGeometry(venue.map)) : ''
     const wording = [
       prompt,
       ...(capacity ? [capacity] : []),
       ...(places ? [places] : []),
+      ...(marked ? [marked] : []),
       ...(problems.length > 0 ? [`Your previous plans could not be built by the simulator: ${problems.join(' ')}\nReturn a corrected complete plan that keeps to what was asked but fits.`] : []),
     ].join('\n\n')
     const request = buildRequest({
@@ -107,7 +118,7 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
       add({ from: 'assistant', text: `That plan didn’t fit: ${problem} Asking for a corrected version…`, tone: 'info' })
       return askScenario(prompt, place, [...problems, problem])
     }
-    add({ from: 'assistant', plan, prompt, where: place, status: 'ready', ...(problem && { note: `This still can’t be built: ${problem}` }) })
+    add({ from: 'assistant', plan, prompt, where: place, status: 'ready', ...(outcome.title && { name: outcome.title }), ...(problem && { note: `This still can’t be built: ${problem}` }) })
   }
 
   const askChange = async (prompt: string) => {
@@ -116,10 +127,12 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
     const venue = venueFor(currentVenueId)
     // What the tables, desks and any dangers on the map do, so the change can use them by ID.
     const places = view.scene ? placesNote(placesInScene(view.scene)) : ''
+    // Points marked on this venue ("point A"), described by area, doors and objects.
+    const marked = view.scene && view.simulationId ? pointsNote(loadPoints(pointsKeyForSource(view.scene.map.source, view.simulationId)), sceneGeometry(view.scene)) : ''
+    // The conversation so far, so a reply like "no, just some of them" is read against what came before.
+    const earlier = recentChat(messages)
     const request = buildRequest({
-      simulationId: view.simulationId ?? 'assistant', prompt: places ? `${prompt}
-
-${places}` : prompt, kind: 'change',
+      simulationId: view.simulationId ?? 'assistant', prompt: [prompt, earlier, places, marked].filter(Boolean).join('\n\n'), kind: 'change',
       ...(venue && { layout: venue.layout }), inventory, ...(view.metrics && { summary: view.metrics }), interventions,
     })
     if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that request: ${request.error.message}`, tone: 'error' })
@@ -127,6 +140,33 @@ ${places}` : prompt, kind: 'change',
     if (outcome.type === 'change') add({ from: 'assistant', change: pinGoalTargets(outcome.request, inventory), prompt, inventory, status: 'ready' })
     else if (outcome.type === 'message') add({ from: 'assistant', text: outcome.text, tone: outcome.tone })
     else add({ from: 'assistant', text: 'That came back as a whole new scenario rather than a change. Switch to “New scenario” if that’s what you want.', tone: 'info' })
+  }
+
+  /**
+   * A question about this run: the planner gets its measurements and events so far, and must
+   * answer from them alone, citing the events it relied on (shown under the answer).
+   */
+  const askWhy = async (prompt: string) => {
+    if (!view.simulationId || !view.current) return add({ from: 'assistant', tone: 'info', text: 'Press Play first: there’s nothing to ask about until the run has started.' })
+    const [samples, events] = await Promise.all([
+      client.command({ type: 'query', query: { kind: 'metrics' } }),
+      client.command({ type: 'query', query: { kind: 'events' } }),
+    ])
+    const metricSamples = samples.type === 'query_result' && samples.result.kind === 'metrics' ? samples.result.samples : []
+    const eventRecords = events.type === 'query_result' && events.result.kind === 'events' ? events.result.events : []
+    const interventions: InterventionSummary[] = view.changes.map((change) => ({ id: change.interventionId, revision: 1, label: change.label, at: change.at, deleted: false }))
+    const request = buildRequest({
+      simulationId: view.simulationId, prompt, kind: 'why', inventory: await liveInventory(), interventions,
+      ...(view.metrics && { summary: view.metrics }), metricSamples, events: eventRecords,
+    })
+    if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that question: ${request.error.message}`, tone: 'error' })
+    const outcome = await askPlanner(request.value, 'why', authFetch)
+    if (outcome.type !== 'message') return add({ from: 'assistant', tone: 'info', text: 'That came back as a change rather than an answer.' })
+    // Cited events, as "Door closed (00:04)", in the order they happened.
+    const cited = (outcome.evidence ?? []).flatMap((id) => eventRecords.filter((e) => e.id === id))
+      .sort((a, b) => a.time - b.time)
+      .map((e) => `${e.name.replaceAll('_', ' ')}${e.source ? ` · ${e.source.replaceAll('_', ' ')}` : ''} (${formatClock(e.time, false)})`)
+    add({ from: 'assistant', text: outcome.text, tone: outcome.tone, ...(cited.length > 0 && { evidence: cited }) })
   }
 
   const send = async (event?: FormEvent) => {
@@ -138,6 +178,7 @@ ${places}` : prompt, kind: 'change',
     setBusy(true)
     try {
       if (kind === 'scenario') await askScenario(prompt, where === GENERATE ? null : where)
+      else if (kind === 'why') await askWhy(prompt)
       else await askChange(prompt)
     } finally {
       setBusy(false)
@@ -145,9 +186,21 @@ ${places}` : prompt, kind: 'change',
     }
   }
 
-  const run = (id: number, plan: ScenarioPlan, prompt: string) => {
-    const error = onRunPlan(plan, titleFrom(prompt))
-    update(id, error ? { note: error } : { status: 'running', note: undefined })
+  /**
+   * Runs a scenario the assistant wrote. It becomes its own scenario with its own conversation,
+   * which starts with the request that made it, so changes to it are asked about there.
+   */
+  const run = (id: number, plan: ScenarioPlan, prompt: string, name?: string) => {
+    const result = onRunPlan(plan, name ?? titleFrom(prompt))
+    if ('error' in result) return update(id, { note: result.error })
+    // Saved now: this panel is replaced by the new scenario's before its effects would run.
+    saveThread(scenarioId, messages.map((m) => (m.id === id ? ({ ...m, status: 'running', note: undefined } as Message) : m)))
+    // The same plan run again opens the scenario it already is, with its own conversation.
+    if (result.reused) return
+    saveThread(result.id, [
+      { id: 1, from: 'you', text: prompt, kind: 'scenario' },
+      { id: 2, from: 'assistant', tone: 'info', text: `Started this scenario from your request in “${scenarioTitle}”. Ask for changes to it here.` },
+    ])
   }
 
   /** Asks the planner again for a plan that can be built, sending the reason this one can't. */
@@ -166,20 +219,22 @@ ${places}` : prompt, kind: 'change',
     // A time already passed (the planner often writes "at": 0 for "now") means now, not a replay.
     const now = client.getView().current?.frame.time ?? 0
     const when = change.at !== undefined && change.at > now ? change.at : undefined
-    const result = await client.apply(change.label ?? titleFrom(prompt), change.operations, when)
+    const result = await client.apply(change.label ?? titleFrom(prompt), change.operations, when, prompt)
     update(id, result.ok ? { status: 'applied', note: undefined } : { note: explainRefusal(result.error.message) })
   }
 
   return (
     <div className="sim-chat">
+      <div className="sim-chat-about">
+        <p>Chat about <strong>{scenarioTitle}</strong></p>
+        {messages.length > 0 && (
+          <button type="button" className="sim-link" onClick={() => setMessages([])} disabled={busy} title="Clears this scenario’s conversation; other scenarios keep theirs">Start over</button>
+        )}
+      </div>
       {messages.length === 0 ? (
         <div className="sim-chat-empty">
           <p className="sim-chat-title">Talk to the simulation</p>
-          <p className="sim-muted">
-            {kind === 'change'
-              ? 'Describe a change to this run. You’ll see what it would do before anything changes.'
-              : 'Describe a whole scenario: the crowd, and what happens when. You’ll see the plan before it runs.'}
-          </p>
+          <p className="sim-muted">{KINDS.find((k) => k.kind === kind)!.intro}</p>
           <ul className="sim-suggestions" aria-label="Example requests">
             {SUGGESTIONS[kind].map((suggestion) => (
               <li key={suggestion}>
@@ -202,9 +257,9 @@ ${places}` : prompt, kind: 'change',
 
       <form className="sim-chat-form" onSubmit={send}>
         <div className="sim-ask-kind" role="radiogroup" aria-label="What to ask for">
-          {(['change', 'scenario'] as const).map((option) => (
-            <button key={option} type="button" role="radio" aria-checked={kind === option} onClick={() => setKind(option)}>
-              {option === 'change' ? 'Change this run' : 'New scenario'}
+          {KINDS.map((option) => (
+            <button key={option.kind} type="button" role="radio" aria-checked={kind === option.kind} onClick={() => setKind(option.kind)}>
+              {option.label}
             </button>
           ))}
         </div>
@@ -219,14 +274,11 @@ ${places}` : prompt, kind: 'change',
         )}
         <div className="sim-composer">
           <label className="visually-hidden" htmlFor="sim-chat-input">Message</label>
-          <textarea id="sim-chat-input" ref={input} rows={1} value={text} placeholder={kind === 'change' ? 'Describe a change…' : 'Describe a scenario…'}
+          <textarea id="sim-chat-input" ref={input} rows={1} value={text} placeholder={KINDS.find((k) => k.kind === kind)!.placeholder}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} />
           <button type="submit" className="sim-send" disabled={busy || !text.trim()} aria-label="Send"><SendHorizontal size={15} /></button>
         </div>
-        {messages.length > 0 && (
-          <button type="button" className="sim-link sim-clear-chat" onClick={() => setMessages([])} disabled={busy}>Clear conversation</button>
-        )}
       </form>
     </div>
   )
@@ -236,13 +288,22 @@ function MessageView({ message, venues, busy, onRun, onApply, onAskAgain, onDisc
   message: Message
   venues: VenueOption[]
   busy: boolean
-  onRun: (id: number, plan: ScenarioPlan, prompt: string) => void
+  onRun: (id: number, plan: ScenarioPlan, prompt: string, name?: string) => void
   onApply: (id: number, change: CreateInterventionRequest, prompt: string) => void
   onAskAgain: (id: number, plan: ScenarioPlan, prompt: string, where: string | null) => void
   onDiscard: (id: number) => void
 }) {
   if (message.from === 'you') return <li className="sim-message sim-message-you">{message.text}</li>
-  if ('text' in message) return <li className={`sim-message sim-message-assistant${message.tone === 'error' ? ' is-error' : ''}`}>{message.text}</li>
+  if ('text' in message) {
+    return (
+      <li className={`sim-message sim-message-assistant${message.tone === 'error' ? ' is-error' : ''}`}>
+        {message.text}
+        {message.evidence && message.evidence.length > 0 && (
+          <span className="sim-evidence"><span>Based on</span> {message.evidence.join(', ')}</span>
+        )}
+      </li>
+    )
+  }
 
   if ('plan' in message) {
     const { locations, population } = describePlan(message.plan)
@@ -268,7 +329,7 @@ function MessageView({ message, venues, busy, onRun, onApply, onAskAgain, onDisc
           </div>
         ) : (
           <ProposalActions status={message.status} doneLabel="Running in the simulator"
-            onAccept={() => onRun(message.id, message.plan, message.prompt)} acceptLabel="Run it" onDiscard={() => onDiscard(message.id)} />
+            onAccept={() => onRun(message.id, message.plan, message.prompt, message.name)} acceptLabel="Run it" onDiscard={() => onDiscard(message.id)} />
         )}
       </li>
     )

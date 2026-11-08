@@ -7,6 +7,7 @@ import {
   serviceResultSchema,
   type Capabilities,
   type CreateInterventionRequest,
+  type EventRecord,
   type InterventionSummary,
   type InventoryItem,
   type LayoutSource,
@@ -33,15 +34,17 @@ export const SCENARIO_CAPABILITIES: Capabilities = { ...CAPABILITIES, editableHi
  * goals (including queueing at a desk and using a table or counter), sound events, add or remove
  * rules, and schedule any of these. (Follow needs a person's ID, which the planner can't see, so
  * it is left out.) Any layout source is allowed, since the change is made to whatever map is
- * loaded (a prepared venue or an uploaded plan as well as a generated building).
+ * loaded (a prepared venue or an uploaded plan as well as a generated building). Objects can be
+ * placed by a rectangle, so "a check-in desk at point A" lands on the spot that was marked.
  */
 export const CHANGE_CAPABILITIES: Capabilities = {
   operations: ['add', 'spawn', 'set', 'schedule', 'assign_goal', 'clear_goal', 'emit', 'define_rule', 'remove_rule', 'remove'],
   goals: ['reach', 'avoid', 'wait', 'wander', 'queue', 'interact', 'sequence'],
-  geometry: [], layouts: ['generate', 'lookup', 'upload'], entityMetrics: [], editableHistory: false,
+  geometry: ['rectangle'], layouts: ['generate', 'lookup', 'upload'], entityMetrics: [], editableHistory: false,
 }
 
-export type AskKind = 'scenario' | 'change'
+/** A change to this run, a whole new scenario, or a question about what happened in this run. */
+export type AskKind = 'scenario' | 'change' | 'why'
 
 export type AskContext = {
   simulationId: string
@@ -53,6 +56,16 @@ export type AskContext = {
   summary?: MetricSample
   interventions: InterventionSummary[]
   requestId?: string
+  /** For "why" questions: the run's measurements and events, the only evidence the answer may use. */
+  metricSamples?: MetricSample[]
+  events?: EventRecord[]
+}
+
+/** At most `limit` items, spread evenly and keeping the last, so a long run still fits a request. */
+export function spread<T>(items: readonly T[], limit: number): T[] {
+  if (items.length <= limit) return [...items]
+  const step = (items.length - 1) / (limit - 1)
+  return Array.from({ length: limit }, (_, k) => items[Math.round(k * step)]!)
 }
 
 export function buildRequest(context: AskContext) {
@@ -67,15 +80,16 @@ export function buildRequest(context: AskContext) {
       inventory: context.inventory,
       ...(context.summary && { summary: context.summary }),
       interventions: context.interventions,
+      ...(context.kind === 'why' && { askWhy: true, metricSamples: spread(context.metricSamples ?? [], 100), events: (context.events ?? []).slice(-100) }),
     },
   })
 }
 
 /** What the Assistant shows for a reply. */
 export type Outcome =
-  | { type: 'scenario'; plan: ScenarioPlan }
+  | { type: 'scenario'; plan: ScenarioPlan; title?: string }
   | { type: 'change'; request: CreateInterventionRequest }
-  | { type: 'message'; text: string; tone: 'info' | 'error' }
+  | { type: 'message'; text: string; tone: 'info' | 'error'; evidence?: string[] }
 
 type Fetcher = (url: string, init: RequestInit) => Promise<{ json(): Promise<unknown> }>
 
@@ -111,10 +125,16 @@ export async function askPlanner(request: PlannerRequest, kind: AskKind, fetcher
 
 /** Checks a reply against what was asked, the way the planner page does. */
 export function interpret(reply: Extract<ReturnType<typeof PlannerReplySchema.parse>, object>, kind: AskKind, request: PlannerRequest): Outcome {
+  if (kind === 'why') {
+    return reply.kind === 'answer'
+      ? { type: 'message', tone: 'info', text: reply.text, evidence: reply.evidenceEventIds }
+      : reply.kind === 'clarification' ? { type: 'message', tone: 'info', text: reply.message }
+      : { type: 'message', tone: 'info', text: 'That came back as a change rather than an answer. Ask about something that has already happened in this run.' }
+  }
   switch (reply.kind) {
     case 'scenario':
       return kind === 'scenario'
-        ? { type: 'scenario', plan: reply.plan }
+        ? { type: 'scenario', plan: reply.plan, ...(reply.title && { title: reply.title }) }
         : { type: 'message', tone: 'info', text: 'That came back as a whole new scenario rather than a change. Switch to “New scenario” if that’s what you want, or describe a change to this run.' }
     case 'followup': {
       if (kind !== 'change') return { type: 'message', tone: 'info', text: 'That came back as a change to the current run rather than a new scenario. Try describing the whole scenario.' }
@@ -123,6 +143,8 @@ export function interpret(reply: Extract<ReturnType<typeof PlannerReplySchema.pa
       }
       const checked = parseContract(CreateInterventionRequestSchema, reply.request, { capabilities: CHANGE_CAPABILITIES })
       if (!checked.ok) return { type: 'message', tone: 'error', text: `That change didn’t pass the simulator’s checks: ${checked.error.message}` }
+      // Live changes can place objects (desks, stands, dangers), not walls, rooms or doors.
+      if (addsStructure(checked.value.operations)) return { type: 'message', tone: 'info', text: 'That change would add walls, rooms or doors, which can’t be changed while a run plays. Edit the floor plan instead, or place an object.' }
       return { type: 'change', request: checked.value }
     }
     case 'clarification':
@@ -181,6 +203,11 @@ export function placesNote(places: readonly Place[]): string {
 }
 
 type Op = CreateInterventionRequest['operations'][number]
+
+/** Whether any operation (at any depth) adds something other than an object. */
+function addsStructure(operations: readonly Op[]): boolean {
+  return operations.some((o) => (o.op === 'add' && o.entity.kind !== 'object') || ((o.op === 'schedule' || o.op === 'define_rule') && addsStructure(o.operations as Op[])))
+}
 type Goal = Extract<Op, { op: 'assign_goal' }>['goal']
 type Target = Extract<Goal, { kind: 'reach' }>['target']
 

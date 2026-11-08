@@ -35,6 +35,9 @@ export const RunSummarySchema = z.strictObject({
   startedAt: z.iso.datetime(),
   sampleCount: CounterSchema,
   interventionCount: CounterSchema,
+  title: z.string().optional(),
+  /** Whether a safety report has been written for this run. */
+  hasReport: z.boolean().optional(),
 });
 export const RunSummariesSchema = z.array(RunSummarySchema);
 export const DensityGridSchema = z.strictObject({ width: PositiveIntegerSchema, height: PositiveIntegerSchema, cellSize: PositiveSchema, origin: Vec2Schema, units: z.enum(['people/m2', 'people/model-unit2']), values: z.array(NonnegativeSchema) }).refine((v) => v.values.length === v.width * v.height, 'Density buffer length must equal width × height');

@@ -1,20 +1,23 @@
-import { DoorOpen, MousePointer2, PersonStanding, SquareDashedMousePointer, TriangleAlert } from 'lucide-react'
+import { DoorOpen, MapPin, MousePointer2, PersonStanding, SquareDashedMousePointer, TriangleAlert } from 'lucide-react'
 import type { ScenarioPlan } from '@crowd-control/contract'
 import type { Pick } from '../render/hitTest.ts'
 import type { AppliedChange, SimulationView } from '../worker/simulationClient.ts'
 import { formatClock } from './incidents.ts'
 import { DANGER, isDown, isOpen, nameOf, presentPeople, selectionActions, type MapAction } from './mapActions.ts'
 import { objectOf, isHazard, placeFacts, placeReasons, placeUsage } from './places.ts'
+import { describePoint, sceneGeometry, type MapPoint } from './points.ts'
 
 /**
- * What the pointer does on the map. Select and Box choose things to inspect; Trip, Doors and
- * Danger change the simulation with one click. In every tool but Box, dragging pans the map.
+ * What the pointer does on the map. Select and Box choose things to inspect; Point marks spots
+ * to mention to the assistant; Trip, Doors and Danger change the simulation with one click. In
+ * every tool but Box, dragging pans the map.
  */
-export type MapTool = 'select' | 'box' | 'trip' | 'doors' | 'danger'
+export type MapTool = 'select' | 'box' | 'point' | 'trip' | 'doors' | 'danger'
 
 const TOOLS: { id: MapTool; label: string; hint: string; key: string; Icon: typeof MousePointer2; group: 'choose' | 'change' }[] = [
   { id: 'select', label: 'Select', hint: 'Click a person, door, room or marked object to see it. Drag to pan; Shift-click or Shift-drag to select several', key: 'V', Icon: MousePointer2, group: 'choose' },
   { id: 'box', label: 'Box', hint: 'Drag a box to select the people and doors inside it; hold Shift to add to the selection', key: 'B', Icon: SquareDashedMousePointer, group: 'choose' },
+  { id: 'point', label: 'Point', hint: 'Click the floor to mark a point (A, B, C…), then mention it to the assistant: “put the check-in at point A”', key: 'P', Icon: MapPin, group: 'choose' },
   { id: 'trip', label: 'Trip', hint: 'Click a person to make them fall, or to help them up', key: 'F', Icon: PersonStanding, group: 'change' },
   { id: 'doors', label: 'Doors', hint: 'Click a door to close it, or to open it again', key: 'D', Icon: DoorOpen, group: 'change' },
   { id: 'danger', label: 'Danger', hint: `Click the floor to place a danger: people within ${DANGER.m.notice} m move ${DANGER.m.keep} m away from it and stay clear`, key: 'X', Icon: TriangleAlert, group: 'change' },
@@ -50,15 +53,16 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * Details of what is selected, with the actions that apply to it. One item shows its own
  * facts; several show totals, and each action says how many it affects.
  */
-export function SelectionDetails({ selection, view, plan, onAction, onClear }: {
-  selection: readonly Pick[]; view: SimulationView; plan: ScenarioPlan | null; onAction: (action: MapAction) => void; onClear: () => void
+export function SelectionDetails({ selection, view, plan, points, onAction, onClear, onRemovePoint }: {
+  selection: readonly Pick[]; view: SimulationView; plan: ScenarioPlan | null; points: readonly MapPoint[]
+  onAction: (action: MapAction) => void; onClear: () => void; onRemovePoint: (id: string) => void
 }) {
   const { scene } = view
   const frame = view.current?.frame ?? null
   if (selection.length === 0 || !scene) {
     return (
       <p className="sim-muted">
-        Click a person, door, room or marked object on the map (a blue dot marks things people use; red, a danger). Use Box (B) or Shift-drag to select several, and Trip (F), Doors (D) or Danger (X) to change things with one click.
+        Click a person, door, room or marked object on the map (a blue dot marks things people use; red, a danger). Use Box (B) or Shift-drag to select several, Point (P) to mark spots for the assistant, and Trip (F), Doors (D) or Danger (X) to change things with one click.
       </p>
     )
   }
@@ -71,6 +75,19 @@ export function SelectionDetails({ selection, view, plan, onAction, onClear }: {
     </div>
   )
 
+  if (selection.length === 1 && selection[0]!.kind === 'point') {
+    const id = selection[0]!.id
+    return (
+      <div className="sim-selected">
+        {pointDetails(id, points, scene)}
+        {points.some((p) => p.id === id) && (
+          <div className="sim-actions">
+            <button type="button" className="sim-action" onClick={() => onRemovePoint(id)}>Remove point</button>
+          </div>
+        )}
+      </div>
+    )
+  }
   if (selection.length === 1) {
     const [only] = selection
     return <div className="sim-selected">{single(only!, view, plan)}{buttons}</div>
@@ -98,6 +115,25 @@ export function SelectionDetails({ selection, view, plan, onAction, onClear }: {
       </dl>
       {buttons}
     </div>
+  )
+}
+
+/** Where a marked point is: its area and the nearest door and object, and how to use it. */
+function pointDetails(id: string, points: readonly MapPoint[], scene: NonNullable<SimulationView['scene']>) {
+  const point = points.find((p) => p.id === id)
+  if (!point) return <p className="sim-muted">That point was removed.</p>
+  const { area, doors, things } = describePoint(point, sceneGeometry(scene))
+  const distance = (d: number) => formatSize(Math.round(d * 10) / 10, scene.map.units)
+  return (
+    <>
+      <p className="sim-selected-name">Point {point.id}</p>
+      <dl className="sim-facts">
+        <div><dt>In</dt><dd>{area ? nameOf(scene, area.id) : 'Not on the floor'}</dd></div>
+        {doors[0] && <div><dt>Nearest door</dt><dd>{nameOf(scene, doors[0].item.id)}, {distance(doors[0].distance)}</dd></div>}
+        {things[0] && <div><dt>Next to</dt><dd>{nameOf(scene, things[0].item.id)}</dd></div>}
+      </dl>
+      <p className="sim-point-tip">Mention it to the assistant, like <q>put the check-in at point {point.id}</q> or <q>people come in by the door near point {point.id}</q>.</p>
+    </>
   )
 }
 

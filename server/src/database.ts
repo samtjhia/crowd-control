@@ -4,16 +4,23 @@ import {
   CreateInterventionRequestSchema,
   IdSchema,
   MetricSampleSchema,
+  ModelPresetSchema,
+  PreparedMapSchema,
   RunAnalyticsSchema,
+  RunReplaySchema,
+  ScenarioPlanSchema,
   RunSummariesSchema,
 } from '@crowd-control/contract'
-import type { RunAnalytics, RunSummary } from '@crowd-control/contract'
+import type { RunAnalytics, RunReplay, RunSummary } from '@crowd-control/contract'
 import type { Pool } from 'pg'
 
 const RunSchema = z.strictObject({
   runId: z.uuid(),
   simulationId: IdSchema,
   startedAt: z.iso.datetime(),
+  /** What the person calls it ("Concert evacuation"), and the scenario itself, so it can be replayed anywhere. */
+  title: z.string().min(1).max(200).optional(),
+  plan: ScenarioPlanSchema.optional(),
 })
 
 const MetricsBatchSchema = z.strictObject({
@@ -48,10 +55,14 @@ export async function getOwnedRuns(pool: Pool, ownerSub: string): Promise<RunSum
     startedAt: Date | string
     sampleCount: number
     interventionCount: number
+    title: string | null
+    hasReport: boolean
   }>(
     `SELECT run.run_id AS "runId",
             run.simulation_id AS "simulationId",
             run.started_at AS "startedAt",
+            run.title AS "title",
+            (run.report IS NOT NULL) AS "hasReport",
             COALESCE(metrics.sample_count, 0)::integer AS "sampleCount",
             COALESCE(interventions.intervention_count, 0)::integer AS "interventionCount"
      FROM crowd_runs AS run
@@ -71,8 +82,9 @@ export async function getOwnedRuns(pool: Pool, ownerSub: string): Promise<RunSum
     [ownerSub],
   )
 
-  return RunSummariesSchema.parse(result.rows.map((row) => ({
+  return RunSummariesSchema.parse(result.rows.map(({ title, ...row }) => ({
     ...row,
+    ...(title ? { title } : {}),
     startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : row.startedAt,
   })))
 }
@@ -161,6 +173,107 @@ export async function getRunAnalytics(pool: Pool, ownerSub: string, runId: strin
   })
 }
 
+/**
+ * A floor plan saved from the editor: its name and floor, when it was saved, and the reviewed
+ * map (walls, rooms, doors as a grid). The map's own ID is the venue's ID.
+ */
+const SavedVenueSchema = z.strictObject({
+  name: z.string().min(1).max(200),
+  floor: z.string().max(200),
+  savedAt: z.iso.datetime(),
+  map: PreparedMapSchema,
+})
+export type SavedVenueRecord = z.infer<typeof SavedVenueSchema>
+
+/** The signed-in person's saved floor plans, newest first. */
+export async function listVenues(pool: Pool, ownerSub: string): Promise<SavedVenueRecord[]> {
+  const result = await pool.query(
+    `SELECT name, floor, saved_at AS "savedAt", map
+     FROM crowd_venues
+     WHERE owner_sub = $1
+     ORDER BY saved_at DESC
+     LIMIT 100`,
+    [ownerSub],
+  )
+  return result.rows.flatMap((row) => {
+    const parsed = SavedVenueSchema.safeParse({ ...row, savedAt: row.savedAt instanceof Date ? row.savedAt.toISOString() : row.savedAt })
+    return parsed.success ? [parsed.data] : []
+  })
+}
+
+/**
+ * Saves a floor plan under its map ID. Saving again replaces it, unless the stored copy is
+ * newer (another device saved it since), so an old copy never overwrites a newer one.
+ */
+export async function saveVenue(pool: Pool, ownerSub: string, venueId: string, input: unknown): Promise<'invalid' | 'saved'> {
+  const parsed = SavedVenueSchema.safeParse(input)
+  if (!parsed.success || parsed.data.map.id !== venueId) return 'invalid'
+  const venue = parsed.data
+  await pool.query(
+    `INSERT INTO crowd_venues (owner_sub, venue_id, name, floor, saved_at, map)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (owner_sub, venue_id) DO UPDATE
+       SET name = EXCLUDED.name, floor = EXCLUDED.floor, saved_at = EXCLUDED.saved_at, map = EXCLUDED.map
+       WHERE crowd_venues.saved_at <= EXCLUDED.saved_at`,
+    [ownerSub, venueId, venue.name, venue.floor, venue.savedAt, JSON.stringify(venue.map)],
+  )
+  return 'saved'
+}
+
+/** Deletes one of the signed-in person's floor plans; false if there was none. */
+/**
+ * A scenario the person kept (one the assistant wrote and they ran): its name, the plan, the
+ * model it runs with, and when it was last saved.
+ */
+const SavedScenarioSchema = z.strictObject({
+  id: IdSchema,
+  title: z.string().min(1).max(200),
+  plan: ScenarioPlanSchema,
+  model: ModelPresetSchema,
+  savedAt: z.iso.datetime(),
+})
+export type SavedScenarioRecord = z.infer<typeof SavedScenarioSchema>
+
+export async function listScenarios(pool: Pool, ownerSub: string): Promise<SavedScenarioRecord[]> {
+  const result = await pool.query(
+    `SELECT scenario_id AS "id", title, plan, model, saved_at AS "savedAt"
+     FROM crowd_scenarios WHERE owner_sub = $1 ORDER BY saved_at DESC LIMIT 200`,
+    [ownerSub],
+  )
+  return result.rows.flatMap((row) => {
+    const parsed = SavedScenarioSchema.safeParse({ ...row, savedAt: row.savedAt instanceof Date ? row.savedAt.toISOString() : row.savedAt })
+    return parsed.success ? [parsed.data] : []
+  })
+}
+
+/** Saves (or renames) a scenario; an older copy never replaces a newer one. */
+export async function saveScenario(pool: Pool, ownerSub: string, scenarioId: string, input: unknown): Promise<'invalid' | 'saved'> {
+  const parsed = SavedScenarioSchema.safeParse(input)
+  if (!parsed.success || parsed.data.id !== scenarioId) return 'invalid'
+  const scenario = parsed.data
+  await pool.query(
+    `INSERT INTO crowd_scenarios (owner_sub, scenario_id, title, plan, model, saved_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (owner_sub, scenario_id) DO UPDATE
+       SET title = EXCLUDED.title, plan = EXCLUDED.plan, model = EXCLUDED.model, saved_at = EXCLUDED.saved_at
+       WHERE crowd_scenarios.saved_at <= EXCLUDED.saved_at`,
+    [ownerSub, scenarioId, scenario.title, JSON.stringify(scenario.plan), JSON.stringify(scenario.model), scenario.savedAt],
+  )
+  return 'saved'
+}
+
+export async function deleteScenario(pool: Pool, ownerSub: string, scenarioId: string): Promise<'invalid' | boolean> {
+  if (!IdSchema.safeParse(scenarioId).success) return 'invalid'
+  const result = await pool.query('DELETE FROM crowd_scenarios WHERE owner_sub = $1 AND scenario_id = $2', [ownerSub, scenarioId])
+  return (result.rowCount ?? 0) > 0
+}
+
+export async function deleteVenue(pool: Pool, ownerSub: string, venueId: string): Promise<'invalid' | boolean> {
+  if (!IdSchema.safeParse(venueId).success) return 'invalid'
+  const result = await pool.query('DELETE FROM crowd_venues WHERE owner_sub = $1 AND venue_id = $2', [ownerSub, venueId])
+  return (result.rowCount ?? 0) > 0
+}
+
 export async function initializeDatabase(pool: Pool): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS crowd_runs (
@@ -211,6 +324,32 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
       PRIMARY KEY (run_id, request_id)
     )
   `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crowd_venues (
+      owner_sub TEXT NOT NULL,
+      venue_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      floor TEXT NOT NULL,
+      saved_at TIMESTAMPTZ NOT NULL,
+      map JSONB NOT NULL,
+      PRIMARY KEY (owner_sub, venue_id)
+    )
+  `)
+  // A run's title and scenario, for Past runs and replay.
+  await pool.query('ALTER TABLE crowd_runs ADD COLUMN IF NOT EXISTS title TEXT')
+  await pool.query('ALTER TABLE crowd_runs ADD COLUMN IF NOT EXISTS plan JSONB')
+  await pool.query('ALTER TABLE crowd_runs ADD COLUMN IF NOT EXISTS report JSONB')
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crowd_scenarios (
+      owner_sub TEXT NOT NULL,
+      scenario_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      plan JSONB NOT NULL,
+      model JSONB NOT NULL,
+      saved_at TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (owner_sub, scenario_id)
+    )
+  `)
 }
 
 export async function saveRun(pool: Pool, ownerSub: string, input: unknown): Promise<boolean> {
@@ -218,16 +357,130 @@ export async function saveRun(pool: Pool, ownerSub: string, input: unknown): Pro
   if (!parsed.success) return false
   const run = parsed.data
   const result = await pool.query(
-    `INSERT INTO crowd_runs (run_id, simulation_id, started_at, owner_sub)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO crowd_runs (run_id, simulation_id, started_at, owner_sub, title, plan)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (run_id) DO UPDATE
        SET run_id = EXCLUDED.run_id
        WHERE crowd_runs.owner_sub = EXCLUDED.owner_sub
          AND crowd_runs.simulation_id = EXCLUDED.simulation_id
      RETURNING run_id`,
-    [run.runId, run.simulationId, run.startedAt, ownerSub],
+    [run.runId, run.simulationId, run.startedAt, ownerSub, run.title ?? null, run.plan ? JSON.stringify(run.plan) : null],
   )
   return result.rowCount !== null && result.rowCount > 0
+}
+
+/** The run's saved safety report and the facts it was written from, if one has been written. */
+export async function getSavedReport(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | null | { report: unknown; facts: unknown } | 'none'> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+  const result = await pool.query('SELECT report FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2', [runId, ownerSub])
+  if (result.rowCount === 0) return null
+  const saved = result.rows[0]?.report
+  return saved && typeof saved === 'object' && 'report' in saved ? saved : 'none'
+}
+
+/** Keeps a run's report (and the facts it was written from), replacing any earlier one. */
+export async function saveReport(pool: Pool, ownerSub: string, runId: string, report: unknown, facts: unknown): Promise<void> {
+  await pool.query('UPDATE crowd_runs SET report = $3 WHERE run_id = $1 AND owner_sub = $2', [runId, ownerSub, JSON.stringify({ report, facts })])
+}
+
+/** Deletes one of the person's runs with its measurements and changes; false if it isn't theirs. */
+export async function deleteRun(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | boolean> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+  const owned = await pool.query('SELECT 1 FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2', [runId, ownerSub])
+  if (owned.rowCount === 0) return false
+  await pool.query('DELETE FROM crowd_metric_samples WHERE run_id = $1', [runId])
+  await pool.query('DELETE FROM crowd_interventions WHERE run_id = $1', [runId])
+  const removed = await pool.query('DELETE FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2', [runId, ownerSub])
+  return (removed.rowCount ?? 0) > 0
+}
+
+/** The measured facts the safety report is written from, all from one of the person's runs. */
+export type RunFacts = {
+  scenario: string
+  startedAt: string
+  units: 'people/m²' | 'relative'
+  measuredSeconds: number
+  measurements: number
+  end: { present: number; departed: number; immobile: number; clearance: { t50: number | null; t90: number | null; t100: number | null } } | null
+  busiest: RunAnalytics['peakDensityByZone']
+  changes: RunAnalytics['interventions']
+}
+
+export async function getRunFacts(pool: Pool, ownerSub: string, runId: string, units: RunFacts['units']): Promise<'invalid' | null | RunFacts> {
+  const analytics = await getRunAnalytics(pool, ownerSub, runId)
+  if (analytics === 'invalid' || analytics === null) return analytics
+  const [run, timeline] = await Promise.all([
+    pool.query('SELECT simulation_id AS "simulationId", title, started_at AS "startedAt" FROM crowd_runs WHERE run_id = $1', [runId]),
+    pool.query(
+      `SELECT simulation_time AS "time", present, departed, immobile, clearance
+       FROM crowd_metric_samples WHERE run_id = $1 ORDER BY simulation_time`,
+      [runId],
+    ),
+  ])
+  const row = run.rows[0] ?? {}
+  const samples = timeline.rows as { time: number; present: number; departed: number; immobile: number; clearance: { t50: number | null; t90: number | null; t100: number | null } }[]
+  const last = samples.at(-1)
+  // Clearance times, when the simulator didn't record them: the first moment half, 90% and
+  // everyone had left, from the departure counts.
+  const total = last ? last.present + last.departed : 0
+  const firstAt = (share: number) => {
+    if (total === 0) return null
+    const needed = Math.ceil(total * share)
+    return samples.find((sample) => sample.departed >= needed)?.time ?? null
+  }
+  const end = last && {
+    ...last,
+    clearance: {
+      t50: last.clearance?.t50 ?? firstAt(0.5),
+      t90: last.clearance?.t90 ?? firstAt(0.9),
+      t100: last.clearance?.t100 ?? (last.present === 0 ? firstAt(1) : null),
+    },
+  }
+  return {
+    scenario: row.title ?? row.simulationId ?? 'Simulation',
+    startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : String(row.startedAt ?? ''),
+    units,
+    measuredSeconds: end ? Number(end.time) : 0,
+    measurements: analytics.sampleCount,
+    end: end ? { present: end.present, departed: end.departed, immobile: end.immobile, clearance: end.clearance } : null,
+    busiest: [...analytics.peakDensityByZone].sort((a, b) => b.peakDensity - a.peakDensity).slice(0, 12),
+    changes: analytics.interventions,
+  }
+}
+
+/**
+ * What it takes to replay one of the person's runs: its scenario (if it was saved with the run)
+ * and every change applied, in the order they took effect, with the time each took effect.
+ */
+export async function getRunReplay(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | null | RunReplay> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+  const run = await pool.query(
+    `SELECT simulation_id AS "simulationId", started_at AS "startedAt", title, plan
+     FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2`,
+    [runId, ownerSub],
+  )
+  const row = run.rows[0]
+  if (!row) return null
+  const changes = await pool.query(
+    `SELECT prompt, request, acknowledgement
+     FROM crowd_interventions WHERE run_id = $1
+     ORDER BY (acknowledgement->>'at')::double precision, recorded_at`,
+    [runId],
+  )
+  const plan = ScenarioPlanSchema.safeParse(row.plan)
+  return RunReplaySchema.parse({
+    runId,
+    simulationId: row.simulationId,
+    startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : row.startedAt,
+    ...(row.title ? { title: row.title } : {}),
+    plan: plan.success ? plan.data : null,
+    changes: changes.rows.flatMap((change) => {
+      const request = CreateInterventionRequestSchema.safeParse(change.request)
+      const ack = ApplyAckSchema.safeParse(change.acknowledgement)
+      if (!request.success || !ack.success) return []
+      return [{ at: ack.data.at, label: request.data.label ?? change.prompt, prompt: change.prompt, operations: request.data.operations }]
+    }),
+  })
 }
 
 export async function saveMetricBatch(pool: Pool, ownerSub: string, runId: string, input: unknown): Promise<'invalid' | 'missing-run' | 'saved'> {

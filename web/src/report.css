@@ -1,0 +1,66 @@
+/* The safety report: one page, like a document on the green workspace; prints as plain paper. */
+.report { width: min(100% - 32px, 820px); margin: 0 auto; }
+.report-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 28px 4px 16px; }
+.report-page .report-back { gap: 6px; text-decoration: none; }
+.report-tool-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.report-tool-buttons .hist-button { margin-top: 0; height: 36px; }
+
+.report-sheet {
+  padding: clamp(24px, 5vw, 56px) clamp(22px, 6vw, 64px);
+  border-radius: var(--cc-radius);
+  background: var(--cc-card);
+  box-shadow: var(--cc-shadow);
+  line-height: 1.6;
+}
+.report-status { display: grid; justify-items: start; gap: 6px; }
+.report-status p { max-width: 56ch; margin: 0; color: var(--cc-muted); }
+.report-status strong { color: var(--cc-text); }
+.report-status .hist-button { margin-top: 12px; }
+
+.report-head { margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--cc-hair); }
+.report-head h1 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 34px); font-weight: 700; line-height: 1.15; }
+.report-meta { margin: 0; color: var(--cc-muted); font-size: 13.5px; }
+.report-summary { max-width: 68ch; margin: 0 0 22px; font-size: 16px; }
+
+.report-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; margin: 0 0 8px; overflow: hidden; border-radius: 14px; background: var(--cc-hair); }
+.report-figures div { padding: 12px 14px; background: var(--cc-well); }
+.report-figures dt { color: var(--cc-muted); font-size: 12px; }
+.report-figures dd { margin: 2px 0 0; font: 650 20px/1.2 var(--cc-display); letter-spacing: -0.03em; }
+
+.report-sheet h2 { margin: 30px 0 10px; font-size: 18px; font-weight: 650; }
+.report-findings, .report-recommendations { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.report-findings > li { padding: 14px 16px; border-radius: 12px; background: var(--cc-well); }
+.report-findings p { max-width: 70ch; margin: 0; }
+.report-finding-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 4px !important; }
+.report-severity { padding: 2px 8px; border-radius: 999px; background: var(--cc-green-soft); color: var(--cc-green-hover); font-size: 12px; font-weight: 600; }
+.is-high .report-severity { background: var(--cc-rose-soft); color: #87283f; }
+.is-medium .report-severity { background: var(--cc-amber-soft); color: #7a4f12; }
+.report-where { color: var(--cc-muted); font-size: 13px; }
+.report-recommendations { counter-reset: rec; }
+.report-recommendations li { position: relative; max-width: 70ch; padding-left: 34px; counter-increment: rec; }
+.report-recommendations li::before { content: counter(rec); position: absolute; top: 1px; left: 0; display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--cc-green-soft); color: var(--cc-green-hover); font-size: 12px; font-weight: 700; }
+
+.report-caveats { margin-top: 30px; padding-top: 6px; border-top: 1px solid var(--cc-hair); color: var(--cc-muted); font-size: 13px; }
+.report-caveats h2 { font-size: 14px; color: var(--cc-text); }
+.report-caveats ul { margin: 0 0 10px; padding-left: 18px; }
+
+@media print {
+  .report-page { background: #fff; padding: 0; }
+  .report-page .cc-header, .report-tools { display: none; }
+  .report { width: 100%; }
+  .report-sheet { padding: 0; box-shadow: none; }
+  .report-findings > li, .report-figures div { break-inside: avoid; }
+}
+
+/* The report inside a side panel or Past runs: same content, tighter. */
+.report-body.is-compact { font-size: 13px; line-height: 1.55; }
+.report-body.is-compact .report-head { margin-bottom: 12px; padding-bottom: 12px; }
+.report-body.is-compact .report-head h1 { font-size: 19px; }
+.report-body.is-compact .report-meta { font-size: 12px; }
+.report-body.is-compact .report-summary { margin-bottom: 14px; font-size: 13.5px; }
+.report-body.is-compact .report-figures { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+.report-body.is-compact .report-figures div { padding: 8px 10px; }
+.report-body.is-compact .report-figures dd { font-size: 16px; }
+.report-body.is-compact h2 { margin: 18px 0 8px; font-size: 14.5px; }
+.report-body.is-compact .report-findings > li { padding: 10px 12px; }
+.report-body.is-compact .report-caveats { margin-top: 18px; font-size: 12px; }

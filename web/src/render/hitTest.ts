@@ -1,7 +1,7 @@
 import type { Frame, RenderScene, Vec2 } from '@crowd-control/contract'
 
-/** Something on the map the user can point at: a person, a door, a room, or an object (a table, a danger). */
-export type Pick = { kind: 'agent' | 'portal' | 'zone' | 'object'; id: string }
+/** Something on the map the user can point at: a person, a door, a room, an object (a table, a danger), or a marked point (picked from its pin, not here). */
+export type Pick = { kind: 'agent' | 'portal' | 'zone' | 'object' | 'point'; id: string }
 export type PickKind = Pick['kind']
 
 type Rect = { x: number; y: number; width: number; height: number }

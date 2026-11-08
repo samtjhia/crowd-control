@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
-import '@fontsource-variable/dm-sans'
-import '@fontsource-variable/manrope'
 import { ArrowLeft, Check, Crop, ImageUp, Maximize2, Minus, Plus } from 'lucide-react'
 import { LIMITS } from '../sim/scenario.ts'
+import { AccountMenu, PageLinks } from '../site/Site.tsx'
 import '../sim/simulator.css'
 import './editor.css'
 import { PlanCanvas, type PlanCanvasHandle } from './PlanCanvas.tsx'
@@ -183,7 +182,7 @@ export default function EditorApp() {
       )}
 
       <header className="sim-float sim-topbar editor-topbar">
-        <a className="editor-back" href="/sim" title="Back to the simulator"><ArrowLeft size={16} aria-hidden="true" /><span className="visually-hidden">Back to the simulator</span></a>
+        <a className="editor-back" href="/plans" title="Back to your floor plans"><ArrowLeft size={16} aria-hidden="true" /><span className="visually-hidden">Back to your floor plans</span></a>
         <p className="sim-brand">Floor plan editor</p>
         <ol className="editor-steps" aria-label="Steps">
           {STEPS.map(({ id, label }, index) => {
@@ -200,6 +199,8 @@ export default function EditorApp() {
             )
           })}
         </ol>
+        <PageLinks />
+        <AccountMenu />
       </header>
 
       {!plan ? (

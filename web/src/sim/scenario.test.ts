@@ -115,3 +115,17 @@ test('a varied layout reshapes a generated plan and still plays', () => {
   const frame = lastFrame(send(sim, { type: 'run_to', time: 60 }))
   assert.ok(frame.agents.every((agent) => agent.state === 'departed'), 'everyone still gets out of the reshaped building')
 })
+
+test('a scenario the assistant wrote gets a simulation ID of its own, once', async () => {
+  const { ownSimulationId } = await import('./ownSimulationId.ts')
+  const { scenarios } = await import('./scenario.ts')
+  const { readFileSync } = await import('node:fs')
+  const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../../../contract/fixtures/${name}.json`, import.meta.url), 'utf8'))
+  const concert = scenarios(fixture('scenario-plan'), fixture('compile-output').resolvedModel).find((s) => s.id === 'concert-floor')!
+  // The planner hands plans back under the ID of the scenario they were asked from.
+  const written = { ...concert, id: 'assistant-3', title: 'Assistant: check-in at point B' }
+  const own = ownSimulationId(written)
+  assert.notEqual(own.plan.simulationId, concert.plan.simulationId, 'its runs no longer look like the concert demo’s')
+  assert.match(own.plan.simulationId, /^assistant-3-/)
+  assert.equal(ownSimulationId(own), own, 'an ID it already has is kept')
+})

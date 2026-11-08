@@ -57,6 +57,8 @@ export type VenueOption = {
   capacities: Record<string, number>
   /** The tables, counters and check-in desks people can use, with what each does. */
   places: Place[]
+  /** The map itself, so marked points can be described before a scenario runs there. */
+  map: PreparedMap
 }
 
 /**
@@ -75,7 +77,7 @@ export function mapInventory(map: PreparedMap): InventoryItem[] {
  */
 export function venueOptions(bodies?: ModelPreset): VenueOption[] {
   const prepared = venueAssets().flatMap((map): VenueOption[] => map.source.mode === 'lookup'
-    ? [{ id: map.id, name: map.source.venue, layout: { mode: 'lookup', venue: map.source.venue, floor: map.source.floor }, inventory: mapInventory(map), capacities: spawnCapacities(map, PEDESTRIAN_PRESET), places: placesOf(map.entities) }]
+    ? [{ id: map.id, name: map.source.venue, layout: { mode: 'lookup', venue: map.source.venue, floor: map.source.floor }, inventory: mapInventory(map), capacities: spawnCapacities(map, PEDESTRIAN_PRESET), places: placesOf(map.entities), map }]
     : [])
   const saved = loadSavedVenues().map((venue): VenueOption => ({
     id: venue.map.id, name: venue.name,
@@ -83,6 +85,7 @@ export function venueOptions(bodies?: ModelPreset): VenueOption[] {
     inventory: mapInventory(venue.map),
     capacities: venue.map.grid.units === 'm' ? spawnCapacities(venue.map, PEDESTRIAN_PRESET) : bodies ? spawnCapacities(venue.map, bodies) : {},
     places: placesOf(venue.map.entities),
+    map: venue.map,
   }))
   return [...prepared, ...saved]
 }
@@ -135,7 +138,8 @@ export function fittedStarterPlan(venue: SavedVenue, model: ModelPreset): Scenar
   return plan
 }
 
-export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: ModelPreset }
+/** A scenario: its name, plan and model; `savedAt` for the person's own, kept in their account. */
+export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: ModelPreset; savedAt?: string }
 
 // Small builders so each demo plan reads like its description.
 const inside = (id: string) => ({ ids: [id] })

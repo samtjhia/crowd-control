@@ -127,29 +127,36 @@ test('previews name doors and rooms the way the plan does', async () => {
   assert.deepEqual(describeOperations([close], []), ['Close alley head'], 'without a label, the ID reads as words')
 })
 
-test('the conversation and the assistant’s scenarios survive a reload', async () => {
-  const { loadAssistant, saveMessages, saveScenarios } = await import('./assistantStore.ts')
+test('each scenario keeps its own conversation, and they and the assistant’s scenarios survive a reload', async () => {
+  const { loadAssistant, loadThread, saveThread, saveScenarios } = await import('./assistantStore.ts')
   const memory = new Map<string, string>()
   const global = globalThis as unknown as { localStorage?: unknown }
   global.localStorage = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => { memory.set(k, v) } }
   try {
     const change = { schemaVersion: 1 as const, simulationId: 's', requestId: 'r', operations: [{ op: 'set' as const, targets: { ids: ['exit'] }, values: { components: { portal: { open: false } } } }] }
-    saveMessages([
+    saveThread('concert-floor', [
       { id: 1, from: 'you', text: 'close the exit', kind: 'change' },
       { id: 2, from: 'assistant', change, prompt: 'close the exit', inventory: [], status: 'applied' },
     ])
+    saveThread('school-wing', [{ id: 1, from: 'you', text: 'sound the alarm', kind: 'change' }])
     saveScenarios([{ id: 'assistant-1', title: 'Assistant: drill', plan, model }])
-    const restored = loadAssistant()
-    assert.equal(restored.messages.length, 2)
-    assert.equal(restored.scenarios[0]!.id, 'assistant-1', 'saving messages kept the scenarios, and the other way round')
-    const applied = restored.messages[1]!
+    assert.equal(loadThread('concert-floor').length, 2)
+    assert.deepEqual(loadThread('school-wing').map((m) => 'text' in m && m.text), ['sound the alarm'], 'another scenario has its own conversation')
+    assert.deepEqual(loadThread('hackathon-hall'), [], 'a scenario never chatted about starts empty')
+    assert.equal(loadAssistant().scenarios[0]!.id, 'assistant-1', 'saving conversations kept the scenarios, and the other way round')
+    const applied = loadThread('concert-floor')[1]!
     assert.ok('change' in applied && applied.note === 'Applied in an earlier run.', 'a change from before the reload is marked as belonging to that run')
-    saveMessages(Array.from({ length: 100 }, (_, k) => ({ id: k, from: 'you' as const, text: `m${k}`, kind: 'change' as const })))
-    assert.equal(loadAssistant().messages.length, 60, 'only the most recent messages are kept')
+    saveThread('concert-floor', [])
+    assert.deepEqual(loadThread('concert-floor'), [], 'starting over clears only this scenario')
+    assert.equal(loadThread('school-wing').length, 1)
+    saveThread('school-wing', Array.from({ length: 100 }, (_, k) => ({ id: k, from: 'you' as const, text: `m${k}`, kind: 'change' as const })))
+    assert.equal(loadThread('school-wing').length, 60, 'only the most recent messages are kept')
+    memory.set('crowd-control:assistant', JSON.stringify({ messages: [{ id: 1, from: 'you', text: 'old', kind: 'change' }], scenarios: [] }))
+    assert.deepEqual(loadAssistant(), { threads: {}, scenarios: [] }, 'the old shared conversation is left behind')
   } finally {
     delete global.localStorage
   }
-  assert.deepEqual(loadAssistant(), { messages: [], scenarios: [] }, 'without storage it simply starts fresh')
+  assert.deepEqual(loadAssistant(), { threads: {}, scenarios: [] }, 'without storage it simply starts fresh')
 })
 
 test('wider live changes are allowed and read as plain English', async () => {
@@ -211,4 +218,39 @@ test('a sign-in refusal from the server is shown as it is, not as an unreadable 
   const gate = server(() => ({ ok: false, error: 'A valid Auth0 access token is required.' }))
   const outcome = await askPlanner(request('change'), 'change', gate.fetcher)
   assert.deepEqual(outcome, { type: 'message', tone: 'error', text: 'The assistant is unavailable: A valid Auth0 access token is required.' })
+})
+
+test('a "why" question sends the run’s measurements and events, and shows the events the answer cites', async () => {
+  const { spread } = await import('./assistant.ts')
+  assert.deepEqual(spread([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4), [1, 4, 7, 10], 'evenly spread, keeping the first and last')
+  const sample = (time: number) => ({ time, present: 10, departed: 0, blocked: 0, immobile: 0, removed: 0, zones: [], portals: [], queues: [], clearance: { t50: null, t90: null, t100: null } })
+  const events = [{ id: 'e1', tick: 40, time: 4, name: 'portal_closed', source: 'street_exit_west' }]
+  const why = request('change', { kind: 'why', metricSamples: Array.from({ length: 250 }, (_, k) => sample(k)), events })
+  assert.equal(why.context.askWhy, true)
+  assert.equal(why.context.metricSamples?.length, 100, 'a long run is thinned to what one request may carry')
+  assert.equal(why.context.metricSamples?.at(-1)?.time, 249, 'the latest measurement is always kept')
+  assert.deepEqual(why.context.events, events)
+  assert.equal(request('change').context.askWhy, undefined, 'other requests are not "why" questions')
+
+  const answer = server(() => ({ ok: true, value: { kind: 'answer', text: 'The west exit closed at 0:04, so everyone used the east exit.', evidenceEventIds: ['e1'] } }))
+  assert.deepEqual(await askPlanner(why, 'why', answer.fetcher), { type: 'message', tone: 'info', text: 'The west exit closed at 0:04, so everyone used the east exit.', evidence: ['e1'] })
+  const change = server((r) => ({ ok: true, value: { kind: 'followup', request: { schemaVersion: 1, simulationId: r.simulationId, requestId: r.requestId, operations: [{ op: 'emit', event: { name: 'alarm' } }] } } }))
+  const refused = await askPlanner(why, 'why', change.fetcher)
+  assert.ok(refused.type === 'message' && /rather than an answer/.test(refused.text), 'a "why" question never changes the run')
+})
+
+test('falls and "a couple near the door" read plainly, and the conversation goes along with a follow-up', async () => {
+  const { recentChat } = await import('./assistantStore.ts')
+  const inventory = [{ id: 'street_exit_west', kind: 'portal' as const, label: 'West street exit', tags: ['exit'], componentNames: ['portal'] }]
+  const near = { kind: 'agent' as const, near: { targets: { ids: ['street_exit_west'] }, distance: 3 }, sample: { count: 2 } }
+  assert.deepEqual(describeOperations([
+    { op: 'set', targets: near, values: { components: { mobility: { speedMultiplier: 0 } }, appearance: { pose: 'fallen' } } },
+    { op: 'set', targets: near, values: { components: { mobility: { speedMultiplier: 1 } }, appearance: { pose: 'upright' } } },
+  ], inventory), ['Make 2 people near West street exit fall', 'Help 2 people near West street exit up'])
+  const chat = recentChat([
+    { id: 1, from: 'you', text: 'make a couple of people fall near the door at point A', kind: 'change' },
+    { id: 2, from: 'assistant', tone: 'info', text: 'That needs a new scenario.' },
+  ])
+  assert.match(chat, /Person: make a couple of people fall near the door at point A\nAssistant: That needs a new scenario\./)
+  assert.equal(recentChat([]), '')
 })

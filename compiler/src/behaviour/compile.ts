@@ -64,6 +64,9 @@ export function compileBehaviour(plan: ScenarioPlan, world: StaticWorld): Result
       case 'spawn':
         spawned += operation.count
         break
+      case 'add':
+        // Placed on the map before the start (scene/objects.ts).
+        break
       case 'assign_goal': {
         if (!isSimpleSelector(operation.targets)) {
           return fail('UNSUPPORTED_CAPABILITY', 'Starting goals can only pick people by ids, kind, tags and label for now', { path: `${path}.targets` })

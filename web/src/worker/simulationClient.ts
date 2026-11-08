@@ -3,6 +3,7 @@ import {
   type ApplyAck,
   type CompileOutput,
   type ContractError,
+  type CreateInterventionRequest,
   type DensityGrid,
   type EventRecord,
   type Frame,
@@ -21,7 +22,13 @@ export type TimedFrame = { frame: Frame; receivedAt: number }
 
 /** A change applied to this run (a fall, a door, later chat edits), newest last. */
 /** A change applied in this run: what it was called, when it took effect, and what it did. */
-export type AppliedChange = { interventionId: string; label: string; at: number; operations: Operation[] }
+export type AppliedChange = {
+  interventionId: string; label: string; at: number; operations: Operation[]
+  /** What the person asked for, in their words (the label for map clicks). */
+  prompt: string
+  /** The request as sent and the simulator's acknowledgement, kept so the run can be saved. */
+  request: CreateInterventionRequest; ack: ApplyAck
+}
 
 /** Immutable snapshot of what the screen should show. A new object is created on every change. */
 export type SimulationView = {
@@ -102,15 +109,16 @@ export class SimulationClient {
    * Applies a change (now, or at simulation time `when`) as a follow-up request (the same path chat edits use). On success it
    * joins `changes`; on failure the error is returned and shown as `lastError`.
    */
-  async apply(label: string, operations: Operation[], when?: number): Promise<Result<ApplyAck>> {
+  async apply(label: string, operations: Operation[], when?: number, prompt = label): Promise<Result<ApplyAck>> {
     const simulationId = this.view.simulationId
     if (!simulationId) return { ok: false, error: { code: 'NOT_FOUND', message: 'No simulation is loaded' } }
     const requestId = `ui-${this.nextRequest++}-${Math.random().toString(36).slice(2, 8)}`
-    const reply = await this.command({ type: 'apply_request', request: { schemaVersion: SCHEMA_VERSION, simulationId, requestId, label, operations, ...(when !== undefined && { at: when }) } })
+    const request: CreateInterventionRequest = { schemaVersion: SCHEMA_VERSION, simulationId, requestId, label, operations, ...(when !== undefined && { at: when }) }
+    const reply = await this.command({ type: 'apply_request', request })
     if (reply.type === 'error') return { ok: false, error: reply.error }
     if (reply.type !== 'ack' || !reply.applied) return { ok: false, error: { code: 'INVALID_SCHEMA', message: 'The worker did not confirm the change' } }
     const { interventionId, at } = reply.applied
-    this.update({ lastError: null, changes: [...this.view.changes, { interventionId, label, at, operations }] })
+    this.update({ lastError: null, changes: [...this.view.changes, { interventionId, label, at, operations, prompt, request, ack: reply.applied }] })
     return { ok: true, value: reply.applied }
   }
   play() { return this.command({ type: 'resume' }) }

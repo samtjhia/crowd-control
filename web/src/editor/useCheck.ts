@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { saveVenue, savedScenarioId } from '../sim/savedVenues.ts'
+import { useAuthFetch } from '../site/useAuthFetch.ts'
+import { pushVenue } from '../site/venueSync.ts'
 import type { Door } from './doors.ts'
 import type { LoadedPlan } from './loadPlan.ts'
 import { toScreen, type PlanCamera } from './planView.ts'
@@ -28,7 +30,9 @@ export function useCheck({ plan, active, readKinds, furnitureBlocks, rooms, door
   const [focus, setFocus] = useState<Problem | null>(null)
   const [name, setName] = useState('')
   const [floor, setFloor] = useState('Ground floor')
-  const [saved, setSaved] = useState<{ scenario: string } | null>(null)
+  /** Saved here; `account` is null while saving to the account, then 'saved' or why it didn't. */
+  const [saved, setSaved] = useState<{ scenario: string; account: 'saving' | 'saved' | { failed: string } } | null>(null)
+  const authFetch = useAuthFetch()
   const [saveError, setSaveError] = useState<string | null>(null)
   const image = useRef<HTMLCanvasElement | null>(null)
   const live = useRef({ preview, focus, result })
@@ -86,7 +90,12 @@ export function useCheck({ plan, active, readKinds, furnitureBlocks, rooms, door
     const venue = { name: name.trim() || 'My venue', floor: floor.trim() || 'Ground floor', savedAt: new Date().toISOString(), map: result.map }
     const error = saveVenue(venue)
     setSaveError(error)
-    if (!error) setSaved({ scenario: savedScenarioId(venue) })
+    if (error) return
+    const scenario = savedScenarioId(venue)
+    setSaved({ scenario, account: 'saving' })
+    void pushVenue(authFetch, venue).then((failed) => {
+      setSaved((current) => (current?.scenario === scenario ? { scenario, account: failed ? { failed } : 'saved' } : current))
+    })
   }
 
   /** The simulation grid over the plan (when previewing), and a ring around the focused problem. */

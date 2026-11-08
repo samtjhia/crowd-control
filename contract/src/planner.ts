@@ -31,7 +31,7 @@ export const InventoryItemSchema = z.strictObject({ id: IdSchema, kind: EntityKi
 export const InterventionSummarySchema = z.strictObject({ id: IdSchema, revision: PositiveIntegerSchema, label: z.string(), at: SimTimeSchema, deleted: z.boolean() });
 export const PlannerRequestSchema = HeaderSchema.extend({ requestId: IdSchema, prompt: z.string().min(1), context: z.strictObject({ capabilities: CapabilitiesSchema, layout: LayoutSourceSchema.optional(), inventory: z.array(InventoryItemSchema), summary: MetricSampleSchema.optional(), metricSamples: z.array(MetricSampleSchema).max(100).optional(), events: z.array(EventRecordSchema).max(100).optional(), interventions: z.array(InterventionSummarySchema), selectedInterventionId: IdSchema.optional(), askWhy: z.boolean().optional() }) });
 export const PlannerReplySchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('scenario'), plan: ScenarioPlanSchema }), z.strictObject({ kind: z.literal('followup'), request: FollowupRequestSchema }), z.strictObject({ kind: z.literal('query'), query: ReadQuerySchema }),
+  z.strictObject({ kind: z.literal('scenario'), plan: ScenarioPlanSchema, title: z.string().min(1).max(80).optional() }), z.strictObject({ kind: z.literal('followup'), request: FollowupRequestSchema }), z.strictObject({ kind: z.literal('query'), query: ReadQuerySchema }),
   z.strictObject({ kind: z.literal('clarification'), message: z.string().min(1), candidateIds: z.array(IdSchema).optional() }), z.strictObject({ kind: z.literal('answer'), text: z.string().min(1), evidenceEventIds: z.array(IdSchema) }),
 ]);
 export type SpacePlan = z.infer<typeof SpacePlanSchema>;
@@ -39,6 +39,21 @@ export type ConnectionPlan = z.infer<typeof ConnectionPlanSchema>;
 export type LayoutSource = z.infer<typeof LayoutSourceSchema>;
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export type ScenarioPlan = z.infer<typeof ScenarioPlanSchema>;
+/** What replaying a saved run needs: its scenario (when saved with it) and its changes in time order. */
+export const RunReplaySchema = z.strictObject({
+  runId: z.uuid(), simulationId: IdSchema, startedAt: z.iso.datetime(), title: z.string().optional(), plan: ScenarioPlanSchema.nullable(),
+  changes: z.array(z.strictObject({ at: SimTimeSchema, label: z.string(), prompt: z.string(), operations: z.array(OperationSchema).min(1) })),
+});
+export type RunReplay = z.infer<typeof RunReplaySchema>;
+/** The AI safety report for a saved run: a summary, rated findings, recommendations and caveats. */
+export const RunReportSchema = z.strictObject({
+  title: z.string().min(1).max(160),
+  summary: z.string().min(1).max(1500),
+  findings: z.array(z.strictObject({ heading: z.string().min(1).max(160), detail: z.string().min(1).max(800), severity: z.enum(['high', 'medium', 'low']), when: z.string().max(60).optional(), where: z.string().max(120).optional() })).min(1).max(8),
+  recommendations: z.array(z.string().min(1).max(400)).min(1).max(6),
+  caveats: z.array(z.string().min(1).max(400)).min(1).max(5),
+});
+export type RunReport = z.infer<typeof RunReportSchema>;
 export type FollowupRequest = z.infer<typeof FollowupRequestSchema>;
 export type CreateInterventionRequest = z.infer<typeof CreateInterventionRequestSchema>;
 export type FollowupAction = Omit<Extract<FollowupRequest, { operations: unknown }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'edit_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'delete_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'>;
