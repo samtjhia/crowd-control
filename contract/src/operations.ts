@@ -27,7 +27,7 @@ export const EntitySelectorSchema: z.ZodType<EntitySelector> = z.lazy(() => Sele
 export const SelectorSchema = z.union([EntitySelectorSchema, z.strictObject({ binding: z.literal('subject') })]);
 const placementOptions = { distance: NonnegativeSchema.optional(), edge: EdgeSchema.optional(), awayFrom: z.array(EntitySelectorSchema).min(1).optional() };
 export const PlacementSchema = z.union([
-  z.strictObject({ inside: EntitySelectorSchema, ...placementOptions }), z.strictObject({ near: EntitySelectorSchema, ...placementOptions }), z.strictObject({ along: EntitySelectorSchema, ...placementOptions }),
+  z.strictObject({ inside: EntitySelectorSchema, ...placementOptions }), z.strictObject({ near: EntitySelectorSchema, within: EntitySelectorSchema.optional(), ...placementOptions }), z.strictObject({ along: EntitySelectorSchema, ...placementOptions }),
 ]);
 const GoalLeafSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('reach'), target: SelectorSchema, departOnArrival: z.boolean().optional(), selection: SelectionSchema.optional(), stopDistance: NonnegativeSchema.optional(), urgency: NonnegativeSchema.optional() }),

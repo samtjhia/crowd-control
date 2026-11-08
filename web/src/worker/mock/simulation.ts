@@ -1169,8 +1169,10 @@ export class MockSimulation {
 
   private spawnTemplate(op: Extract<Operation, { op: 'spawn' }>): ContractError | null {
     const world = this.world!
-    if (!('inside' in op.placement)) return unsupported('spawn placement other than inside')
-    const regions = this.resolveEntities(op.placement.inside)
+    // The mock places by room only: a near placement narrowed `within` an area uses that area.
+    const area = 'inside' in op.placement ? op.placement.inside : 'within' in op.placement ? op.placement.within : undefined
+    if (!area) return unsupported('spawn placement other than inside')
+    const regions = this.resolveEntities(area)
     if (isFail(regions)) return regions.error
     const zone = regions.flatMap((id) => world.zones.get(id) ?? [])[0]
     if (!zone) return fail('NOT_FOUND', 'Spawn placement matched no zone')

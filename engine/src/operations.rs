@@ -281,9 +281,15 @@ pub fn condition(v: &Value) -> Result<(), Failure> {
 fn validate_placement(v: &Value) -> Result<(), Failure> {
     sel::keys(
         v,
-        &["inside", "near", "along", "distance", "edge", "awayFrom"],
+        &["inside", "near", "along", "within", "distance", "edge", "awayFrom"],
         &[],
     )?;
+    if let Some(s) = v.get("within") {
+        if v.get("near").is_none() {
+            return Err(invalid("within only narrows a near placement"));
+        }
+        sel::validate(s, 0)?;
+    }
     let mut n = 0;
     for k in ["inside", "near", "along"] {
         if let Some(s) = v.get(k) {
@@ -915,6 +921,17 @@ impl World {
         if targets.is_empty() {
             return Err(("NOT_FOUND", "Placement matched no targets".into()));
         }
+        // `within` keeps a near placement to these areas (e.g. only the outside side of a door).
+        let within = match v.get("within") {
+            Some(s) => {
+                let ids = sel::resolve(self, s, key, work)?;
+                if ids.is_empty() {
+                    return Err(("NOT_FOUND", "within matched no targets".into()));
+                }
+                Some(ids)
+            }
+            None => None,
+        };
         let mut away = vec![];
         if let Some(a) = v.get("awayFrom") {
             for s in array(a)? {
@@ -1008,7 +1025,15 @@ impl World {
                         }
                 }
             });
+            let in_area = within.as_ref().is_none_or(|ids| {
+                cells.iter().all(|i| {
+                    grid.zone_ids[grid.zone_index[*i] as usize]
+                        .as_ref()
+                        .is_some_and(|z| ids.contains(z))
+                })
+            });
             if !fits
+                || !in_area
                 || away
                     .iter()
                     .any(|id| sel::distance(self, id, &p) < distance + r)
