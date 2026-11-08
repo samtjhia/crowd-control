@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowRight, LoaderCircle, Play, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
+import { LoaderCircle, Play, RefreshCw, RotateCcw, TrendingDown, TrendingUp } from 'lucide-react'
 import { RunAnalyticsSchema, RunSummariesSchema, type RunAnalytics, type RunSummary } from '@crowd-control/contract'
 import { SiteHeader } from './site/Site.tsx'
 import { useAuthFetch } from './site/useAuthFetch.ts'
@@ -8,7 +8,7 @@ import { readable, runIdentity } from './sim/runNames.ts'
 import './history.css'
 
 /**
- * Past simulations: the signed-in person's saved runs, newest first. Choosing one shows where it
+ * Past runs: the signed-in person's saved runs, newest first. Choosing one shows where it
  * got busiest and what each change did to crowding, from the analytics the server keeps.
  */
 
@@ -26,6 +26,9 @@ function when(iso: string, now = new Date()): string {
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** A run's name: the title it was saved with, else what its simulation ID is known as here. */
+const titleOf = (run: RunSummary) => run.title?.replace(/^Assistant: /, '') ?? runIdentity(run.simulationId).title
 
 /** The server's reason for a failed request, or its status. */
 async function readJson(response: Response, key: string): Promise<unknown> {
@@ -83,7 +86,7 @@ export default function HistoryApp() {
       <main className="hist">
         <div className="hist-head">
           <div>
-            <h1>Past simulations</h1>
+            <h1>Past runs</h1>
             <p>Runs you’ve played in the simulator, newest first. They save on their own as they play.</p>
           </div>
           <button type="button" className="hist-refresh" onClick={() => void loadRuns()} disabled={refreshing}>
@@ -132,19 +135,22 @@ function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>
     <ol className="hist-runs">
       {runs.value.map((run) => {
         const identity = runIdentity(run.simulationId)
+        // Runs saved with their scenario replay anywhere; older ones only if the scenario is known here.
+        const replayable = run.title !== undefined || identity.scenario !== null
         const current = selected?.runId === run.runId
         return (
           <li key={run.runId} className={current ? 'is-current' : undefined}>
             <button type="button" className="hist-run" aria-pressed={current} onClick={() => onOpen(run)}>
-              <span className="hist-run-name">{identity.title}</span>
+              <span className="hist-run-name">{titleOf(run)}</span>
               <span className="hist-run-when">{when(run.startedAt)}</span>
               <span className="hist-run-meta">
                 {plural(run.interventionCount, 'change', 'changes')} · {plural(run.sampleCount, 'measurement', 'measurements')}
               </span>
             </button>
-            {identity.scenario && (
-              <a className="hist-open" href={`/sim?scenario=${encodeURIComponent(identity.scenario)}`} title={`Open ${identity.title} in the simulator`}>
-                Open <ArrowRight size={14} aria-hidden="true" />
+            {replayable && (
+              <a className="hist-open" href={`/sim?replay=${encodeURIComponent(run.runId)}`}
+                title={run.interventionCount > 0 ? `Run ${titleOf(run)} again, with your ${plural(run.interventionCount, 'change', 'changes')} at the same moments` : `Run ${titleOf(run)} again`}>
+                <RotateCcw size={14} aria-hidden="true" /> Replay
               </a>
             )}
           </li>
@@ -164,7 +170,7 @@ function Details({ run, analytics, onRetry }: { run: RunSummary | null; analytic
   return (
     <>
       <header className="hist-detail-head">
-        <h2>{identity.title}</h2>
+        <h2>{titleOf(run)}</h2>
         <p>{when(run.startedAt)}</p>
       </header>
       {analytics.state === 'loading' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading this run…</p>}

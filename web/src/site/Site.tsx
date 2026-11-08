@@ -26,9 +26,9 @@ function initials(name: string): string {
 function saveText(save: SaveState): string | null {
   switch (save.kind) {
     case 'off': return null
-    case 'waiting': return 'Press Play: this run saves to Past simulations as it plays.'
-    case 'saving': return 'Saving this run to Past simulations…'
-    case 'saved': return 'This run is saved to Past simulations.'
+    case 'waiting': return 'Press Play: this run saves to Past runs as it plays.'
+    case 'saving': return 'Saving this run to Past runs…'
+    case 'saved': return 'This run is saved to Past runs.'
     case 'failed': return `This run isn’t being saved: ${save.message}`
   }
 }
@@ -94,6 +94,20 @@ export function AccountMenu({ save = { kind: 'off' } }: { save?: SaveState }) {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The pages, as compact links for the simulator's and editor's own top bars: the other two
+ * pages, with icons, so the same three places are always one click away.
+ */
+export function PageLinks() {
+  return (
+    <nav className="cc-pagelinks" aria-label="Pages">
+      {PAGES.filter(({ href }) => !isCurrent(href)).map(({ href, label, Icon }) => (
+        <a key={href} href={href} title={label}><Icon size={14} aria-hidden="true" /><span>{label}</span></a>
+      ))}
+    </nav>
   )
 }
 

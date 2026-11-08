@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SaveState } from '../site/saveState.ts'
 import { useAuthFetch } from '../site/useAuthFetch.ts'
 import type { SimulationView } from '../worker/simulationClient.ts'
-import { RunRecorder, type Poster } from './runRecorder.ts'
+import { RunRecorder, type Poster, type RunAbout } from './runRecorder.ts'
 
 /** How often queued run data is sent while a run plays. */
 const FLUSH_MS = 4000
@@ -11,7 +11,7 @@ const FLUSH_MS = 4000
  * Saves the simulator's runs to the signed-in account as they play: a new run for each load or
  * reset, its metric samples, and each change applied. Returns the save state for the account menu.
  */
-export function useRunSaving(view: SimulationView): SaveState {
+export function useRunSaving(view: SimulationView, about: RunAbout): SaveState {
   const authFetch = useAuthFetch()
   const [state, setState] = useState<SaveState>({ kind: 'off' })
   const recorder = useMemo(() => {
@@ -25,9 +25,13 @@ export function useRunSaving(view: SimulationView): SaveState {
     return new RunRecorder(post, setState)
   }, [authFetch])
 
+  // What the current scenario is; updated before a new run starts, so the run is saved with it.
+  const aboutRef = useRef(about)
+  useEffect(() => { aboutRef.current = about }, [about])
+
   // Each new stream (a load or a reset) is a new run.
   useEffect(() => {
-    if (view.streamId && view.simulationId) recorder.start(view.simulationId)
+    if (view.streamId && view.simulationId) recorder.start(view.simulationId, aboutRef.current)
   }, [recorder, view.streamId, view.simulationId])
 
   useEffect(() => {

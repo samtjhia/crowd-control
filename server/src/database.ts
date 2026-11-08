@@ -6,15 +6,20 @@ import {
   MetricSampleSchema,
   PreparedMapSchema,
   RunAnalyticsSchema,
+  RunReplaySchema,
+  ScenarioPlanSchema,
   RunSummariesSchema,
 } from '@crowd-control/contract'
-import type { RunAnalytics, RunSummary } from '@crowd-control/contract'
+import type { RunAnalytics, RunReplay, RunSummary } from '@crowd-control/contract'
 import type { Pool } from 'pg'
 
 const RunSchema = z.strictObject({
   runId: z.uuid(),
   simulationId: IdSchema,
   startedAt: z.iso.datetime(),
+  /** What the person calls it ("Concert evacuation"), and the scenario itself, so it can be replayed anywhere. */
+  title: z.string().min(1).max(200).optional(),
+  plan: ScenarioPlanSchema.optional(),
 })
 
 const MetricsBatchSchema = z.strictObject({
@@ -49,10 +54,12 @@ export async function getOwnedRuns(pool: Pool, ownerSub: string): Promise<RunSum
     startedAt: Date | string
     sampleCount: number
     interventionCount: number
+    title: string | null
   }>(
     `SELECT run.run_id AS "runId",
             run.simulation_id AS "simulationId",
             run.started_at AS "startedAt",
+            run.title AS "title",
             COALESCE(metrics.sample_count, 0)::integer AS "sampleCount",
             COALESCE(interventions.intervention_count, 0)::integer AS "interventionCount"
      FROM crowd_runs AS run
@@ -72,8 +79,9 @@ export async function getOwnedRuns(pool: Pool, ownerSub: string): Promise<RunSum
     [ownerSub],
   )
 
-  return RunSummariesSchema.parse(result.rows.map((row) => ({
+  return RunSummariesSchema.parse(result.rows.map(({ title, ...row }) => ({
     ...row,
+    ...(title ? { title } : {}),
     startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : row.startedAt,
   })))
 }
@@ -277,6 +285,9 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
       PRIMARY KEY (owner_sub, venue_id)
     )
   `)
+  // A run's title and scenario, for Past runs and replay.
+  await pool.query('ALTER TABLE crowd_runs ADD COLUMN IF NOT EXISTS title TEXT')
+  await pool.query('ALTER TABLE crowd_runs ADD COLUMN IF NOT EXISTS plan JSONB')
 }
 
 export async function saveRun(pool: Pool, ownerSub: string, input: unknown): Promise<boolean> {
@@ -284,16 +295,51 @@ export async function saveRun(pool: Pool, ownerSub: string, input: unknown): Pro
   if (!parsed.success) return false
   const run = parsed.data
   const result = await pool.query(
-    `INSERT INTO crowd_runs (run_id, simulation_id, started_at, owner_sub)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO crowd_runs (run_id, simulation_id, started_at, owner_sub, title, plan)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (run_id) DO UPDATE
        SET run_id = EXCLUDED.run_id
        WHERE crowd_runs.owner_sub = EXCLUDED.owner_sub
          AND crowd_runs.simulation_id = EXCLUDED.simulation_id
      RETURNING run_id`,
-    [run.runId, run.simulationId, run.startedAt, ownerSub],
+    [run.runId, run.simulationId, run.startedAt, ownerSub, run.title ?? null, run.plan ? JSON.stringify(run.plan) : null],
   )
   return result.rowCount !== null && result.rowCount > 0
+}
+
+/**
+ * What it takes to replay one of the person's runs: its scenario (if it was saved with the run)
+ * and every change applied, in the order they took effect, with the time each took effect.
+ */
+export async function getRunReplay(pool: Pool, ownerSub: string, runId: string): Promise<'invalid' | null | RunReplay> {
+  if (!z.uuid().safeParse(runId).success) return 'invalid'
+  const run = await pool.query(
+    `SELECT simulation_id AS "simulationId", started_at AS "startedAt", title, plan
+     FROM crowd_runs WHERE run_id = $1 AND owner_sub = $2`,
+    [runId, ownerSub],
+  )
+  const row = run.rows[0]
+  if (!row) return null
+  const changes = await pool.query(
+    `SELECT prompt, request, acknowledgement
+     FROM crowd_interventions WHERE run_id = $1
+     ORDER BY (acknowledgement->>'at')::double precision, recorded_at`,
+    [runId],
+  )
+  const plan = ScenarioPlanSchema.safeParse(row.plan)
+  return RunReplaySchema.parse({
+    runId,
+    simulationId: row.simulationId,
+    startedAt: row.startedAt instanceof Date ? row.startedAt.toISOString() : row.startedAt,
+    ...(row.title ? { title: row.title } : {}),
+    plan: plan.success ? plan.data : null,
+    changes: changes.rows.flatMap((change) => {
+      const request = CreateInterventionRequestSchema.safeParse(change.request)
+      const ack = ApplyAckSchema.safeParse(change.acknowledgement)
+      if (!request.success || !ack.success) return []
+      return [{ at: ack.data.at, label: request.data.label ?? change.prompt, prompt: change.prompt, operations: request.data.operations }]
+    }),
+  })
 }
 
 export async function saveMetricBatch(pool: Pool, ownerSub: string, runId: string, input: unknown): Promise<'invalid' | 'missing-run' | 'saved'> {

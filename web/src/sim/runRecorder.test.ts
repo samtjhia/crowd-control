@@ -38,8 +38,19 @@ test('a run is saved only once something has happened, then its samples follow i
   await r.flush()
   assert.deepEqual(sent.map((s) => s.path), ['/api/runs', '/api/runs/00000000-0000-4000-8000-000000000001/metrics'])
   assert.equal(sent[0]!.body.simulationId, 'concert-floor-demo')
+  assert.equal(sent[0]!.body.title, undefined, 'no title unless the run has one')
   assert.deepEqual(sent[1]!.body.samples.map((s: MetricSample) => s.time), [1, 2], 'repeats are dropped')
   assert.deepEqual(states.map((s) => s.kind), ['waiting', 'saving', 'saved'])
+})
+
+test('a run is saved with its title and scenario, so it can be replayed anywhere', async () => {
+  const { post, sent } = server()
+  const { r } = recorder(post)
+  const plan = { schemaVersion: 1 as const, simulationId: 'concert-floor-demo', seed: 42, layout: { mode: 'lookup' as const, venue: 'Harbour Concert Hall', floor: 'Main floor' }, initialOperations: [], timeline: [], rules: [] }
+  r.start('concert-floor-demo', { title: 'Concert evacuation', plan })
+  r.sample(sample(1))
+  await r.flush()
+  assert.deepEqual([sent[0]!.body.title, sent[0]!.body.plan], ['Concert evacuation', plan])
 })
 
 test('changes are saved with the request and acknowledgement the server checks', async () => {

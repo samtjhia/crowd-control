@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { navigate } from './site/navigate.ts'
 
 // Each page loads on demand so its features stay out of the others' bundles: the simulator
-// (/sim, also the home page), floor-plan editor (/editor), past simulations (/history), the
+// (/sim, also the home page), floor-plan editor (/editor), past runs (/history), the
 // original planner page (/planner, reachable by URL), and Conrad's engine test page (/engine).
 const PlannerApp = lazy(() => import('./PlannerApp.tsx'))
 const HistoryApp = lazy(() => import('./HistoryApp.tsx'))

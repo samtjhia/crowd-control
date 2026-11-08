@@ -697,7 +697,23 @@
   cursor: pointer;
 }
 .sim-where select:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
-.sim .sim-clear-chat { justify-self: center; font-size: 11.5px; }
+/* Which scenario the conversation is about; each scenario has its own. */
+.sim-chat-about {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 20px 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--muted);
+  font-size: 12px;
+}
+.sim-chat-about p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-chat-about strong { color: var(--text); font-weight: 600; }
+.sim .sim-chat-about .sim-link { flex: none; font-size: 12px; }
 .sim-keep-venue { display: flex; align-items: center; gap: 7px; padding: 0 4px; color: var(--muted); font-size: 12px; line-height: 16px; }
 .sim-keep-venue input { width: 14px; height: 14px; margin: 0; accent-color: var(--green); }
 

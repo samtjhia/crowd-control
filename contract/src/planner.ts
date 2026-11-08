@@ -39,6 +39,12 @@ export type ConnectionPlan = z.infer<typeof ConnectionPlanSchema>;
 export type LayoutSource = z.infer<typeof LayoutSourceSchema>;
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export type ScenarioPlan = z.infer<typeof ScenarioPlanSchema>;
+/** What replaying a saved run needs: its scenario (when saved with it) and its changes in time order. */
+export const RunReplaySchema = z.strictObject({
+  runId: z.uuid(), simulationId: IdSchema, startedAt: z.iso.datetime(), title: z.string().optional(), plan: ScenarioPlanSchema.nullable(),
+  changes: z.array(z.strictObject({ at: SimTimeSchema, label: z.string(), prompt: z.string(), operations: z.array(OperationSchema).min(1) })),
+});
+export type RunReplay = z.infer<typeof RunReplaySchema>;
 export type FollowupRequest = z.infer<typeof FollowupRequestSchema>;
 export type CreateInterventionRequest = z.infer<typeof CreateInterventionRequestSchema>;
 export type FollowupAction = Omit<Extract<FollowupRequest, { operations: unknown }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'edit_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'> | Omit<Extract<FollowupRequest, { action: 'delete_intervention' }>, keyof z.infer<typeof HeaderSchema> | 'requestId'>;

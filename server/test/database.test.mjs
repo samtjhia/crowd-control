@@ -44,7 +44,7 @@ test('initializes runs, metrics hypertable, and intervention tables', async () =
 
   await initializeDatabase(pool)
 
-  assert.equal(pool.calls.length, 7)
+  assert.equal(pool.calls.length, 9)
   assert.match(pool.calls[1].text, /ADD COLUMN IF NOT EXISTS owner_sub/)
   assert.match(pool.calls[2].text, /crowd_runs_owner_started_at_idx/)
   assert.match(pool.calls[4].text, /create_hypertable/)
@@ -97,7 +97,33 @@ test('validates and stores run records with their authenticated owner', async ()
   assert.equal(await saveRun(pool, ownerSub, { ...run, runId: 'not-a-uuid' }), false)
   assert.match(pool.calls[0].text, /owner_sub/)
   assert.match(pool.calls[0].text, /WHERE crowd_runs\.owner_sub = EXCLUDED\.owner_sub/)
-  assert.deepEqual(pool.calls[0].values, [run.runId, run.simulationId, run.startedAt, ownerSub])
+  assert.deepEqual(pool.calls[0].values, [run.runId, run.simulationId, run.startedAt, ownerSub, null, null])
+})
+
+test('a run can carry its title and scenario, and replays with its changes in order', async () => {
+  const { getRunReplay } = await import('../dist/database.js')
+  const pool = fakePool()
+  const plan = { schemaVersion: 1, simulationId: 'worked-demo', seed: 42, layout: { mode: 'lookup', venue: 'Hall', floor: 'Ground' }, initialOperations: [], timeline: [], rules: [] }
+  const run = { runId: '37c6729d-9e21-4c8f-a414-fdbf8c56d66c', simulationId: 'worked-demo', startedAt: '2026-01-01T00:00:00.000Z', title: 'Worked example', plan }
+  assert.equal(await saveRun(pool, 'auth0|me', run), true)
+  assert.deepEqual(pool.calls[0].values.slice(4), ['Worked example', JSON.stringify(plan)])
+
+  const close = { op: 'set', targets: { ids: ['door'] }, values: { components: { portal: { open: false } } } }
+  const stored = {
+    async query(text) {
+      if (text.includes('FROM crowd_runs')) return { rowCount: 1, rows: [{ simulationId: 'worked-demo', startedAt: new Date(run.startedAt), title: 'Worked example', plan }] }
+      assert.match(text, /ORDER BY \(acknowledgement->>'at'\)::double precision/)
+      return { rowCount: 2, rows: [
+        { prompt: 'close the door', request: { schemaVersion: 1, simulationId: 'worked-demo', requestId: 'r1', label: 'Close door', operations: [close] }, acknowledgement: { requestId: 'r1', interventionId: 'i1', revision: 1, at: 12.5, historyRevision: 1 } },
+        { prompt: 'broken', request: { nope: true }, acknowledgement: {} },
+      ] }
+    },
+  }
+  assert.deepEqual(await getRunReplay(stored, 'auth0|me', run.runId), {
+    runId: run.runId, simulationId: 'worked-demo', startedAt: run.startedAt, title: 'Worked example', plan,
+    changes: [{ at: 12.5, label: 'Close door', prompt: 'close the door', operations: [close] }],
+  })
+  assert.equal(await getRunReplay(stored, 'auth0|me', 'nope'), 'invalid')
 })
 
 test('stores validated metrics in an idempotent time-series batch', async () => {

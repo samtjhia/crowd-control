@@ -7,7 +7,7 @@ import type { SimulationClient, SimulationView } from '../worker/simulationClien
 import { askPlanner, buildRequest, capacityNote, explainRefusal, pinGoalTargets, placesNote, titleFrom, type AskKind } from './assistant.ts'
 import { placesInScene } from './places.ts'
 import { loadPoints, pointsKeyForLayout, pointsKeyForSource, pointsNote, preparedGeometry, sceneGeometry } from './points.ts'
-import { loadAssistant, saveMessages, type Message } from './assistantStore.ts'
+import { loadThread, saveThread, type Message } from './assistantStore.ts'
 import type { VenueOption } from './scenario.ts'
 
 /** A message before it gets an ID (Omit applied to each kind of message separately). */
@@ -24,13 +24,16 @@ const GENERATE = 'generate'
 type Props = {
   client: SimulationClient
   view: SimulationView
+  /** The scenario this conversation is about; each scenario has its own. */
+  scenarioId: string
+  scenarioTitle: string
   /** Venues a new scenario can use, and the one loaded now (null for a made-up building). */
   venues: VenueOption[]
   currentVenueId: string | null
   /** Tries to build a plan without loading it; returns why it can't be built, or null. */
   onCheckPlan: (plan: ScenarioPlan) => string | null
-  /** Compiles and loads a scenario the assistant wrote; returns an error message, or null when it is running. */
-  onRunPlan: (plan: ScenarioPlan, title: string) => string | null
+  /** Compiles and loads a scenario the assistant wrote; returns why it can't, or the new scenario's ID. */
+  onRunPlan: (plan: ScenarioPlan, title: string) => { error: string } | { id: string }
 }
 
 /**
@@ -40,8 +43,8 @@ type Props = {
  * be built the reason goes back to the planner once for a corrected plan. Applied changes go
  * through the same request path as the map's click tools, so they appear in the Changes list.
  */
-export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPlan, onRunPlan }: Props) {
-  const [messages, setMessages] = useState<Message[]>(() => loadAssistant().messages)
+export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues, currentVenueId, onCheckPlan, onRunPlan }: Props) {
+  const [messages, setMessages] = useState<Message[]>(() => loadThread(scenarioId))
   const [text, setText] = useState('')
   const [kind, setKind] = useState<AskKind>('change')
   const [where, setWhere] = useState<string>(currentVenueId ?? GENERATE)
@@ -55,7 +58,7 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
   // A new scenario defaults to wherever the simulator is now.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setWhere(currentVenueId ?? GENERATE) }, [currentVenueId])
-  useEffect(() => { saveMessages(messages) }, [messages])
+  useEffect(() => { saveThread(scenarioId, messages) }, [scenarioId, messages])
   useEffect(() => {
     list.current?.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' })
   }, [messages, busy])
@@ -143,9 +146,19 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
     }
   }
 
+  /**
+   * Runs a scenario the assistant wrote. It becomes its own scenario with its own conversation,
+   * which starts with the request that made it, so changes to it are asked about there.
+   */
   const run = (id: number, plan: ScenarioPlan, prompt: string) => {
-    const error = onRunPlan(plan, titleFrom(prompt))
-    update(id, error ? { note: error } : { status: 'running', note: undefined })
+    const result = onRunPlan(plan, titleFrom(prompt))
+    if ('error' in result) return update(id, { note: result.error })
+    // Saved now: this panel is replaced by the new scenario's before its effects would run.
+    saveThread(scenarioId, messages.map((m) => (m.id === id ? ({ ...m, status: 'running', note: undefined } as Message) : m)))
+    saveThread(result.id, [
+      { id: 1, from: 'you', text: prompt, kind: 'scenario' },
+      { id: 2, from: 'assistant', tone: 'info', text: `Started this scenario from your request in “${scenarioTitle}”. Ask for changes to it here.` },
+    ])
   }
 
   /** Asks the planner again for a plan that can be built, sending the reason this one can't. */
@@ -170,6 +183,12 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
 
   return (
     <div className="sim-chat">
+      <div className="sim-chat-about">
+        <p>Chat about <strong>{scenarioTitle}</strong></p>
+        {messages.length > 0 && (
+          <button type="button" className="sim-link" onClick={() => setMessages([])} disabled={busy} title="Clears this scenario’s conversation; other scenarios keep theirs">Start over</button>
+        )}
+      </div>
       {messages.length === 0 ? (
         <div className="sim-chat-empty">
           <p className="sim-chat-title">Talk to the simulation</p>
@@ -222,9 +241,6 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} />
           <button type="submit" className="sim-send" disabled={busy || !text.trim()} aria-label="Send"><SendHorizontal size={15} /></button>
         </div>
-        {messages.length > 0 && (
-          <button type="button" className="sim-link sim-clear-chat" onClick={() => setMessages([])} disabled={busy}>Clear conversation</button>
-        )}
       </form>
     </div>
   )

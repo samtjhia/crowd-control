@@ -4,5 +4,5 @@ import { History, Map as MapIcon, Play } from 'lucide-react'
 export const PAGES = [
   { href: '/sim', label: 'Simulator', short: 'Simulator', Icon: Play },
   { href: '/editor', label: 'Floor plans', short: 'Plans', Icon: MapIcon },
-  { href: '/history', label: 'Past simulations', short: 'History', Icon: History },
+  { href: '/history', label: 'Past runs', short: 'Runs', Icon: History },
 ] as const

@@ -127,29 +127,36 @@ test('previews name doors and rooms the way the plan does', async () => {
   assert.deepEqual(describeOperations([close], []), ['Close alley head'], 'without a label, the ID reads as words')
 })
 
-test('the conversation and the assistant’s scenarios survive a reload', async () => {
-  const { loadAssistant, saveMessages, saveScenarios } = await import('./assistantStore.ts')
+test('each scenario keeps its own conversation, and they and the assistant’s scenarios survive a reload', async () => {
+  const { loadAssistant, loadThread, saveThread, saveScenarios } = await import('./assistantStore.ts')
   const memory = new Map<string, string>()
   const global = globalThis as unknown as { localStorage?: unknown }
   global.localStorage = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => { memory.set(k, v) } }
   try {
     const change = { schemaVersion: 1 as const, simulationId: 's', requestId: 'r', operations: [{ op: 'set' as const, targets: { ids: ['exit'] }, values: { components: { portal: { open: false } } } }] }
-    saveMessages([
+    saveThread('concert-floor', [
       { id: 1, from: 'you', text: 'close the exit', kind: 'change' },
       { id: 2, from: 'assistant', change, prompt: 'close the exit', inventory: [], status: 'applied' },
     ])
+    saveThread('school-wing', [{ id: 1, from: 'you', text: 'sound the alarm', kind: 'change' }])
     saveScenarios([{ id: 'assistant-1', title: 'Assistant: drill', plan, model }])
-    const restored = loadAssistant()
-    assert.equal(restored.messages.length, 2)
-    assert.equal(restored.scenarios[0]!.id, 'assistant-1', 'saving messages kept the scenarios, and the other way round')
-    const applied = restored.messages[1]!
+    assert.equal(loadThread('concert-floor').length, 2)
+    assert.deepEqual(loadThread('school-wing').map((m) => 'text' in m && m.text), ['sound the alarm'], 'another scenario has its own conversation')
+    assert.deepEqual(loadThread('hackathon-hall'), [], 'a scenario never chatted about starts empty')
+    assert.equal(loadAssistant().scenarios[0]!.id, 'assistant-1', 'saving conversations kept the scenarios, and the other way round')
+    const applied = loadThread('concert-floor')[1]!
     assert.ok('change' in applied && applied.note === 'Applied in an earlier run.', 'a change from before the reload is marked as belonging to that run')
-    saveMessages(Array.from({ length: 100 }, (_, k) => ({ id: k, from: 'you' as const, text: `m${k}`, kind: 'change' as const })))
-    assert.equal(loadAssistant().messages.length, 60, 'only the most recent messages are kept')
+    saveThread('concert-floor', [])
+    assert.deepEqual(loadThread('concert-floor'), [], 'starting over clears only this scenario')
+    assert.equal(loadThread('school-wing').length, 1)
+    saveThread('school-wing', Array.from({ length: 100 }, (_, k) => ({ id: k, from: 'you' as const, text: `m${k}`, kind: 'change' as const })))
+    assert.equal(loadThread('school-wing').length, 60, 'only the most recent messages are kept')
+    memory.set('crowd-control:assistant', JSON.stringify({ messages: [{ id: 1, from: 'you', text: 'old', kind: 'change' }], scenarios: [] }))
+    assert.deepEqual(loadAssistant(), { threads: {}, scenarios: [] }, 'the old shared conversation is left behind')
   } finally {
     delete global.localStorage
   }
-  assert.deepEqual(loadAssistant(), { messages: [], scenarios: [] }, 'without storage it simply starts fresh')
+  assert.deepEqual(loadAssistant(), { threads: {}, scenarios: [] }, 'without storage it simply starts fresh')
 })
 
 test('wider live changes are allowed and read as plain English', async () => {

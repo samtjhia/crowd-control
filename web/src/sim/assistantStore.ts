@@ -3,8 +3,10 @@ import type { AskKind } from './assistant.ts'
 import type { Scenario } from './scenario.ts'
 
 /**
- * The Assistant's conversation and the scenarios it wrote, kept in this browser so a reload
- * doesn't lose them. Storage can be missing or full; then the assistant simply starts fresh.
+ * The Assistant's conversations, one per scenario, and the scenarios it wrote, kept in this
+ * browser so a reload doesn't lose them. A conversation is about the scenario it was had in:
+ * switching scenarios switches conversations. Storage can be missing or full; then the
+ * assistant simply starts fresh.
  */
 
 export type Message =
@@ -13,11 +15,12 @@ export type Message =
   | { id: number; from: 'assistant'; plan: ScenarioPlan; prompt: string; where: string | null; status: 'ready' | 'running' | 'discarded'; note?: string }
   | { id: number; from: 'assistant'; change: CreateInterventionRequest; prompt: string; inventory: InventoryItem[]; status: 'ready' | 'applied' | 'discarded'; note?: string }
 
-export type AssistantState = { messages: Message[]; scenarios: Scenario[] }
+export type AssistantState = { threads: Record<string, Message[]>; scenarios: Scenario[] }
 
 const KEY = 'crowd-control:assistant'
 /** Enough history to scroll back through, small enough to stay well within browser storage. */
 const MAX_MESSAGES = 60
+const MAX_THREADS = 30
 
 type KeyValue = { getItem(key: string): string | null; setItem(key: string, value: string): void }
 function store(): KeyValue {
@@ -26,27 +29,44 @@ function store(): KeyValue {
   return storage
 }
 
+/**
+ * Everything saved. The single shared conversation of earlier versions belonged to no one
+ * scenario, so it is left behind rather than shown in the wrong place.
+ */
 export function loadAssistant(): AssistantState {
   try {
     const raw = store().getItem(KEY)
     const parsed = raw ? (JSON.parse(raw) as Partial<AssistantState>) : {}
-    const messages = Array.isArray(parsed.messages) ? parsed.messages : []
-    // A change applied before the reload belongs to that earlier run; it can't be re-applied blindly.
-    const settled = messages.map((m): Message => ('change' in m && m.status === 'applied' ? { ...m, note: 'Applied in an earlier run.' } : m))
-    return { messages: settled, scenarios: Array.isArray(parsed.scenarios) ? parsed.scenarios : [] }
+    const threads = typeof parsed.threads === 'object' && parsed.threads !== null ? parsed.threads : {}
+    return { threads, scenarios: Array.isArray(parsed.scenarios) ? parsed.scenarios : [] }
   } catch {
-    return { messages: [], scenarios: [] }
+    return { threads: {}, scenarios: [] }
   }
 }
 
-export function saveAssistant(state: AssistantState) {
+function saveAssistant(state: AssistantState) {
   try {
-    store().setItem(KEY, JSON.stringify({ messages: state.messages.slice(-MAX_MESSAGES), scenarios: state.scenarios }))
+    // Keep the most recently used conversations (object keys keep insertion order).
+    const entries = Object.entries(state.threads).filter(([, messages]) => messages.length > 0).slice(-MAX_THREADS)
+    const threads = Object.fromEntries(entries.map(([id, messages]) => [id, messages.slice(-MAX_MESSAGES)]))
+    store().setItem(KEY, JSON.stringify({ threads, scenarios: state.scenarios }))
   } catch {
     // Not saved; the conversation still works for this visit.
   }
 }
 
-/** Reads one part, writes it back with the other part unchanged. */
-export function saveMessages(messages: Message[]) { saveAssistant({ ...loadAssistant(), messages }) }
+/** One scenario's conversation. A change applied before a reload belonged to that earlier run. */
+export function loadThread(scenarioId: string): Message[] {
+  const messages = loadAssistant().threads[scenarioId]
+  if (!Array.isArray(messages)) return []
+  return messages.map((m): Message => ('change' in m && m.status === 'applied' ? { ...m, note: 'Applied in an earlier run.' } : m))
+}
+
+/** Saves one scenario's conversation, moving it to the most recent. */
+export function saveThread(scenarioId: string, messages: Message[]) {
+  const state = loadAssistant()
+  const { [scenarioId]: _previous, ...others } = state.threads
+  saveAssistant({ ...state, threads: { ...others, [scenarioId]: messages } })
+}
+
 export function saveScenarios(scenarios: Scenario[]) { saveAssistant({ ...loadAssistant(), scenarios }) }

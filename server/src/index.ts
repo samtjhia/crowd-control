@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
 import { createAuth0TokenVerifier } from './auth.ts';
-import { deleteVenue, getOwnedRuns, getRunAnalytics, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
+import { deleteVenue, getOwnedRuns, getRunAnalytics, getRunReplay, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
 
 const port = Number(process.env.PORT ?? 3001);
@@ -188,6 +188,25 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
         : 'UNKNOWN';
       console.error(`Tiger Data analytics query failed (${code}).`);
       sendJson(response, 503, { ok: false, error: 'Could not load analytics from Tiger Data.' });
+    });
+    return;
+  }
+
+  const replayRoute = /^\/api\/runs\/([^/]+)\/replay$/.exec(telemetryPath);
+  if (request.method === 'GET' && replayRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const replay = await getRunReplay(database, ownerSub, replayRoute[1]!);
+      if (replay === 'invalid') sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' });
+      else if (replay === null) sendJson(response, 404, { ok: false, error: 'Run was not found.' });
+      else sendJson(response, 200, { ok: true, replay });
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'UNKNOWN';
+      console.error(`Tiger Data replay query failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not load the run from Tiger Data.' });
     });
     return;
   }

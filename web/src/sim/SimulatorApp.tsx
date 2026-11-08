@@ -3,7 +3,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
   Pause, Play, Plus, RotateCcw, Shuffle, Siren, StepForward,
 } from 'lucide-react'
-import type { Camera, ModelPreset, ScenarioPlan, Vec2 } from '@crowd-control/contract'
+import { RunReplaySchema, type Camera, type ModelPreset, type RunReplay, type ScenarioPlan, type Vec2 } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
 import workedPlan from '../../../contract/fixtures/scenario-plan.json'
 import type { AgentDrawMode } from '../render/agentStyle.ts'
@@ -23,7 +23,9 @@ import { PEDESTRIAN_PRESET, describeScenario, movementPreset, scenarios, startSc
 import { loadAssistant, saveScenarios } from './assistantStore.ts'
 import { AssistantPanel } from './AssistantPanel.tsx'
 import { loadSavedVenues, presetFor } from './savedVenues.ts'
-import { AccountMenu, BrandMark } from '../site/Site.tsx'
+import { AccountMenu, BrandMark, PageLinks } from '../site/Site.tsx'
+import { useAuthFetch } from '../site/useAuthFetch.ts'
+import { runIdentity } from './runNames.ts'
 import { useRunSaving } from './useRunSaving.ts'
 import { PointPins } from './PointPins.tsx'
 import { loadPoints, nextPointId, pointsKeyForSource, savePoints, type MapPoint } from './points.ts'
@@ -59,6 +61,8 @@ function insetsFor(panels: Panels) {
 const REAL_ENGINE = new URLSearchParams(window.location.search).get('engine') === 'real'
 const SCENARIOS = scenarios(workedPlan as ScenarioPlan, REAL_ENGINE ? movementPreset(examplePreset.resolvedModel as ModelPreset) : examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
+/** `/sim?replay=<run ID>` replays a saved run from Past runs. */
+const REPLAY_PARAM = 'replay'
 const ASSISTANT_PREFIX = 'assistant-'
 
 /**
@@ -87,6 +91,7 @@ function initialScenarioId(): string {
 /** Keeps the choice in the URL so a reload or a shared link opens the same venue. */
 function rememberScenario(id: string) {
   const url = new URL(window.location.href)
+  if (!id.startsWith('replay-')) url.searchParams.delete(REPLAY_PARAM)
   if (id === SCENARIOS[0]!.id) url.searchParams.delete(SCENARIO_PARAM)
   else url.searchParams.set(SCENARIO_PARAM, id)
   window.history.replaceState(window.history.state, '', url)
@@ -148,8 +153,6 @@ export default function SimulatorApp() {
     return { left: wide, right: wide }
   })
   const view = useSyncExternalStore(client.subscribe, client.getView)
-  // Runs save to the signed-in account as they play, for Past simulations.
-  const save = useRunSaving(view)
   const incidents = useMemo(() => toIncidents(view.events), [view.events])
   const now = view.current?.frame.time ?? 0
   const ready = view.current !== null
@@ -166,7 +169,44 @@ export default function SimulatorApp() {
   /** Scenarios the assistant wrote in this visit; they join the picker. */
   const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>(() => loadAssistant().scenarios)
   useEffect(() => { saveScenarios(assistantScenarios) }, [assistantScenarios])
-  const scenario = [...SCENARIOS, ...assistantScenarios].find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0]!
+
+  // A replay of a saved run (from Past runs): its scenario, then its changes at the same moments.
+  const authFetch = useAuthFetch()
+  const [replay, setReplay] = useState<{ scenario: Scenario; changes: RunReplay['changes']; startedAt: string } | { error: string } | null>(null)
+  useEffect(() => {
+    const runId = new URLSearchParams(window.location.search).get(REPLAY_PARAM)
+    if (!runId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await authFetch(`/api/runs/${encodeURIComponent(runId)}/replay`)
+        const payload = await response.json().catch(() => null) as { replay?: unknown; error?: string } | null
+        if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`)
+        const parsed = RunReplaySchema.safeParse(payload?.replay)
+        if (!parsed.success) throw new Error('the saved run couldn’t be read')
+        const saved = parsed.data
+        // Older runs were saved without their scenario; the demos can still be found by name.
+        const identity = runIdentity(saved.simulationId)
+        const known = [...SCENARIOS, ...loadAssistant().scenarios].find((candidate) => candidate.id === identity.scenario || candidate.plan.simulationId === saved.simulationId)
+        const plan = saved.plan ?? known?.plan
+        if (!plan) throw new Error('this run was saved before runs kept their scenario, so it can’t be rebuilt')
+        const title = saved.title ?? identity.title
+        const scenario: Scenario = { id: `replay-${saved.runId}`, title: `Replay: ${title}`, plan, model: known && known.plan.simulationId === plan.simulationId ? known.model : presetForPlan(plan) }
+        if (cancelled) return
+        setReplay({ scenario, changes: saved.changes, startedAt: saved.startedAt })
+        setScenarioId(scenario.id)
+      } catch (error) {
+        if (!cancelled) setReplay({ error: error instanceof Error ? error.message : 'something went wrong' })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [authFetch])
+  const replayScenarios = replay && 'scenario' in replay ? [replay.scenario] : []
+  const scenario = [...SCENARIOS, ...assistantScenarios, ...replayScenarios].find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0]!
+  const replaying = replay && 'scenario' in replay && replay.scenario.id === scenario.id ? replay : null
+  // Runs save to the signed-in account as they play, for Past runs, with their title and scenario.
+  const about = useMemo(() => ({ title: scenario.title, plan: scenario.plan }), [scenario])
+  const save = useRunSaving(view, about)
   /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
   const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
   const generated = scenario.plan.layout.mode === 'generate'
@@ -174,9 +214,10 @@ export default function SimulatorApp() {
   const compiled = useMemo(() => layoutSeed === null
     ? startScenario(scenario.plan, scenario.model)
     : startScenario({ ...scenario.plan, seed: layoutSeed }, scenario.model, { varyLayout: true }), [scenario, layoutSeed])
-  const scenarioDetail = compiled.ok
-    ? describeScenario(compiled.value) + (layoutSeed === null ? '' : ` · layout ${layoutSeed}`)
-    : 'This plan could not be built'
+  const scenarioDetail = !compiled.ok ? 'This plan could not be built'
+    // A replay says what it replays: the saved changes, at the moments they first happened.
+    : replaying ? `Replaying ${replaying.changes.length} ${replaying.changes.length === 1 ? 'change' : 'changes'} from ${new Date(replaying.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+    : describeScenario(compiled.value) + (layoutSeed === null ? '' : ` · layout ${layoutSeed}`)
   const chooseScenario = (id: string) => {
     setScenarioId(id)
     setLayoutSeed(null)
@@ -187,14 +228,14 @@ export default function SimulatorApp() {
    * Runs a scenario the assistant wrote: compile it first, so a plan that can't be built is
    * reported in the chat instead of loaded; then add it to the picker and switch to it.
    */
-  const runAssistantPlan = (plan: ScenarioPlan, title: string): string | null => {
+  const runAssistantPlan = (plan: ScenarioPlan, title: string): { error: string } | { id: string } => {
     const model = presetForPlan(plan)
     const check = startScenario(plan, model)
-    if (!check.ok) return `This can’t be built: ${check.error.message}`
+    if (!check.ok) return { error: `This can’t be built: ${check.error.message}` }
     const id = `${ASSISTANT_PREFIX}${assistantScenarios.length + 1}`
     setAssistantScenarios((all) => [...all, { id, title: `Assistant: ${title}`, plan, model }])
     chooseScenario(id)
-    return null
+    return { id }
   }
   /** Test-builds a plan the assistant wrote, without loading it; returns why it can't be built. */
   const checkAssistantPlan = (plan: ScenarioPlan): string | null => {
@@ -287,7 +328,23 @@ export default function SimulatorApp() {
     rendererRef.current?.setSelection(selection)
   }, [selection])
 
+  // Replaying: once the replayed scenario's run is ready (and again after each reset), its saved
+  // changes are applied, each scheduled for the moment it originally took effect.
+  const replayedStream = useRef<string | null>(null)
+  const staleStream = useRef<string | null>(null)
   useEffect(() => {
+    if (!replaying || !view.streamId || !ready || replayedStream.current === view.streamId || staleStream.current === view.streamId) return
+    if (view.simulationId !== replaying.scenario.plan.simulationId) return
+    replayedStream.current = view.streamId
+    const start = client.getView().current?.frame.time ?? 0
+    for (const change of replaying.changes) {
+      void client.apply(change.label, change.operations, change.at > start + 0.05 ? change.at : undefined, change.prompt)
+    }
+  }, [client, replaying, ready, view.streamId, view.simulationId])
+
+  useEffect(() => {
+    // The stream showing before this load; until the new one arrives, it still belongs to the old scenario.
+    staleStream.current = client.getView().streamId
     // A plan that fails to compile never reaches the worker; its error shows in the event log.
     if (compiled.ok) void client.load(compiled.value)
     else client.reportError(compiled.error)
@@ -418,7 +475,12 @@ export default function SimulatorApp() {
                   {assistantScenarios.map((option) => <option key={option.id} value={option.id}>{option.title.replace(/^Assistant: /, '')}</option>)}
                 </optgroup>
               )}
-              <option value={UPLOAD_OPTION}>Upload a floor plan…</option>
+              {replayScenarios.length > 0 && (
+                <optgroup label="Replay from Past runs">
+                  {replayScenarios.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+                </optgroup>
+              )}
+              <option value={UPLOAD_OPTION}>New floor plan…</option>
             </select>
             <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
           </label>
@@ -428,14 +490,16 @@ export default function SimulatorApp() {
               <Shuffle size={14} />
             </button>
           )}
-          <span className="sim-scenario-detail">{scenarioDetail}</span>
+          <span className="sim-scenario-detail" title={scenarioDetail}>{scenarioDetail}</span>
         </div>
         {alarm && (
           <p className="sim-tag sim-tag-alarm" role="status">
             <Siren size={13} strokeWidth={2.25} aria-hidden="true" /> Alarm at {formatClock(alarm.time, false)}
           </p>
         )}
-        {view.endpointKind === 'mock' ? <p className="sim-tag" title="Driven by the development mock worker, not the simulation engine">Mock data</p> : <p className="sim-tag">Rust engine · movement only</p>}
+        {replay && 'error' in replay && <p className="sim-tag sim-tag-alarm" role="alert">Couldn’t replay that run: {replay.error}</p>}
+        {view.endpointKind === 'real' && <p className="sim-tag" title="Running on the Rust engine preview (movement only)">Engine preview</p>}
+        <PageLinks />
         <AccountMenu save={save} />
       </header>
 
@@ -467,7 +531,7 @@ export default function SimulatorApp() {
       <PlaybackBar client={client} view={view} ready={ready} now={now} incidents={incidents} />
 
       <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
-        <AssistantPanel client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
+        <AssistantPanel key={scenario.id} scenarioId={scenario.id} scenarioTitle={scenario.title.replace(/^Assistant: /, '')} client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
       </SidePanel>
 
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
