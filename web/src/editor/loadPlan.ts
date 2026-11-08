@@ -1,4 +1,6 @@
 import type { Limits, Result, SourcePage } from '@crowd-control/contract'
+import type { Door } from './doors.ts'
+import type { Room } from './rooms.ts'
 import { checkUpload, fitWithin, sha256Hex, type AcceptedType, type PixelRect } from './source.ts'
 
 /**
@@ -14,6 +16,23 @@ export type LoadedPlan = {
   original: { width: number; height: number; bitmap: ImageBitmap }
   /** The part of the original in use, in original pixels; null for the whole image. */
   crop: PixelRect | null
+  /** A saved plan reopened for editing: where its rooms, doors and scale start (see fromSaved.ts). */
+  seed?: PlanSeed
+}
+
+/** The tracing of a saved plan, in the pixels of its redrawn image. */
+export type PlanSeed = {
+  /** FLOOR or WALL per pixel: the saved walls exactly, used instead of a draft from the image. */
+  kinds: Uint8Array
+  /** Room number per pixel, 0 for none. */
+  labels: Uint16Array
+  rooms: Room[]
+  doors: Door[]
+  /** The saved scale as a measured line, or null for a plan without one. */
+  scale: { a: { x: number; y: number }; b: { x: number; y: number }; metres: number } | null
+  floor: string
+  /** The saved plan's ID, kept when it is saved again. */
+  editing: string
 }
 
 type Limit = Pick<Limits, 'maxUploadBytes' | 'maxSourcePixels'>

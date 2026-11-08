@@ -39,9 +39,12 @@ export function useCheck({ plan, active, readKinds, furnitureBlocks, rooms, door
   useEffect(() => { live.current = { preview, focus, result }; redraw() }, [preview, focus, result, redraw])
 
   // The venue is named after the file until the person types a name.
+  // A reopened saved plan keeps its name and floor.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (plan) setName(plan.fileName.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'My venue')
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (plan?.seed) { setName(plan.fileName); setFloor(plan.seed.floor) }
+    else if (plan) setName(plan.fileName.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'My venue')
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [plan])
 
   const run = useCallback(() => {

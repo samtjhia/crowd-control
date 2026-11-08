@@ -117,6 +117,15 @@ export class RoomLayer {
     this.boundary = new Uint8Array(width * height)
   }
 
+  /** Starts from a saved plan's rooms (no undo history before them). */
+  restore(labels: Uint16Array, rooms: Room[]) {
+    this.labels.set(labels)
+    this.rooms = rooms.map((room) => ({ ...room, tags: [...room.tags] }))
+    this.nextId = Math.max(0, ...rooms.map((room) => room.id)) + 1
+    this.done = []
+    this.undone = []
+  }
+
   roomAt(i: number): Room | null {
     const id = this.labels[i]!
     return id === 0 ? null : (this.rooms.find((room) => room.id === id) ?? null)

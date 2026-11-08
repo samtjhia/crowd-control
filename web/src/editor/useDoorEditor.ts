@@ -26,15 +26,20 @@ export function useDoorEditor(plan: LoadedPlan | null, active: boolean, rooms: R
   const [warning, setWarning] = useState<string | null>(null)
   const history = useRef<{ done: { doors: Door[]; dismissed: PixelRect[] }[]; undone: { doors: Door[]; dismissed: PixelRect[] }[] }>({ done: [], undone: [] })
   const nextId = useRef(1)
+  /** False until the Doors step has opened once on a reopened saved plan. */
+  const reviewed = useRef(true)
   const live = useRef({ doors, selected, tool })
   const pointer = useRef<{ anchor: Point | null; line: Point | null }>({ anchor: null, line: null })
   useEffect(() => { live.current = { doors, selected, tool }; redraw() }, [doors, selected, tool, redraw])
 
-  // A new plan starts with no doors.
+  // A new plan starts with no doors; a reopened saved plan starts with its saved ones.
   useEffect(() => {
     history.current = { done: [], undone: [] }
+    const saved = plan?.seed?.doors ?? []
+    reviewed.current = plan?.seed === undefined
+    nextId.current = Math.max(0, ...saved.map((door) => door.id)) + 1
     /* eslint-disable react-hooks/set-state-in-effect */
-    setDoors([])
+    setDoors(saved)
     setDismissed([])
     setSelected(null)
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -45,8 +50,16 @@ export function useDoorEditor(plan: LoadedPlan | null, active: boolean, rooms: R
     const layer = rooms.current
     if (!active || !layer) return
     const openings = findOpenings(layer.labels, layer.width, layer.height)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDoors((current) => reconcileDoors(current, openings, dismissed, layer.rooms, () => nextId.current++))
+    const next = reconcileDoors(doors, openings, dismissed, layer.rooms, () => nextId.current++)
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!reviewed.current) {
+      // A reopened saved plan already has the doors the person chose; other openings were
+      // dismissed when it was first made, so they stay dismissed.
+      reviewed.current = true
+      setDismissed([...dismissed, ...next.filter((door) => door.detected).map((door) => door.rect)])
+      setDoors(next.filter((door) => !door.detected))
+    } else setDoors(next)
+    /* eslint-enable react-hooks/set-state-in-effect */
     // Only on opening the step; later edits go through the actions below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])

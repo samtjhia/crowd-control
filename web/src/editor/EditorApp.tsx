@@ -6,6 +6,8 @@ import '../sim/simulator.css'
 import './editor.css'
 import { PlanCanvas, type PlanCanvasHandle } from './PlanCanvas.tsx'
 import { cropPlan, loadPlan, type LoadedPlan } from './loadPlan.ts'
+import { planFromSaved } from './fromSaved.ts'
+import { loadSavedVenues } from '../sim/savedVenues.ts'
 import { ACCEPTED_TYPES } from './source.ts'
 import { useCropTool, type CropTool } from './useCropTool.ts'
 import { useScaleTool } from './useScaleTool.ts'
@@ -167,6 +169,21 @@ export default function EditorApp() {
     setPlan(loaded.value)
     setStep('upload')
   }
+
+  // /editor?edit=<plan ID> reopens a saved floor plan at the walls step; saving replaces it.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('edit')
+    if (!id) return
+    const venue = loadSavedVenues().find((saved) => saved.map.id === id)
+    void Promise.resolve().then(async () => {
+      if (!venue) { setError('That floor plan isn’t saved here any more. Open Floor plans to pick another, or upload a plan.'); return }
+      setLoading(true)
+      const reopened = await planFromSaved(venue)
+      setLoading(false)
+      setPlan(reopened)
+      setStep('walls')
+    })
+  }, [])
 
   const insets = { top: LAYOUT.gap * 2 + LAYOUT.top, right: LAYOUT.gap * 2 + LAYOUT.panel, bottom: LAYOUT.gap, left: LAYOUT.gap }
 

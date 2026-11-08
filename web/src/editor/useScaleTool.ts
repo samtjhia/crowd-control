@@ -22,11 +22,14 @@ export function useScaleTool(plan: LoadedPlan | null, redraw: () => void, camera
   const drag = useRef<'a' | 'b' | null>(null)
 
   // A new (or re-cropped) plan has new pixel coordinates, so any measurement starts again.
+  // A reopened saved plan starts with its saved scale, drawn as a line along the bottom.
   useEffect(() => {
-    live.current = { a: null, b: null }
+    const saved = plan?.seed?.scale
+    live.current = saved ? { a: saved.a, b: saved.b } : { a: null, b: null }
     /* eslint-disable react-hooks/set-state-in-effect */
-    setPoints({ a: null, b: null })
-    setUnscaled(false)
+    setPoints({ ...live.current })
+    setUnscaled(plan?.seed !== undefined && !saved)
+    if (saved) { setDistance(String(saved.metres)); setUnit('m') }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [plan])
 

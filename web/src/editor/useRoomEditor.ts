@@ -52,6 +52,7 @@ export function useRoomEditor(plan: LoadedPlan | null, active: boolean, readWall
   // A new plan: rooms start over, and the default gap is sized to the image.
   useEffect(() => {
     layer.current = plan ? new RoomLayer(plan.pixels.width, plan.pixels.height) : null
+    if (plan?.seed) layer.current!.restore(plan.seed.labels, plan.seed.rooms)
     cache.current = null
     if (!plan) return
     const canvas = document.createElement('canvas')

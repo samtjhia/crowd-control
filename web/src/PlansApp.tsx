@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, Trash2, Upload } from 'lucide-react'
+import { PencilLine, Play, Trash2, Upload } from 'lucide-react'
 import type { PreparedMap } from '@crowd-control/contract'
 import { SiteHeader } from './site/Site.tsx'
 import { useAuthFetch } from './site/useAuthFetch.ts'
@@ -95,6 +95,7 @@ export default function PlansApp() {
                     {venue.map.grid.units !== 'm' && <p className="plans-note">No scale set, so crowding is relative rather than people per m².</p>}
                     <div className="plans-actions">
                       <a className="hist-button" href={`/sim?scenario=${encodeURIComponent(savedScenarioId(venue))}`}><Play size={14} aria-hidden="true" /> Open in simulator</a>
+                      <a className="hist-button" href={`/editor?edit=${encodeURIComponent(venue.map.id)}`} title="Change the walls, rooms, doors or scale; saving replaces this plan"><PencilLine size={14} aria-hidden="true" /> Edit</a>
                       {confirming === venue.map.id ? (
                         <span className="hist-confirm" role="group" aria-label="Confirm delete">
                           <span>Delete this floor plan?</span>

@@ -58,7 +58,9 @@ export function useWallEditor(plan: LoadedPlan | null, metresPerPixel: number | 
   // Redrafting is ~1M pixels of work, so control changes are coalesced to one redraft per frame.
   const current = useRef({ threshold, ignoreSpecks, wallMetres, wallPixels })
   const frame = useRef(0)
+  const exact = useRef(false)
   const redraft = useCallback((next: Partial<typeof current.current>) => {
+    if (Object.keys(next).length > 0) exact.current = false
     current.current = { ...current.current, ...next }
     cancelAnimationFrame(frame.current)
     frame.current = requestAnimationFrame(() => {
@@ -80,7 +82,9 @@ export function useWallEditor(plan: LoadedPlan | null, metresPerPixel: number | 
     const suggested = suggestThreshold(pixels)
     const wallPixelsDefault = Math.max(2, Math.round(Math.min(pixels.width, pixels.height) / 220))
     current.current = { threshold: suggested, ignoreSpecks: true, wallMetres: WALL_METRES, wallPixels: wallPixelsDefault }
-    mask.current = new WallMask(pixels.width, pixels.height, draftLayers(pixels, settingsFor(current.current)))
+    // A reopened saved plan starts from its exact walls; a new upload from the automatic draft.
+    exact.current = plan.seed !== undefined
+    mask.current = new WallMask(pixels.width, pixels.height, plan.seed ? plan.seed.kinds.slice() : draftLayers(pixels, settingsFor(current.current)))
     const canvas = document.createElement('canvas')
     canvas.width = pixels.width
     canvas.height = pixels.height
@@ -99,8 +103,9 @@ export function useWallEditor(plan: LoadedPlan | null, metresPerPixel: number | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan])
 
-  // A new scale changes what "12 cm" is in pixels: redraft, keeping every correction.
-  useEffect(() => { if (mask.current) redraft({}) }, [metresPerPixel, redraft])
+  // A new scale changes what "12 cm" is in pixels: redraft, keeping every correction. Saved
+  // walls are exact, so they are only redrafted once the person changes a wall control.
+  useEffect(() => { if (mask.current && !exact.current) redraft({}) }, [metresPerPixel, redraft])
 
   const setThreshold = (value: number) => { setThresholdState(value); redraft({ threshold: value }) }
   const setIgnoreSpecks = (value: boolean) => { setIgnoreSpecksState(value); redraft({ ignoreSpecks: value }) }
