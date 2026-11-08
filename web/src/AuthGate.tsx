@@ -24,7 +24,12 @@ function AuthFrame({ children, busy = false }: { children: ReactNode; busy?: boo
   )
 }
 
-function AuthScreen({ children }: { children: ReactNode }) {
+/**
+ * The app pages need a signed-in account: until then this shows the sign-in panel (or why
+ * signing in failed), then brings the account's plans in before the page opens. The landing
+ * page is public and sits outside it.
+ */
+export function RequireSignIn({ children }: { children: ReactNode }) {
   const { error, isAuthenticated, isLoading, loginWithRedirect } = useAuth0()
   const signIn = () => void loginWithRedirect({ appState: { returnTo: currentPlace() } })
 
@@ -96,6 +101,7 @@ function AccountSync({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+/** Auth0 for the whole site; app pages add RequireSignIn, the public landing page doesn't. */
 export default function AuthGate({ children }: { children: ReactNode }) {
   if (!domain || !clientId || !audience) {
     const missing = [
@@ -123,7 +129,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       useRefreshTokensFallback
       onRedirectCallback={(state?: AppState) => navigate(typeof state?.returnTo === 'string' ? state.returnTo : '/history')}
     >
-      <AuthScreen>{children}</AuthScreen>
+      {children}
     </Auth0Provider>
   )
 }

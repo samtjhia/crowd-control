@@ -2,7 +2,8 @@
  * Base styles for the pages outside the simulator: the planner (/planner) and the engine test
  * page (/engine). They use the simulator's green world; its tokens live in site/site.css.
  * The simulator and floor-plan editor (root .sim) style themselves; the element rules here are
- * scoped away from them with :where(), which also keeps their specificity at zero.
+ * scoped away from them with :where(), which also keeps their specificity at zero. The landing
+ * page (.landing) has its own styles in landing.css.
  */
 :root {
   color: #1e2420;
@@ -21,10 +22,10 @@ body { margin: 0; min-width: 320px; }
 
 button, textarea, input, select { font: inherit; }
 
-:where(#root > :not(.sim)) ::selection { background: #d0e6ba; }
-:where(#root > :not(.sim)) :is(h1, h2, h3, h4) { font-family: 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; text-wrap: balance; }
+:where(#root > :not(.sim, .landing)) ::selection { background: #d0e6ba; }
+:where(#root > :not(.sim, .landing)) :is(h1, h2, h3, h4) { font-family: 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; text-wrap: balance; }
 
-:where(#root > :not(.sim)) button {
+:where(#root > :not(.sim, .landing)) button {
   border: 0;
   border-radius: 12px;
   background: var(--cc-green, #357650);
@@ -34,12 +35,12 @@ button, textarea, input, select { font: inherit; }
   padding: 0.7rem 1rem;
   transition: background 140ms ease;
 }
-:where(#root > :not(.sim)) button:hover { background: var(--cc-green-hover, #265e3d); }
-:where(#root > :not(.sim)) button:disabled { background: #b9bdb6; cursor: not-allowed; }
-:where(#root > :not(.sim)) :is(button, textarea, input, select, a):focus-visible { outline: 2px solid #357650; outline-offset: 2px; }
+:where(#root > :not(.sim, .landing)) button:hover { background: var(--cc-green-hover, #265e3d); }
+:where(#root > :not(.sim, .landing)) button:disabled { background: #b9bdb6; cursor: not-allowed; }
+:where(#root > :not(.sim, .landing)) :is(button, textarea, input, select, a):focus-visible { outline: 2px solid #357650; outline-offset: 2px; }
 .button-row { display: flex; flex-wrap: wrap; gap: 0.65rem; }
-:where(#root > :not(.sim)) button.secondary-button { background: var(--cc-well, #f5f5f2); color: var(--cc-text, #1e2420); }
-:where(#root > :not(.sim)) button.secondary-button:hover { background: var(--cc-well-strong, #ebebe7); }
+:where(#root > :not(.sim, .landing)) button.secondary-button { background: var(--cc-well, #f5f5f2); color: var(--cc-text, #1e2420); }
+:where(#root > :not(.sim, .landing)) button.secondary-button:hover { background: var(--cc-well-strong, #ebebe7); }
 
 .site-page { min-height: 100dvh; padding-bottom: 3rem; }
 
@@ -84,8 +85,8 @@ button, textarea, input, select { font: inherit; }
 }
 
 form { display: grid; gap: 0.7rem; }
-:where(#root > :not(.sim)) label { font-size: 0.9rem; font-weight: 600; }
-:where(#root > :not(.sim)) :is(textarea, input:not([type='checkbox'], [type='radio']), select) {
+:where(#root > :not(.sim, .landing)) label { font-size: 0.9rem; font-weight: 600; }
+:where(#root > :not(.sim, .landing)) :is(textarea, input:not([type='checkbox'], [type='radio']), select) {
   border: 1px solid #dcdfd8;
   border-radius: 12px;
   background: #fff;
@@ -93,8 +94,8 @@ form { display: grid; gap: 0.7rem; }
   line-height: 1.5;
   padding: 0.7rem 0.8rem;
 }
-:where(#root > :not(.sim)) textarea { resize: vertical; }
-:where(#root > :not(.sim)) form button { justify-self: start; }
+:where(#root > :not(.sim, .landing)) textarea { resize: vertical; }
+:where(#root > :not(.sim, .landing)) form button { justify-self: start; }
 
 .preview-card,
 .followup-panel,
