@@ -5,7 +5,7 @@ import { ENGINE_VERSION } from '../worker/wasmBindings.ts'
 
 type Reading = { fps: number; browserFps: number; updateMs: number; worstMs: number; speed: number; frameAge: number; validationMs: number; validationWorst: number; submitMs: number; submitWorstMs: number; reactMs: number; reactWorst: number; commits: number }
 
-/** Optional browser measurements: /sim?engine=real&scenario=concert-floor&debug=1. */
+/** Optional browser measurements: /sim?scenario=concert-floor&debug=1. */
 export function Diagnostics({ client, renderer, validation }: {
   client: SimulationClient; renderer: RefObject<CrowdRenderer | null>; validation: RefObject<{ ms: number; worstMs: number; reactMs: number; reactWorst: number; commits: number }>
 }) {

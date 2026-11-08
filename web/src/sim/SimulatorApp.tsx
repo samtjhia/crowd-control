@@ -66,7 +66,8 @@ function insetsFor(panels: Panels) {
  * worked example (model units) and one per prepared venue (metres).
  */
 const DEBUG = new URLSearchParams(window.location.search).has('debug')
-const REAL_ENGINE = new URLSearchParams(window.location.search).get('engine') === 'real'
+/** The Rust/Wasm engine runs everywhere except /demo/mock, which keeps the TypeScript mock worker for comparison. */
+const REAL_ENGINE = !window.location.pathname.startsWith('/demo/mock')
 const SCENARIOS = scenarios(workedPlan as ScenarioPlan, REAL_ENGINE ? movementPreset(examplePreset.resolvedModel as ModelPreset) : examplePreset.resolvedModel as ModelPreset)
 const SCENARIO_PARAM = 'scenario'
 /** `/sim?replay=<run ID>` replays a saved run from Past runs. */
@@ -151,7 +152,7 @@ function saveHeatmap(on: boolean) {
 }
 
 export default function SimulatorApp() {
-  // Keep mock demos available; /sim?engine=real uses the same client with Rust/Wasm.
+  // /sim runs the Rust/Wasm engine; /demo/mock runs the same UI on the mock worker.
   const validation = useRef({ ms: 0, worstMs: 0, reactMs: 0, reactWorst: 0, commits: 0 })
   const recordValidation = useCallback((ms: number) => {
     validation.current.ms += ms
@@ -570,7 +571,7 @@ export default function SimulatorApp() {
           </p>
         )}
         {replay && 'error' in replay && <p className="sim-tag sim-tag-alarm" role="alert">Couldn’t replay that run: {replay.error}</p>}
-        {view.endpointKind === 'real' && <p className="sim-tag" title="Running on the Rust engine preview (movement only)">Engine preview</p>}
+        {view.endpointKind !== 'real' && <p className="sim-tag" title="Running on the TypeScript mock worker, not the Rust engine">Mock simulator</p>}
         <PageLinks />
         <AccountMenu save={save} />
       </header>

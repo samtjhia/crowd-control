@@ -3,9 +3,9 @@ import { navigate } from './site/navigate.ts'
 
 // Each page loads on demand so its features stay out of the others' bundles: past runs
 // (/history, also the home page), the simulator (/sim), saved floor plans (/plans) and the
-// floor-plan editor (/editor), a run's safety report (/report), and two developer pages kept
-// out of the way under /demo: the original planner (/demo/planner) and Conrad's engine test
-// page (/demo/engine).
+// floor-plan editor (/editor), a run's safety report (/report), and developer pages kept
+// out of the way under /demo: the original planner (/demo/planner), Conrad's engine test
+// page (/demo/engine), and the simulator on the TypeScript mock worker (/demo/mock).
 const PlannerApp = lazy(() => import('./PlannerApp.tsx'))
 const HistoryApp = lazy(() => import('./HistoryApp.tsx'))
 const PlansApp = lazy(() => import('./PlansApp.tsx'))
@@ -38,6 +38,7 @@ export default function Root() {
     : path.startsWith('/plans') ? <PlansApp />
     : path.startsWith('/editor') ? <EditorApp />
     : path.startsWith('/demo/engine') ? <EngineApp />
+    : path.startsWith('/demo/mock') ? <SimulatorApp />
     : <SimulatorApp />
   return <Suspense fallback={null}>{page}</Suspense>
 }

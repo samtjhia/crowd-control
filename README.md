@@ -96,9 +96,8 @@ Rust goals, movement and recorded changes. Its minimal PixiJS view needs network
 for a pinned CDN bundle. See [engine/README.md](engine/README.md) for supported
 inputs and limitations.
 
-The product simulator at `/sim` defaults to the mock worker. Use
-`/sim?engine=real` for Rust/Wasm with the same PixiJS UI and compiled scenarios.
-That mode runs movement, goals, arrivals, rules, live changes and real metrics.
+The product simulator at `/sim` runs the Rust/Wasm engine. `/demo/mock` runs the
+same PixiJS UI and compiled scenarios on the TypeScript mock worker. The engine runs movement, goals, arrivals, rules, live changes and real metrics.
 The preset is explicitly movement-only. Open `/?demo=contact` for the opt-in
 physical contact and compression-fall fixture. Replay remains pending.
 

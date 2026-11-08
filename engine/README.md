@@ -427,11 +427,11 @@ Contact is opt-in; replay remains pending. Contact samples are not fabricated.
 
 ## Product frontend
 
-`/sim` still defaults to the mock. `/sim?engine=real` selects the Rust worker
+`/sim` runs the Rust worker (the mock moved to `/demo/mock`). It goes
 through the existing SimulationClient/PixiJS renderer. It explicitly compiles the
 worked scenario with a labelled movement-only preset (no contact solver). All
 five compiled picker scenarios load, step and accept changes in actual Wasm/client
-tests. /sim?engine=real now receives real metrics/density/events; no mock values
+tests. /sim now receives real metrics/density/events; no mock values
 are substituted. The renderer retains its own Gaussian visual smoothing. Browser rendering/fps has not been verified in this environment.
 
 ### Worked-scenario movement (engine v8.1)
@@ -449,7 +449,7 @@ before packing into a doorway. Swept-disc checks still prevent actual overlap.
 These steering preferences generate no physical contact loads or falls.
 
 Rebuild Wasm after updating (`npm run build:wasm`) and reset/reload the scene.
-Use `/sim?engine=real` for actual Rust behavior; the default mock is a UI stub.
+`/sim` runs actual Rust behavior; `/demo/mock` is the TypeScript stub.
 Native/Wasm regressions check that all ten worked-example attendees depart,
 including late arrivals, rather than only checking that the alarm changed goals.
 
