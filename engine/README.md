@@ -579,15 +579,27 @@ Dense groups keep coordinated separation steering when both passing sides are
 blocked. The v8.12 concert seed-42 trace, 430 agents: departures 148 at 90 s, 290 at 120 s, all 430 at 180 s
 in the local Wasm trace. This is a liveness regression, not a calibrated prediction.
 
-Passing space (v8.13): nearby-agent count alone cannot disable overtaking. With
-three or more close neighbours and an obstructed forward velocity, test left/right
-side-and-forward corridors against
-walls, portal permissions and body positions. A clear corridor adds a passing
-velocity with an avoidance preference toward that side; packed groups with neither
-side open retain separation steering. Acceleration, speed and swept collision
-checks still apply. Original goals are unchanged.
+Gate routing (v8.16): wide-gate approaches compare short routes across usable
+width, scoring distance plus crowd occupancy along the approach and at the gate.
+Lookahead is two seconds of preferred walking, at least six body radii; lateral
+changes are bounded by that distance. Occupancy uses at most twelve approach samples
+and one gate query per candidate; slower people cost more. A short waypoint lets agents
+go around a clump before returning toward their destination. Wall-corner approaches
+still turn through open space. Geometry, portal permissions, physical speed and
+collision checks remain authoritative; timed queues retain their admission waits.
 
-Alley seed-42 trace with v8.13: 70 of 80 downhill agents reached the station by
-180 s (64 previously); both groups of 80 reached their destinations by 240 s.
-The concert dense-crowd guard checks full clearance by 210 s, allowing overtaking
-paths to change travel times while still detecting persistent blobs.
+Zone arrival requires the full body inside its mask. An agent partly across the
+boundary seeks a nearby body-safe interior point instead of turning back toward
+a shared cell centre. The next sequence goal then starts normally, including
+wander. Bare reach goals stop; no goal is silently replaced with wandering.
+
+Seed-42 alley runs and multi-seed concert runs check progress and full clearance;
+post-arrival checks verify actual movement and evolving wander RNG. These are
+liveness checks, not calibrated travel-time predictions.
+
+Hackathon demo: arrivals pass the timed check-in portals, reach the hall, then
+wander indefinitely. They do not visit a table or dwell for 60 seconds. Working
+hackers choose tables using seeded random selection, work for 300 seconds after
+arrival, then wander. Snack visitors roam after their three service/wander cycles.
+These are explicit scenario goals; the engine does not change nearest selection
+or turn arbitrary completed goals into wandering.

@@ -149,7 +149,7 @@ test('evacuation demos use seeded reaction cohorts and normal walking speed', ()
   }
 })
 
-test('hackathon arrivals settle in, then keep roaming the hall without expiring', () => {
+test('hackathon arrivals enter the hall then roam without a table detour or dwell', () => {
   const scenario = all.find((s) => s.id === 'hackathon-hall')!
   const result = startScenario(scenario.plan, scenario.model)
   assert.ok(result.ok)
@@ -157,6 +157,11 @@ test('hackathon arrivals settle in, then keep roaming the hall without expiring'
   assert.equal(arrivals.length, 40)
   for (const agent of arrivals) {
     const controller: CompiledGoal = result.value.scene.controllers[agent.controller!]!
+    assert.equal(controller.kind, 'sequence')
+    if (controller.kind === 'sequence') {
+      assert.equal(controller.goals.length, 2)
+      assert.equal(controller.goals[0]?.kind, 'reach')
+    }
     const wander: CompiledGoal = controller.kind === 'sequence' ? controller.goals.at(-1)! : controller
     assert.equal(wander.kind, 'wander')
     if (wander.kind === 'wander') {

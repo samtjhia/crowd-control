@@ -54,8 +54,8 @@ fn navigates_around_wall_without_cutting_corners_or_inventing_departures() {
     let s = snapshot(&mut e);
     let a = &s["agents"][0];
     assert_eq!(a["currentGoal"]["status"], "completed");
-    assert!((a["position"]["x"].as_f64().unwrap() - 4.5).abs() < 1e-6);
-    assert_eq!(a["position"]["y"], 2.5);
+    assert!((4.2 - 1e-8..=6.8 + 1e-8).contains(&a["position"]["x"].as_f64().unwrap()));
+    assert!((1.2 - 1e-8..=2.8 + 1e-8).contains(&a["position"]["y"].as_f64().unwrap()));
     assert_eq!(a["zoneId"], "outside");
     assert!(a["departedAt"].is_null());
     assert_eq!(a["velocity"], json!({"x":0.0,"y":0.0}));
@@ -391,7 +391,8 @@ fn fast_motion_visits_each_waypoint_future_work_is_scheduled_and_unknown_goals_r
     step(&mut e, 1);
     let before = snapshot(&mut e);
     assert_eq!(before["agents"][0]["currentGoal"]["status"], "completed");
-    assert_eq!(before["agents"][0]["position"], json!({"x":4.5,"y":2.5}));
+    assert_eq!(before["agents"][0]["zoneId"], "outside");
+    assert!(before["agents"][0]["position"]["x"].as_f64().unwrap() >= 4.2 - 1e-8);
     let mut unsupported = load();
     unsupported["compiled"]["scene"]["controllers"]["leave"] =
         json!({"kind":"teleport","insideZone":"hall"});
@@ -440,8 +441,7 @@ fn doorway_guidance_uses_both_body_width_lanes_in_a_one_unit_opening() {
     }
 }
 
-#[test]
-fn distant_agents_approach_a_wide_door_with_distinct_continuous_headings() {
+fn wide_gate() -> Value {
     let mut v = load();
     v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
     let (w, h) = (32, 12);
@@ -465,6 +465,12 @@ fn distant_agents_approach_a_wide_door_with_distinct_continuous_headings() {
         "portals":[{"id":"door","connects":["hall","outside"],"x":20,"y":3,"width":1,"height":6,"open":true}],
         "grid":{"width":w,"height":h,"cellSize":1,"units":"model","blocked":blocked,"zoneIndex":zones,"portalIndex":portals,
         "traversalCost":vec![1;w*h],"zoneIds":[null,"hall","outside"],"portalIds":[null,"door"]}});
+    v
+}
+
+#[test]
+fn distant_agents_approach_a_wide_door_with_distinct_continuous_headings() {
+    let mut v = wide_gate();
     let template = v["compiled"]["scene"]["agents"][0].clone();
     v["compiled"]["scene"]["agents"] = Value::Array(
         (0..4)
@@ -589,29 +595,7 @@ fn completion_waits_for_future_work_and_excludes_continuous_goals() {
 
 #[test]
 fn wall_side_arrivals_choose_free_width_instead_of_joining_a_corner_queue() {
-    let mut v = load();
-    v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
-    let (w, h) = (32, 12);
-    let mut blocked = vec![0; w * h];
-    let mut zones = vec![0; w * h];
-    let mut portals = vec![0; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let i = y * w + x;
-            if x == 0 || y == 0 || x == w - 1 || y == h - 1 || (x == 20 && !(3..9).contains(&y)) {
-                blocked[i] = 1;
-            } else if x == 20 {
-                portals[i] = 1;
-            } else {
-                zones[i] = if x < 20 { 1 } else { 2 };
-            }
-        }
-    }
-    v["compiled"]["scene"]["map"] = json!({"width":w,"height":h,"cellSize":1,"units":"model",
-        "rooms":[{"id":"hall","x":1,"y":1,"width":19,"height":10},{"id":"outside","x":21,"y":1,"width":10,"height":10}],
-        "portals":[{"id":"door","connects":["hall","outside"],"x":20,"y":3,"width":1,"height":6,"open":true}],
-        "grid":{"width":w,"height":h,"cellSize":1,"units":"model","blocked":blocked,"zoneIndex":zones,"portalIndex":portals,
-        "traversalCost":vec![1;w*h],"zoneIds":[null,"hall","outside"],"portalIds":[null,"door"]}});
+    let mut v = wide_gate();
 
     v["compiled"]["scene"]["controllers"]["hold"] = json!({"kind":"wait","duration":600});
     let template = v["compiled"]["scene"]["agents"][0].clone();
@@ -662,4 +646,76 @@ fn wall_side_arrivals_choose_free_width_instead_of_joining_a_corner_queue() {
             "people must pass the corner queue through the free aperture: {a}"
         );
     }
+}
+
+#[test]
+fn wide_gate_routes_around_a_cluster_on_the_approach_not_only_at_the_opening() {
+    let mut v = wide_gate();
+    v["compiled"]["scene"]["controllers"]["hold"] = json!({"kind":"wait","duration":600});
+    let template = v["compiled"]["scene"]["agents"][0].clone();
+    let mut walker = template.clone();
+    walker["id"] = json!("walker");
+    walker["x"] = json!(4.0);
+    walker["y"] = json!(5.5);
+    walker["components"] = json!({"physical":{"radius":0.25}});
+    let mut agents = vec![walker];
+    for column in 0..2 {
+        for row in 0..3 {
+            let mut a = template.clone();
+            a["id"] = json!(format!("cluster-{column}-{row}"));
+            a["x"] = json!(6.0 + column as f64 * 0.6);
+            a["y"] = json!(4.9 + row as f64 * 0.6);
+            a["components"] = json!({"physical":{"radius":0.25}});
+            a["controller"] = json!("hold");
+            agents.push(a);
+        }
+    }
+    v["compiled"]["scene"]["agents"] = json!(agents);
+    let mut e = init(v);
+    step(&mut e, 1);
+    let s = snapshot(&mut e);
+    let walker = s["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "walker")
+        .unwrap();
+    let target = &walker["navigation"]["targetPoint"];
+    let lateral = target["y"].as_f64().unwrap();
+    assert!(
+        lateral < 4.5 || lateral > 6.5,
+        "aim around the cluster before joining it: {target}"
+    );
+    assert!(
+        target["x"].as_f64().unwrap() < 10.0,
+        "choose a local bypass, not a distant gate point"
+    );
+    step(&mut e, 600);
+    let s = snapshot(&mut e);
+    assert_eq!(
+        s["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "walker")
+            .unwrap()["state"],
+        "departed"
+    );
+}
+
+#[test]
+fn a_zone_destination_does_not_pull_an_agent_back_to_a_partial_body_cell() {
+    let mut v = wide_gate();
+    v["compiled"]["scene"]["agents"][0]["x"] = json!(21.5);
+    v["compiled"]["scene"]["agents"][0]["y"] = json!(5.5);
+    v["compiled"]["scene"]["agents"][0]["components"] = json!({"physical":{"radius":0.6}});
+    let mut e = init(v);
+    step(&mut e, 100);
+    let s = snapshot(&mut e);
+    let a = &s["agents"][0];
+    assert_eq!(a["state"], "departed");
+    assert!(
+        a["position"]["x"].as_f64().unwrap() >= 21.6 - 1e-8,
+        "the whole body must clear the gate before departure: {a}"
+    );
 }

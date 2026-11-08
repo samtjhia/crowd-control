@@ -370,6 +370,51 @@ fn a_faster_walker_passes_a_slow_leader_and_still_reaches_its_goal() {
 }
 
 #[test]
+fn a_closing_walker_starts_passing_before_reaching_the_leader() {
+    let mut fast = agent("fast", 3.5, 5.5, "east");
+    fast["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});
+    let mut slow = agent("slow", 5.0, 5.5, "east");
+    slow["components"] =
+        json!({"physical":{"radius":0.25},"navigation":{"preferredSpeed":0.2,"personalSpace":0.5}});
+    let mut e = load(input(vec![fast, slow]));
+    for tick in 0..60 {
+        step(&mut e, 1);
+        let s = snapshot(&mut e);
+        let a = &s["agents"][0];
+        let leader = &s["agents"][1];
+        assert!((x(a) - x(leader)).hypot(y(a) - y(leader)) >= 0.5 - 1e-8);
+        if tick == 19 {
+            assert!(
+                (y(a) - 5.5).abs() > 0.2,
+                "start using the open side while still approaching the leader: {a}"
+            );
+        }
+    }
+    let s = snapshot(&mut e);
+    assert!(x(&s["agents"][0]) > x(&s["agents"][1]));
+}
+
+#[test]
+fn entering_a_destination_region_starts_wandering_without_visiting_a_cell_centre() {
+    let mut v = input(vec![agent("a", 30.3, 5.2, "east")]);
+    v["compiled"]["scene"]["controllers"]["east"] = json!({"kind":"sequence","goals":[{"kind":"reach","targetZone":"east"},{"kind":"wander","insideZone":"east","changeTargetEvery":2}]});
+    let mut e = load(v);
+    step(&mut e, 1);
+    let s = snapshot(&mut e);
+    assert_eq!(
+        s["agents"][0]["currentGoal"]["cursor"][0]["childIndex"].as_f64(),
+        Some(1.0),
+        "the whole body is already in the destination region"
+    );
+    step(&mut e, 5);
+    let s = snapshot(&mut e);
+    assert!(
+        s["agents"][0]["currentGoal"]["execution"]["targetPoint"].is_object(),
+        "the next wander goal must select a target"
+    );
+}
+
+#[test]
 fn nearby_people_on_one_side_do_not_disable_passing_on_the_open_side() {
     let mut fast = agent("fast", 3.5, 5.5, "east");
     fast["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});

@@ -260,6 +260,7 @@ pub fn advance(
                 nearby.clear();
             }
             charge(&mut work, nearby.len())?;
+            let mut slower_ahead = false;
             for &j in &nearby {
                 if i == j {
                     continue;
@@ -267,6 +268,12 @@ pub fn advance(
                 let other = old[j];
                 let offset = other.p.sub(me.p);
                 let dist = offset.len();
+                let along = offset.dot(direction);
+                let across = (offset.x * direction.y - offset.y * direction.x).abs();
+                slower_ahead |= along > 0.0
+                    && along < desired_speed * 1.2 + me.radius + other.radius
+                    && across < me.radius + other.radius
+                    && me.v.dot(direction) > other.v.dot(direction) + desired_speed * 0.15;
                 let personal = a.components.navigation.personal_space.0;
                 let gap = dist - me.radius - other.radius;
                 let strength = a.components.behavior.avoidance_strength.0;
@@ -361,9 +368,15 @@ pub fn advance(
             let mut preferred_velocity = v;
             let mut accepted = V::default();
             let mut best_progress = f64::NEG_INFINITY;
-            for candidate in 0..17 {
+            for sample in 0..17 {
+                // Start passing while closing on a slower leader, before hard braking becomes necessary.
+                let candidate = if slower_ahead && sample < 2 {
+                    1 - sample
+                } else {
+                    sample
+                };
                 if candidate == 1 {
-                    if !passing_room {
+                    if !passing_room || slower_ahead {
                         let lateral = 2.0 * me.radius
                             + a.components.navigation.personal_space.0.min(me.radius);
                         let forward = desired_speed * 0.75 + 2.0 * me.radius;
@@ -483,7 +496,10 @@ pub fn advance(
                     accepted = v;
                     best_progress = progress;
                     // No sampled velocity can beat full-speed progress straight toward the waypoint.
-                    if !passing_room || candidate == 0 || progress >= speed * 1.05 - 1e-10 {
+                    if !passing_room
+                        || (candidate == 0 && passing_velocity.is_none())
+                        || progress >= speed * 1.05 - 1e-10
+                    {
                         break;
                     }
                 }

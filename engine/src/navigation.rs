@@ -1287,6 +1287,20 @@ impl Navigator {
                 }
                 candidates.push((0.0, point));
             }
+            let lookahead = (speed(a) * 2.0).max(6.0 * radius);
+            let local = sign * (near - longitudinal) > lookahead + radius;
+            let destination = through.clone();
+            if local {
+                for (_, point) in &mut candidates {
+                    if horizontal {
+                        point.x = Number(longitudinal + sign * lookahead);
+                        point.y = Number(point.y.0.clamp(lateral - lookahead, lateral + lookahead));
+                    } else {
+                        point.y = Number(longitudinal + sign * lookahead);
+                        point.x = Number(point.x.0.clamp(lateral - lookahead, lateral + lookahead));
+                    }
+                }
+            }
             let score = |p: &Point| {
                 let lateral = if horizontal { p.y.0 } else { p.x.0 };
                 let back = near - sign * 6.0 * radius;
@@ -1311,7 +1325,32 @@ impl Navigator {
                     let old = if horizontal { saved.y.0 } else { saved.x.0 };
                     (lateral - old).abs() * 0.2
                 });
-                distance(&a.position, p) + congestion * 2.0 * radius + switch
+                let mut approach = 0.0;
+                let length = distance(&a.position, p);
+                let samples = ((length / (2.0 * radius)).ceil() as usize).clamp(1, 12);
+                for sample in 1..=samples {
+                    let t = sample as f64 / samples as f64;
+                    let px = a.position.x.0 + (p.x.0 - a.position.x.0) * t;
+                    let py = a.position.y.0 + (p.y.0 - a.position.y.0) * t;
+                    approach += self.crowd_in(
+                        grid,
+                        [
+                            px - 2.0 * radius,
+                            py - 2.0 * radius,
+                            px + 2.0 * radius,
+                            py + 2.0 * radius,
+                        ],
+                        a,
+                    );
+                }
+                length
+                    + if local {
+                        distance(p, &destination)
+                    } else {
+                        0.0
+                    }
+                    + (congestion + approach) * 2.0 * radius
+                    + switch
             };
             for (cost, point) in &mut candidates {
                 *cost = score(point);
@@ -1319,7 +1358,21 @@ impl Navigator {
             candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
         }
         candidates.push((0.0, align));
-        for (_, point) in candidates {
+        for (_, mut point) in candidates {
+            // Approach a corner from open space instead of joining a queue tangent to its wall.
+            if aperture >= 6.0 * radius
+                && (lateral < lo || lateral > hi)
+                && sign * (near - longitudinal) > radius
+                && !geometry::line_clear(grid, &self.bodies, &a.position, &point, radius, work)?
+            {
+                let across = if horizontal { point.y.0 } else { point.x.0 };
+                let approach = near - sign * (across - lateral).abs().max(2.0 * radius);
+                if horizontal {
+                    point.x = Number(approach);
+                } else {
+                    point.y = Number(approach);
+                }
+            }
             let distance = distance(&a.position, &point);
             if distance > grid.cell_size * 1e-7
                 && point.x.0 >= radius
@@ -1381,6 +1434,55 @@ impl Navigator {
         let Some(route) = self.routes[i].as_ref() else {
             return Ok(None);
         };
+        // Finish entering the region instead of turning back toward a boundary cell centre.
+        if route.direct.is_none()
+            && self.intents[i]
+                .as_ref()
+                .is_some_and(|intent| matches!(intent.goal.kind, GoalKind::Reach))
+            && a.navigation.target_entity_id.is_some()
+            && a.navigation.target_entity_id == a.zone_id
+        {
+            let zone = grid.zone_index[index(grid, &a.position)];
+            let radius = a.components.physical.radius.0;
+            let contained = |point: &Point| {
+                let cells = grid.footprint(point.x.0, point.y.0, radius);
+                !cells.is_empty() && cells.iter().all(|&cell| grid.zone_index[cell] == zone)
+            };
+            if contained(&a.position) {
+                complete(a);
+                return Ok(None);
+            }
+            let spacing = radius.max(grid.cell_size) * 0.5;
+            for scale in [1.0, 2.0] {
+                for (x, y) in [
+                    (0.0, 1.0),
+                    (1.0, 0.0),
+                    (0.0, -1.0),
+                    (-1.0, 0.0),
+                    (1.0, 1.0),
+                    (1.0, -1.0),
+                    (-1.0, 1.0),
+                    (-1.0, -1.0),
+                ] {
+                    let point = Point {
+                        x: Number(a.position.x.0 + x * spacing * scale),
+                        y: Number(a.position.y.0 + y * spacing * scale),
+                    };
+                    if point.x.0 >= radius
+                        && point.y.0 >= radius
+                        && point.x.0 + radius <= grid.width as f64 * grid.cell_size
+                        && point.y.0 + radius <= grid.height as f64 * grid.cell_size
+                        && contained(&point)
+                        && self.permits_agent(grid, &a.position, &point, i)
+                        && geometry::clear(grid, &self.bodies, &a.position, &point, radius, work)?
+                    {
+                        let remaining = distance(&a.position, &point);
+                        a.navigation.target_point = Some(point.clone());
+                        return Ok(Some((point, remaining)));
+                    }
+                }
+            }
+        }
         if let Some(point) = &route.direct {
             let remaining = distance(&a.position, point) - route.stop;
             if remaining <= grid.cell_size * 1e-7 {

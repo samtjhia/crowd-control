@@ -64,9 +64,9 @@ test('a point of interest says what it is, who is using it, and why people go th
   assert.ok(usage.using >= 1 && usage.using <= 3, `at most three use the snack table at once (${usage.using})`)
   assert.ok(usage.waiting >= 1, 'others wait their turn beside it')
   const reasons = placeReasons(scene, sim.demo.plan, [], 'table_3')
-  assert.ok(reasons.some((r) => /^People tagged seated: go to the nearest table, then wait 300 s\.$/.test(r)), reasons.join(' | '))
-  assert.ok(reasons.some((r) => /^People tagged arrival: go to Hacking hall, then go to the nearest table/.test(r)), reasons.join(' | '))
-  assert.deepEqual(placeReasons(scene, sim.demo.plan, [], 'snacks'), ['People tagged hungry: use Snack table, then wander in Hacking hall (3 times).'])
+  assert.ok(reasons.some((r) => /^People tagged seated: go to a randomly chosen table, then wait 300 s, then wander in Hacking hall\.$/.test(r)), reasons.join(' | '))
+  assert.ok(reasons.every((r) => !r.startsWith('People tagged arrival:')), 'arrivals have no table destination')
+  assert.deepEqual(placeReasons(scene, sim.demo.plan, [], 'snacks'), ['People tagged hungry: use Snack table, then wander in Hacking hall (3 times), then wander in Hacking hall.'])
 })
 
 test('the mock serves a counter a few at a time, then people move on', () => {
