@@ -1,4 +1,5 @@
 import { journeyPoint, type JourneyGeometry } from './journeyGeometry'
+import { pedestrianLane } from './journeyLanes'
 
 const GAPS = [48, 73, 39, 86, 57, 65, 43, 91, 54, 76, 46, 62]
 const COUNTS = [2, 1, 3, 1, 2, 2, 1, 3, 2, 1, 2, 1]
@@ -30,7 +31,8 @@ export function journeyPeopleAt(geometry: JourneyGeometry, time: number, overflo
       const point = journeyPoint(geometry, routeDistance)
       const before = journeyPoint(geometry, Math.max(0, routeDistance - 2)), after = journeyPoint(geometry, Math.min(geometry.length, routeDistance + 2))
       const dx = after.x - before.x, dy = after.y - before.y, length = Math.hypot(dx, dy) || 1
-      const lane = count === 1 ? Math.sin(seed * 2.1) * (mobile ? 6 : 13) : (member === 0 ? -1 : member === 1 ? 1 : -.3) * (mobile ? 5.5 : 9)
+      const spread = count === 1 ? Math.sin(seed * 2.1) * (mobile ? 3 : 5.5) : (member === 0 ? -1 : member === 1 ? 1 : -.3) * (mobile ? 3 : 6)
+      const lane = pedestrianLane(geometry, routeDistance, spread)
       const identity = (((group * 3 + member) % 120) + 120) % 120
       people.push({ key: group * 3 + member, x: point.x + dy / length * lane, y: point.y - dx / length * lane, identity, size: (mobile ? .68 : .92) * (.94 + seed % 4 * .035), pace: speed / 13, distance })
     }

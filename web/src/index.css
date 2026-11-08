@@ -494,9 +494,9 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
 }
 
 /* Scroll wayfinding lives on the road; ordinary document scrolling stays native. */
-.roadmap-progress { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; pointer-events: none; transition: color 300ms ease-out; }
-.roadmap-trace-track { stroke: #a2b58a; stroke-width: 1.5; opacity: .25; }
-.roadmap-trace { stroke: currentColor; stroke-width: 3; stroke-linecap: round; opacity: .8; }
+.roadmap-cycle-trail, .roadmap-rider-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.roadmap-cycle-trail { z-index: 1; }
+.roadmap-rider-layer { z-index: 3; }
 .roadmap-waypoints { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .roadmap-waypoint { position: absolute; display: grid; place-items: center; width: 44px; height: 44px; transform: translate(-50%, -50%); pointer-events: auto; color: var(--waypoint-color); text-decoration: none; }
 .roadmap-waypoint-number { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #91a583; border-radius: 50%; background: #f8f3e7; color: #59744f; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background 200ms ease-out, border-color 200ms ease-out, color 200ms ease-out; }
@@ -519,7 +519,6 @@ footer > p { width: 100%; text-align: center; padding-top: 19px; margin: 0; bord
  .handoff-link { top: 129px; font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
- .roadmap-progress, .roadmap-waypoint-number { transition: none; }
- .roadmap-runner { display: none; }
- .roadmap-trace { opacity: .28; }
+ .roadmap-waypoint-number { transition: none; }
+ .roadmap-cycle-trail { display: none; }
 }
