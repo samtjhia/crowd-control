@@ -3,11 +3,14 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import Root from './Root.tsx'
 import AuthGate from './AuthGate.tsx'
+import { loadFeatures } from './features.ts'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <AuthGate>
-      <Root />
-    </AuthGate>
-  </StrictMode>,
-)
+void loadFeatures().then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <AuthGate>
+        <Root />
+      </AuthGate>
+    </StrictMode>,
+  )
+})

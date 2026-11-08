@@ -7,7 +7,7 @@ import { geminiEnabled } from '../server/src/features.ts'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL('..', import.meta.url)), '')
   return {
-    define: { __GEMINI_ENABLED__: JSON.stringify(geminiEnabled(env.PROD)) },
+    define: { 'import.meta.env.GEMINI_ENABLED': JSON.stringify(geminiEnabled(env.PROD)) },
     envDir: '..',
     plugins: [react()],
     server: {

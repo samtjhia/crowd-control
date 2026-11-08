@@ -7,6 +7,8 @@ services:
       target: server
     image: crowd-control-server
     env_file: .env
+    environment:
+      HOST: 0.0.0.0
     restart: unless-stopped
 
   web:

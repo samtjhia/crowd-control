@@ -80,6 +80,12 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
     return;
   }
 
+  if (request.method === 'GET' && request.url?.split('?')[0] === '/api/features') {
+    response.setHeader('Cache-Control', 'no-store');
+    sendJson(response, 200, { geminiEnabled: aiEnabled });
+    return;
+  }
+
   if (!aiEnabled && isGeminiGeneration(request.method, request.url)) {
     const message = 'AI features are disabled in production.';
     sendJson(response, 403, { ok: false, error: request.url?.split('?')[0] === '/api/plan'
@@ -409,6 +415,7 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
   sendJson(response, 404, { error: 'Not found' });
 }
 
-server.listen(port, '127.0.0.1', () => {
-  console.log('Crowd Control API: http://127.0.0.1:' + port);
+const host = process.env.HOST ?? '127.0.0.1';
+server.listen(port, host, () => {
+  console.log(`Crowd Control API: http://${host}:${port}`);
 });

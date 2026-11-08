@@ -185,9 +185,11 @@ the 2,000-agent 4×/60 FPS performance target remains unmet in this benchmark.
 Production feature flag: root `.env` accepts `PROD=TRUE` or `PROD=FALSE` (default).
 TRUE hides Gemini assistant/planner/report UI and makes the API reject planner and
 report-generation POSTs with HTTP 403. FALSE restores the normal features; keys are
-still required. Invalid values fail startup/build. Restart dev servers after edits;
-rebuild the frontend and restart the API for deployments. Cached report reads and
-ordinary simulation, editor, saved-scenario and run APIs do not invoke Gemini.
+still required. Invalid values fail startup/build. The browser waits for public,
+uncached `GET /api/features` before rendering; API runtime configuration overrides
+the build default, and unavailable/malformed settings keep AI hidden. Deploy both
+frontend and API for this behavior; later flag edits need an API restart and page
+reload. Cached report reads and normal simulation/storage APIs do not invoke Gemini.
 
 Playback speed is a worker-session preference: reset, rewind/seek and loading a
 new scenario preserve the selected multiplier. They clear playback debt and pause

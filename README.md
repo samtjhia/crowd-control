@@ -57,8 +57,10 @@ replaying simulations.
 Set `PROD=FALSE` in the root `.env` to enable Gemini. `PROD=TRUE` hides the
 assistant, AI scenario creation/planner demo, and AI report controls, and rejects
 planner/report-generation requests on the API with HTTP 403. This flag is separate
-from `NODE_ENV`. Restart the development servers after changing it; deployments
-must set it for both the frontend build and API runtime, then rebuild/restart.
+from `NODE_ENV`. The browser reads the API's flag before rendering, so the API's
+runtime setting overrides any frontend build default. Restart the API and reload
+the browser after changing it. Deploy this frontend/API update once to enable that
+runtime behavior; later flag changes do not require rebuilding the frontend.
 
 To use Gemini, copy `.env.example` to `.env` and set `GEMINI_API_KEY` and
 `GEMINI_MODEL` there; never put the API key in a `VITE_` variable or share it
@@ -70,8 +72,9 @@ single-page application and an API, then set `AUTH0_DOMAIN`,
 Allow the local app origin, such as `http://localhost:5173`, in the Auth0
 application's callback, logout, and web origins. The API accepts only verified
 Auth0 RS256 access tokens for the configured issuer and audience; `/health`
-and `/health/database` remain public. Missing server Auth0 configuration fails
-closed for every `/api/*` route.
+and `/health/database` remain public, as does `GET /api/features` (only the public
+Gemini-enabled boolean). Missing server Auth0 configuration fails closed for all
+other `/api/*` routes.
 On startup, the server creates the run, intervention, and metric tables and
 turns the metric table into a Timescale hypertable. The offline mock writes
 run metadata, batches metric samples, and records worker-acknowledged
