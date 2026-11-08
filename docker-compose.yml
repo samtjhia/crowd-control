@@ -1,0 +1,28 @@
+name: crowd-control
+
+services:
+  server:
+    build:
+      context: .
+      target: server
+    image: crowd-control-server
+    env_file: .env
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        VITE_AUTH0_DOMAIN: ${VITE_AUTH0_DOMAIN:-}
+        VITE_AUTH0_CLIENT_ID: ${VITE_AUTH0_CLIENT_ID:-}
+        VITE_AUTH0_AUDIENCE: ${VITE_AUTH0_AUDIENCE:-}
+    image: crowd-control-web
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    restart: unless-stopped
