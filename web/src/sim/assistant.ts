@@ -87,7 +87,7 @@ export function buildRequest(context: AskContext) {
 
 /** What the Assistant shows for a reply. */
 export type Outcome =
-  | { type: 'scenario'; plan: ScenarioPlan }
+  | { type: 'scenario'; plan: ScenarioPlan; title?: string }
   | { type: 'change'; request: CreateInterventionRequest }
   | { type: 'message'; text: string; tone: 'info' | 'error'; evidence?: string[] }
 
@@ -134,7 +134,7 @@ export function interpret(reply: Extract<ReturnType<typeof PlannerReplySchema.pa
   switch (reply.kind) {
     case 'scenario':
       return kind === 'scenario'
-        ? { type: 'scenario', plan: reply.plan }
+        ? { type: 'scenario', plan: reply.plan, ...(reply.title && { title: reply.title }) }
         : { type: 'message', tone: 'info', text: 'That came back as a whole new scenario rather than a change. Switch to “New scenario” if that’s what you want, or describe a change to this run.' }
     case 'followup': {
       if (kind !== 'change') return { type: 'message', tone: 'info', text: 'That came back as a change to the current run rather than a new scenario. Try describing the whole scenario.' }

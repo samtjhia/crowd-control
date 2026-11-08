@@ -27,6 +27,10 @@ import { AccountMenu, BrandMark, PageLinks } from '../site/Site.tsx'
 import { useAuthFetch } from '../site/useAuthFetch.ts'
 import { runIdentity } from './runNames.ts'
 import { useRunSaving } from './useRunSaving.ts'
+import { AnalysisPanel } from './AnalysisPanel.tsx'
+import { ownSimulationId } from './ownSimulationId.ts'
+import { ScenarioMenu } from './ScenarioMenu.tsx'
+import { deleteAccountScenario, pushScenario } from '../site/scenarioSync.ts'
 import { PointPins } from './PointPins.tsx'
 import { loadPoints, nextPointId, pointsKeyForSource, savePoints, type MapPoint } from './points.ts'
 
@@ -81,8 +85,12 @@ function presetForPlan(plan: ScenarioPlan): ModelPreset {
 }
 const UPLOAD_OPTION = '__upload'
 
-/** The scenario named in the URL (`/sim?scenario=hillside-alley`), else the worked example. */
+/** `/sim?new`: no map yet; the person describes the scenario to the assistant. */
+const BLANK = '__new'
+
+/** The scenario named in the URL (`/sim?scenario=hillside-alley`), a blank start, else the worked example. */
 function initialScenarioId(): string {
+  if (new URLSearchParams(window.location.search).has('new')) return BLANK
   const requested = new URLSearchParams(window.location.search).get(SCENARIO_PARAM)
   const known = [...SCENARIOS, ...loadAssistant().scenarios]
   return known.some((scenario) => scenario.id === requested) ? requested! : SCENARIOS[0]!.id
@@ -92,6 +100,7 @@ function initialScenarioId(): string {
 function rememberScenario(id: string) {
   const url = new URL(window.location.href)
   if (!id.startsWith('replay-')) url.searchParams.delete(REPLAY_PARAM)
+  url.searchParams.delete('new')
   if (id === SCENARIOS[0]!.id) url.searchParams.delete(SCENARIO_PARAM)
   else url.searchParams.set(SCENARIO_PARAM, id)
   window.history.replaceState(window.history.state, '', url)
@@ -167,7 +176,7 @@ export default function SimulatorApp() {
 
   const [scenarioId, setScenarioId] = useState(initialScenarioId)
   /** Scenarios the assistant wrote in this visit; they join the picker. */
-  const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>(() => loadAssistant().scenarios)
+  const [assistantScenarios, setAssistantScenarios] = useState<Scenario[]>(() => loadAssistant().scenarios.map(ownSimulationId))
   useEffect(() => { saveScenarios(assistantScenarios) }, [assistantScenarios])
 
   // A replay of a saved run (from Past runs): its scenario, then its changes at the same moments.
@@ -187,7 +196,11 @@ export default function SimulatorApp() {
         const saved = parsed.data
         // Older runs were saved without their scenario; the demos can still be found by name.
         const identity = runIdentity(saved.simulationId)
-        const known = [...SCENARIOS, ...loadAssistant().scenarios].find((candidate) => candidate.id === identity.scenario || candidate.plan.simulationId === saved.simulationId)
+        // Assistant scenarios first, by title: older ones shared their venue demo's simulation ID.
+        const written = loadAssistant().scenarios
+        const known = written.find((candidate) => saved.title !== undefined && candidate.title === saved.title)
+          ?? [...written, ...SCENARIOS].find((candidate) => candidate.plan.simulationId === saved.simulationId)
+          ?? SCENARIOS.find((candidate) => candidate.id === identity.scenario)
         const plan = saved.plan ?? known?.plan
         if (!plan) throw new Error('this run was saved before runs kept their scenario, so it can’t be rebuilt')
         const title = saved.title ?? identity.title
@@ -205,16 +218,18 @@ export default function SimulatorApp() {
   const scenario = [...SCENARIOS, ...assistantScenarios, ...replayScenarios].find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0]!
   const replaying = replay && 'scenario' in replay && replay.scenario.id === scenario.id ? replay : null
   // Runs save to the signed-in account as they play, for Past runs, with their title and scenario.
+  const blank = scenarioId === BLANK
   const about = useMemo(() => ({ title: scenario.title, plan: scenario.plan }), [scenario])
-  const save = useRunSaving(view, about)
+  const { state: save, runId, flush } = useRunSaving(view, about)
   /** Seed for a varied generated layout (Technical PRD §10); null keeps the standard layout. */
   const [layoutSeed, setLayoutSeed] = useState<number | null>(null)
-  const generated = scenario.plan.layout.mode === 'generate'
-  // Compiled once per choice; switching scenarios or layouts loads a fresh simulation.
-  const compiled = useMemo(() => layoutSeed === null
+  const generated = !blank && scenario.plan.layout.mode === 'generate'
+  // Compiled once per choice; switching scenarios or layouts loads a fresh simulation. A blank start loads nothing.
+  const compiled = useMemo(() => (blank ? null : layoutSeed === null
     ? startScenario(scenario.plan, scenario.model)
-    : startScenario({ ...scenario.plan, seed: layoutSeed }, scenario.model, { varyLayout: true }), [scenario, layoutSeed])
-  const scenarioDetail = !compiled.ok ? 'This plan could not be built'
+    : startScenario({ ...scenario.plan, seed: layoutSeed }, scenario.model, { varyLayout: true })), [blank, scenario, layoutSeed])
+  const scenarioDetail = !compiled ? 'No map yet: describe your scenario in the assistant'
+    : !compiled.ok ? 'This plan could not be built'
     // A replay says what it replays: the saved changes, at the moments they first happened.
     : replaying ? `Replaying ${replaying.changes.length} ${replaying.changes.length === 1 ? 'change' : 'changes'} from ${new Date(replaying.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
     : describeScenario(compiled.value) + (layoutSeed === null ? '' : ` · layout ${layoutSeed}`)
@@ -228,14 +243,38 @@ export default function SimulatorApp() {
    * Runs a scenario the assistant wrote: compile it first, so a plan that can't be built is
    * reported in the chat instead of loaded; then add it to the picker and switch to it.
    */
-  const runAssistantPlan = (plan: ScenarioPlan, title: string): { error: string } | { id: string } => {
+  const runAssistantPlan = (plan: ScenarioPlan, title: string): { error: string } | { id: string; reused: boolean } => {
     const model = presetForPlan(plan)
     const check = startScenario(plan, model)
     if (!check.ok) return { error: `This can’t be built: ${check.error.message}` }
-    const id = `${ASSISTANT_PREFIX}${assistantScenarios.length + 1}`
-    setAssistantScenarios((all) => [...all, { id, title: `Assistant: ${title}`, plan, model }])
+    // The same plan run again is the scenario it already is, not a second copy.
+    const same = (a: ScenarioPlan, b: ScenarioPlan) => JSON.stringify({ ...a, simulationId: '' }) === JSON.stringify({ ...b, simulationId: '' })
+    const existing = assistantScenarios.find((candidate) => same(candidate.plan, plan))
+    if (existing) {
+      chooseScenario(existing.id)
+      return { id: existing.id, reused: true }
+    }
+    // An ID no other device or deleted scenario has used.
+    const id = `${ASSISTANT_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
+    const created = ownSimulationId({ id, title, plan, model, savedAt: new Date().toISOString() })
+    setAssistantScenarios((all) => [...all, created])
+    void pushScenario(authFetch, created)
     chooseScenario(id)
-    return { id }
+    return { id, reused: false }
+  }
+  /** Renames one of the person's scenarios, here and in their account. */
+  const renameScenario = (id: string, title: string) => {
+    const target = assistantScenarios.find((candidate) => candidate.id === id)
+    if (!target) return
+    const renamed = { ...target, title, savedAt: new Date().toISOString() }
+    setAssistantScenarios((all) => all.map((candidate) => (candidate.id === id ? renamed : candidate)))
+    void pushScenario(authFetch, renamed)
+  }
+  /** Deletes one of the person's scenarios (its past runs stay), and goes back to the first demo. */
+  const deleteScenario = (id: string) => {
+    setAssistantScenarios((all) => all.filter((candidate) => candidate.id !== id))
+    void deleteAccountScenario(authFetch, id)
+    if (scenarioId === id) chooseScenario(SCENARIOS[0]!.id)
   }
   /** Test-builds a plan the assistant wrote, without loading it; returns why it can't be built. */
   const checkAssistantPlan = (plan: ScenarioPlan): string | null => {
@@ -257,6 +296,7 @@ export default function SimulatorApp() {
 
   // Map tools: Select inspects; Trip and Doors change the simulation with one click.
   const [tool, setTool] = useState<MapTool>('select')
+  const [rightTab, setRightTab] = useState<'simulation' | 'analysis'>('simulation')
   const [selection, setSelection] = useState<readonly Pick[]>([])
   const toolRef = useRef(tool)
 
@@ -346,6 +386,7 @@ export default function SimulatorApp() {
     // The stream showing before this load; until the new one arrives, it still belongs to the old scenario.
     staleStream.current = client.getView().streamId
     // A plan that fails to compile never reaches the worker; its error shows in the event log.
+    if (!compiled) return
     if (compiled.ok) void client.load(compiled.value)
     else client.reportError(compiled.error)
     // Pausing stops the playback timer; the client stays usable if React remounts (StrictMode).
@@ -452,7 +493,12 @@ export default function SimulatorApp() {
     <div className={`sim${panels.left ? ' has-left' : ''}${panels.right ? ' has-right' : ''}`}>
       <div className="sim-stage">
         <div className="sim-canvas" ref={hostRef}>
-          {!ready && <p className="sim-loading">Loading the venue…</p>}
+          {blank ? (
+            <div className="sim-blank">
+              <p className="sim-blank-title">No map yet</p>
+              <p>Describe what should happen in the assistant on the left: who comes, where they go, what happens when. It can use one of our venues, one of your floor plans, or make up a building.</p>
+            </div>
+          ) : !ready && <p className="sim-loading">Loading the venue…</p>}
         </div>
         <PlanSigns scene={view.scene} frame={view.current?.frame ?? null} camera={camera} incidents={incidents} now={now} />
         <PointPins points={points} camera={camera} selected={selection.length === 1 && selection[0]!.kind === 'point' ? selection[0]!.id : null}
@@ -469,9 +515,17 @@ export default function SimulatorApp() {
               if (event.target.value === UPLOAD_OPTION) window.location.assign('/editor')
               else chooseScenario(event.target.value)
             }}>
-              {SCENARIOS.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              {blank && <option value={BLANK} disabled>New simulation</option>}
+              <optgroup label="Demo scenarios">
+                {SCENARIOS.filter((option) => !option.id.startsWith('upload-')).map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              </optgroup>
+              {SCENARIOS.some((option) => option.id.startsWith('upload-')) && (
+                <optgroup label="Your floor plans">
+                  {SCENARIOS.filter((option) => option.id.startsWith('upload-')).map((option) => <option key={option.id} value={option.id}>{option.title.replace(/ \(uploaded\)$/, '')}</option>)}
+                </optgroup>
+              )}
               {assistantScenarios.length > 0 && (
-                <optgroup label="From the assistant">
+                <optgroup label="Your scenarios">
                   {assistantScenarios.map((option) => <option key={option.id} value={option.id}>{option.title.replace(/^Assistant: /, '')}</option>)}
                 </optgroup>
               )}
@@ -484,6 +538,9 @@ export default function SimulatorApp() {
             </select>
             <ChevronDown size={14} strokeWidth={2.25} aria-hidden="true" />
           </label>
+          {assistantScenarios.some((candidate) => candidate.id === scenario.id) && !blank && (
+            <ScenarioMenu key={scenario.id} title={scenario.title.replace(/^Assistant: /, '')} onRename={(title) => renameScenario(scenario.id, title)} onDelete={() => deleteScenario(scenario.id)} />
+          )}
           {generated && (
             <button type="button" className="sim-icon-btn" onClick={nextLayout}
               aria-label="New layout" title="New layout: same description, a different building">
@@ -531,13 +588,26 @@ export default function SimulatorApp() {
       <PlaybackBar client={client} view={view} ready={ready} now={now} incidents={incidents} />
 
       <SidePanel side="left" open={panels.left} title="Assistant" onToggle={() => toggle('left')}>
-        <AssistantPanel key={scenario.id} scenarioId={scenario.id} scenarioTitle={scenario.title.replace(/^Assistant: /, '')} client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
+        <AssistantPanel key={blank ? BLANK : scenario.id} scenarioId={blank ? BLANK : scenario.id} scenarioTitle={blank ? 'a new simulation' : scenario.title.replace(/^Assistant: /, '')} startWith={blank ? 'scenario' : 'change'} client={client} view={view} venues={venues} currentVenueId={currentVenueId} onCheckPlan={checkAssistantPlan} onRunPlan={runAssistantPlan} />
       </SidePanel>
 
-      <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
+      <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}
+        head={(
+          <div className="sim-panel-tabs" role="tablist" aria-label="Right panel">
+            {(['simulation', 'analysis'] as const).map((tab) => (
+              <button key={tab} type="button" role="tab" id={`sim-tab-${tab}`} aria-selected={rightTab === tab} aria-controls={`sim-tabpanel-${tab}`} onClick={() => setRightTab(tab)}>
+                {tab === 'simulation' ? 'Simulation' : 'Analysis'}
+              </button>
+            ))}
+          </div>
+        )}>
+        <div role="tabpanel" id="sim-tabpanel-analysis" aria-labelledby="sim-tab-analysis" hidden={rightTab !== 'analysis'}>
+          <AnalysisPanel key={runId ?? 'none'} view={view} runId={runId} flush={flush} />
+        </div>
+        <div role="tabpanel" id="sim-tabpanel-simulation" aria-labelledby="sim-tab-simulation" hidden={rightTab !== 'simulation'}>
         <Overview view={view} />
         <Section title="Selected">
-          <SelectionDetails selection={selection} view={view} plan={compiled.ok ? scenario.plan : null} points={points} onAction={applyAction} onClear={() => setSelection([])} onRemovePoint={removePoint} />
+          <SelectionDetails selection={selection} view={view} plan={compiled?.ok ? scenario.plan : null} points={points} onAction={applyAction} onClear={() => setSelection([])} onRemovePoint={removePoint} />
         </Section>
         <Section title="Density">
           <DensityPanel view={view} on={heatmap} onToggle={() => setHeatmap((on) => !on)} />
@@ -547,6 +617,7 @@ export default function SimulatorApp() {
           <ChangesList changes={view.changes} />
         </Section>
         <Legend />
+        </div>
       </SidePanel>
 
       <button type="button" className="sim-scrim" aria-label="Close panels" tabIndex={-1}
@@ -560,15 +631,15 @@ export default function SimulatorApp() {
  * sits on the panel's inner edge and closes it; closed, the same handle waits at the screen
  * edge and reopens it ([ and ] too). It slides with the panel, so it is always in one place.
  */
-function SidePanel({ side, open, title, onToggle, children }: {
-  side: 'left' | 'right'; open: boolean; title: string; onToggle: () => void; children: ReactNode
+function SidePanel({ side, open, title, head, onToggle, children }: {
+  side: 'left' | 'right'; open: boolean; title: string; head?: ReactNode; onToggle: () => void; children: ReactNode
 }) {
   // The arrow points where the panel will go: toward the edge to close, away from it to open.
   const Icon = (side === 'left') === open ? ChevronLeft : ChevronRight
   return (
     <>
       <aside className={`sim-float sim-panel sim-panel-${side}`} aria-label={title} inert={!open}>
-        <header className="sim-panel-head"><h2>{title}</h2></header>
+        <header className="sim-panel-head">{head ?? <h2>{title}</h2>}</header>
         <div className="sim-panel-body">{children}</div>
       </aside>
       <button type="button" className={`sim-handle sim-handle-${side}`} onClick={onToggle} aria-expanded={open}

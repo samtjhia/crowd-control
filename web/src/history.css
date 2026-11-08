@@ -158,3 +158,35 @@
   .hist-detail { position: static; }
   .hist-head { align-items: flex-start; flex-direction: column; gap: 14px; padding-top: 32px; }
 }
+
+/* Head actions: refresh as a quiet icon, New simulation with its two ways to start. */
+.hist-head-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+.hist-head-actions .hist-refresh { width: 40px; padding: 0; justify-content: center; }
+.hist-new { position: relative; }
+.hist-new > .hist-button { margin-top: 0; }
+.hist-new-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  width: 340px;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--cc-card);
+  box-shadow: var(--cc-shadow);
+  animation: cc-menu-in 160ms var(--cc-ease);
+}
+.hist-new-menu a { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 10px; color: var(--cc-text); text-decoration: none; }
+.hist-new-menu a:hover { background: var(--cc-well); }
+.hist-new-menu a > svg { flex: none; margin-top: 2px; color: var(--cc-green); }
+.hist-new-menu a > span { display: grid; gap: 2px; }
+.hist-new-menu strong { font-weight: 650; }
+.hist-new-menu a > span > span { color: var(--cc-muted); font-size: 13px; line-height: 1.45; }
+.hist-has-report { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; color: var(--cc-green); }
+.hist-report-empty { display: grid; justify-items: start; gap: 4px; padding: 6px 0 4px; }
+.hist-report-empty p { max-width: 50ch; margin: 0; color: var(--cc-muted); }
+.hist-report-empty .hist-button { margin-top: 10px; }
+a.hist-quiet { text-decoration: none; }
+@media (max-width: 860px) { .hist-new-menu { right: auto; left: 0; width: min(340px, calc(100vw - 32px)); } }

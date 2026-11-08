@@ -115,7 +115,7 @@ export function PageLinks() {
 export function SiteHeader({ children }: { children?: ReactNode }) {
   return (
     <header className="cc-header">
-      <a className="cc-brand" href="/sim"><BrandMark /> <span>Crowd Control</span></a>
+      <a className="cc-brand" href="/history"><BrandMark /> <span>Crowd Control</span></a>
       <nav className="cc-nav" aria-label="Pages">
         {PAGES.map(({ href, label, short }) => (
           <a key={href} href={href} aria-current={isCurrent(href) ? 'page' : undefined} aria-label={label}>

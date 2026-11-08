@@ -138,7 +138,8 @@ export function fittedStarterPlan(venue: SavedVenue, model: ModelPreset): Scenar
   return plan
 }
 
-export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: ModelPreset }
+/** A scenario: its name, plan and model; `savedAt` for the person's own, kept in their account. */
+export type Scenario = { id: string; title: string; plan: ScenarioPlan; model: ModelPreset; savedAt?: string }
 
 // Small builders so each demo plan reads like its description.
 const inside = (id: string) => ({ ids: [id] })

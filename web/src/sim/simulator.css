@@ -974,3 +974,71 @@
 /* What a "why" answer was based on: the events it cites, under the answer. */
 .sim-evidence { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 12px; }
 .sim-evidence span { color: var(--text); font-weight: 600; }
+
+/* Right panel tabs: Simulation | Analysis, in the panel's header. */
+.sim-panel-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--well); }
+.sim .sim-panel-tabs button {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 8px;
+  color: var(--muted);
+  font: 600 13px/1 'Manrope Variable', 'Manrope', sans-serif;
+  letter-spacing: -0.01em;
+}
+.sim .sim-panel-tabs button:hover { color: var(--text); }
+.sim .sim-panel-tabs button[aria-selected='true'] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgb(20 30 20 / 0.12); }
+
+/* Analysis: the safety report for the run on screen. */
+.sim-analysis { display: grid; gap: 12px; padding: 4px 20px 20px; }
+.sim-analysis-start { justify-items: start; padding-top: 8px; }
+.sim-analysis-title { font: 600 16px/1.3 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; }
+.sim-analysis-note { padding: 8px 20px; }
+.sim-analysis-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.sim-analysis-actions .sim-link { display: inline-flex; align-items: center; gap: 5px; }
+.sim-analysis .sim-action svg.sim-spin { animation: sim-spin 900ms linear infinite; }
+.sim-analysis .report-head h1 { font: 650 18px/1.25 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; }
+.sim-analysis .report-body h2 { font: 600 14px/1.3 'Manrope Variable', 'Manrope', sans-serif; }
+.sim-analysis ol, .sim-analysis ul { list-style: none; }
+
+/* A blank start: no map yet, a note in the middle of the canvas. */
+.sim-blank {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(420px, calc(100% - 48px));
+  padding: 22px 24px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  transform: translate(-50%, -50%);
+}
+.sim-blank-title { margin-bottom: 6px !important; color: var(--text); font: 600 18px/1.3 'Manrope Variable', 'Manrope', sans-serif; letter-spacing: -0.03em; }
+
+/* Rename or delete the person's own scenario, beside the picker. */
+.sim-scenario-menu { position: relative; flex: none; }
+.sim-scenario-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  width: 260px;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+.sim .sim-scenario-pop > button { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; text-align: left; }
+.sim .sim-scenario-pop > button:hover { background: var(--well); }
+.sim .sim-scenario-pop > button.is-danger { color: #96364e; }
+.sim .sim-scenario-pop > button.is-danger:hover { background: #f8e8ec; }
+.sim-scenario-pop form, .sim-scenario-pop > div { display: grid; gap: 8px; padding: 6px; }
+.sim-scenario-pop label { color: var(--muted); font-size: 12px; }
+.sim-scenario-pop input { height: 34px; padding: 0 10px; border: 1px solid var(--hair); border-radius: 9px; font: inherit; }
+.sim-scenario-pop input:focus-visible { outline: 2px solid var(--green); outline-offset: 0; }
+.sim-scenario-pop-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.sim .sim-action.is-danger { background: #a1324c; }
+.sim .sim-action.is-danger:hover { background: #87283f; }

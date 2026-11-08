@@ -22,5 +22,5 @@ test('after signing in you come back to the page you asked for, without sign-in 
   location('http://localhost:5173/sim?scenario=concert-floor&error=access_denied&error_description=x')
   assert.equal(currentPlace(), '/sim?scenario=concert-floor')
   location('http://localhost:5173/')
-  assert.equal(currentPlace(), '/sim', 'the home page is the simulator')
+  assert.equal(currentPlace(), '/history', 'the home page is Past runs')
 })

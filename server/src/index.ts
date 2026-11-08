@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
 import { createAuth0TokenVerifier } from './auth.ts';
-import { deleteRun, deleteVenue, getOwnedRuns, getRunAnalytics, getRunFacts, getRunReplay, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
+import { deleteRun, deleteScenario, deleteVenue, listScenarios, saveScenario, getOwnedRuns, getRunAnalytics, getRunFacts, getRunReplay, getSavedReport, saveReport, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
 import { createReportWriter } from './report.ts';
 
@@ -215,6 +215,21 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
 
   // The AI safety report for a run, written by Gemini from the run's measured facts.
   const reportRoute = /^\/api\/runs\/([^/]+)\/report$/.exec(telemetryPath);
+  // The report written earlier for a run, without writing it again.
+  if (request.method === 'GET' && reportRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const saved = await getSavedReport(database, ownerSub, reportRoute[1]!);
+      if (saved === 'invalid') sendJson(response, 400, { ok: false, error: 'Run ID must be a UUID.' });
+      else if (saved === null) sendJson(response, 404, { ok: false, error: 'Run was not found.' });
+      else if (saved === 'none') sendJson(response, 200, { ok: true, report: null });
+      else sendJson(response, 200, { ok: true, ...saved });
+    })().catch(() => sendJson(response, 503, { ok: false, error: 'Could not load the report from Tiger Data.' }));
+    return;
+  }
   if (request.method === 'POST' && reportRoute) {
     void (async () => {
       if (!database || !await databaseReady) {
@@ -228,7 +243,10 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
       if (facts === null) { sendJson(response, 404, { ok: false, error: 'Run was not found.' }); return; }
       if (facts.measurements === 0) { sendJson(response, 422, { ok: false, error: 'This run has no measurements yet. Play it for a while first.' }); return; }
       const report = await writeReport(facts);
-      if (report.ok) sendJson(response, 200, { ok: true, report: report.value, facts });
+      if (report.ok) {
+        await saveReport(database, ownerSub, reportRoute[1]!, report.value, facts);
+        sendJson(response, 200, { ok: true, report: report.value, facts });
+      }
       else sendJson(response, 503, { ok: false, error: report.error.message });
     })().catch((error: unknown) => {
       const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'UNKNOWN';
@@ -291,6 +309,33 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
       console.error(`Tiger Data telemetry write failed (${code}).`);
       sendJson(response, 503, { ok: false, error: 'Could not save telemetry to Tiger Data.' });
     });
+    return;
+  }
+
+  // Scenarios the person kept (written by the assistant), per signed-in person.
+  const scenarioRoute = /^\/api\/scenarios(?:\/([^/]+))?$/.exec(telemetryPath);
+  if (scenarioRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const scenarioId = scenarioRoute[1] ? decodeURIComponent(scenarioRoute[1]) : undefined;
+      if (request.method === 'GET' && !scenarioId) {
+        sendJson(response, 200, { ok: true, scenarios: await listScenarios(database, ownerSub) });
+      } else if (request.method === 'PUT' && scenarioId) {
+        const body = await readJsonBody(request, MAX_VENUE_BODY_BYTES);
+        if (!body.ok) { sendJson(response, body.error.code === 'RESOURCE_LIMIT' ? 413 : 400, { ok: false, error: body.error.message }); return; }
+        const saved = await saveScenario(database, ownerSub, scenarioId, body.value);
+        sendJson(response, saved === 'saved' ? 200 : 400, saved === 'saved' ? { ok: true } : { ok: false, error: 'Invalid scenario.' });
+      } else if (request.method === 'DELETE' && scenarioId) {
+        const deleted = await deleteScenario(database, ownerSub, scenarioId);
+        if (deleted === 'invalid') sendJson(response, 400, { ok: false, error: 'Invalid scenario ID.' });
+        else sendJson(response, deleted ? 200 : 404, deleted ? { ok: true } : { ok: false, error: 'Scenario was not found.' });
+      } else {
+        sendJson(response, 405, { ok: false, error: 'Method not allowed.' });
+      }
+    })().catch(() => sendJson(response, 503, { ok: false, error: 'Could not reach saved scenarios in Tiger Data.' }));
     return;
   }
 

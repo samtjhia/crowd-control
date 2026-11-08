@@ -1,0 +1,13 @@
+/* Floor plans: a grid of saved venues, each with a drawing of its plan. */
+.plans-upload { flex: none; margin-top: 0 !important; }
+.plans-empty { max-width: 560px; }
+
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.plans-card { display: grid; overflow: hidden; border-radius: var(--cc-radius); background: var(--cc-card); box-shadow: var(--cc-shadow); }
+.plan-thumb { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: var(--cc-workspace); }
+.plans-card-body { display: grid; gap: 4px; padding: 16px 18px 18px; }
+.plans-card-body h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.plans-card-body > p { margin: 0; color: var(--cc-muted); font-size: 13px; }
+.plans-card-body .plans-note { color: #7a4f12; }
+.plans-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.plans-actions .hist-button { margin-top: 0; height: 36px; font-size: 13.5px; }

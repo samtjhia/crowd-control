@@ -57,11 +57,11 @@ export function describeOperation(operation: Operation, inventory: InventoryItem
     return `Add ${operation.count} ${operation.count === 1 ? 'person' : 'people'}${locations ? ` in ${locations}` : ''}`
   }
   if (operation.op === 'set') {
-    const ids = 'ids' in operation.targets ? operation.targets.ids : undefined
-    const targets = ids?.map((id) => {
-      const item = inventory.find((entry) => entry.id === id)
-      return displayName(item?.label ?? id)
-    }).join(', ') ?? 'selected entities'
+    const targets = describeWho(operation.targets, inventory)
+    // A fall (no mobility, lying down) and getting back up, as the map's Trip tool says them.
+    const pose = operation.values.appearance?.pose
+    if (pose === 'fallen') return `Make ${targets} fall`
+    if (pose === 'upright' && operation.values.components?.mobility?.speedMultiplier !== 0) return `Help ${targets} up`
     const portalOpen = operation.values.components?.portal?.open
     if (portalOpen !== undefined) return `${portalOpen ? 'Open' : 'Close'} ${targets}`
     const speed = operation.values.components?.navigation?.preferredSpeed
@@ -115,11 +115,16 @@ export function describeWho(selector: Selector, inventory: InventoryItem[]): str
     if (selector.ids.length > 3) return selector.ids.every((id) => !inventory.some((item) => item.id === id)) ? `${selector.ids.length} people` : `${selector.ids.length} things`
     return selector.ids.map((id) => nameIn(id, inventory)).join(', ')
   }
-  const group = selector.tags
-    ? `people tagged ${selector.tags.map(displayName).join(' and ')}`
-    : !selector.kind || selector.kind === 'agent' ? 'everyone' : `every ${selector.kind}`
+  // "2 people", "a few"-style picks read as a count; otherwise the group as a whole.
+  const count = selector.sample && 'count' in selector.sample ? selector.sample.count : null
+  const group = count !== null
+    ? `${count} ${count === 1 ? 'person' : 'people'}${selector.tags ? ` tagged ${selector.tags.map(displayName).join(' and ')}` : ''}`
+    : selector.tags
+      ? `people tagged ${selector.tags.map(displayName).join(' and ')}`
+      : !selector.kind || selector.kind === 'agent' ? 'everyone' : `every ${selector.kind}`
   const where = selector.inside?.ids ? ` in ${selector.inside.ids.map((id) => nameIn(id, inventory)).join(', ')}` : ''
-  return group + where
+  const near = selector.near?.targets.ids ? ` near ${selector.near.targets.ids.map((id) => nameIn(id, inventory)).join(' or ')}` : ''
+  return group + where + near
 }
 
 /** Where a goal points: named rooms or doors, or a description of the selection. */

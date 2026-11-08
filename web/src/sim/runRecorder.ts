@@ -80,6 +80,12 @@ export class RunRecorder {
     run.changes.push({ ...change, recordedAt: new Date().toISOString() })
   }
 
+  /** The run on screen now, and whether it has reached the account yet. */
+  current(): { runId: string; saved: boolean } | null {
+    const run = this.runs.at(-1)
+    return run ? { runId: run.runId, saved: run.created } : null
+  }
+
   /** Sends whatever is queued; safe to call often. Resolves when this flush is done. */
   flush(): Promise<void> {
     this.flushing ??= this.send().finally(() => { this.flushing = null })

@@ -8,7 +8,7 @@ import { askPlanner, buildRequest, capacityNote, explainRefusal, pinGoalTargets,
 import { formatClock } from './incidents.ts'
 import { placesInScene } from './places.ts'
 import { loadPoints, pointsKeyForLayout, pointsKeyForSource, pointsNote, preparedGeometry, sceneGeometry } from './points.ts'
-import { loadThread, saveThread, type Message } from './assistantStore.ts'
+import { loadThread, recentChat, saveThread, type Message } from './assistantStore.ts'
 import type { VenueOption } from './scenario.ts'
 
 /** A message before it gets an ID (Omit applied to each kind of message separately). */
@@ -41,7 +41,9 @@ type Props = {
   /** Tries to build a plan without loading it; returns why it can't be built, or null. */
   onCheckPlan: (plan: ScenarioPlan) => string | null
   /** Compiles and loads a scenario the assistant wrote; returns why it can't, or the new scenario's ID. */
-  onRunPlan: (plan: ScenarioPlan, title: string) => { error: string } | { id: string }
+  onRunPlan: (plan: ScenarioPlan, title: string) => { error: string } | { id: string; reused: boolean }
+  /** Which kind of request the composer starts on: New scenario when there is no map yet. */
+  startWith?: AskKind
 }
 
 /**
@@ -51,10 +53,10 @@ type Props = {
  * be built the reason goes back to the planner once for a corrected plan. Applied changes go
  * through the same request path as the map's click tools, so they appear in the Changes list.
  */
-export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues, currentVenueId, onCheckPlan, onRunPlan }: Props) {
+export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues, currentVenueId, onCheckPlan, onRunPlan, startWith = 'change' }: Props) {
   const [messages, setMessages] = useState<Message[]>(() => loadThread(scenarioId))
   const [text, setText] = useState('')
-  const [kind, setKind] = useState<AskKind>('change')
+  const [kind, setKind] = useState<AskKind>(startWith)
   const [where, setWhere] = useState<string>(currentVenueId ?? GENERATE)
   const [busy, setBusy] = useState(false)
   // The planner API needs the signed-in person's Auth0 token.
@@ -116,7 +118,7 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
       add({ from: 'assistant', text: `That plan didn’t fit: ${problem} Asking for a corrected version…`, tone: 'info' })
       return askScenario(prompt, place, [...problems, problem])
     }
-    add({ from: 'assistant', plan, prompt, where: place, status: 'ready', ...(problem && { note: `This still can’t be built: ${problem}` }) })
+    add({ from: 'assistant', plan, prompt, where: place, status: 'ready', ...(outcome.title && { name: outcome.title }), ...(problem && { note: `This still can’t be built: ${problem}` }) })
   }
 
   const askChange = async (prompt: string) => {
@@ -127,8 +129,10 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
     const places = view.scene ? placesNote(placesInScene(view.scene)) : ''
     // Points marked on this venue ("point A"), described by area, doors and objects.
     const marked = view.scene && view.simulationId ? pointsNote(loadPoints(pointsKeyForSource(view.scene.map.source, view.simulationId)), sceneGeometry(view.scene)) : ''
+    // The conversation so far, so a reply like "no, just some of them" is read against what came before.
+    const earlier = recentChat(messages)
     const request = buildRequest({
-      simulationId: view.simulationId ?? 'assistant', prompt: [prompt, places, marked].filter(Boolean).join('\n\n'), kind: 'change',
+      simulationId: view.simulationId ?? 'assistant', prompt: [prompt, earlier, places, marked].filter(Boolean).join('\n\n'), kind: 'change',
       ...(venue && { layout: venue.layout }), inventory, ...(view.metrics && { summary: view.metrics }), interventions,
     })
     if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that request: ${request.error.message}`, tone: 'error' })
@@ -186,11 +190,13 @@ export function AssistantPanel({ client, view, scenarioId, scenarioTitle, venues
    * Runs a scenario the assistant wrote. It becomes its own scenario with its own conversation,
    * which starts with the request that made it, so changes to it are asked about there.
    */
-  const run = (id: number, plan: ScenarioPlan, prompt: string) => {
-    const result = onRunPlan(plan, titleFrom(prompt))
+  const run = (id: number, plan: ScenarioPlan, prompt: string, name?: string) => {
+    const result = onRunPlan(plan, name ?? titleFrom(prompt))
     if ('error' in result) return update(id, { note: result.error })
     // Saved now: this panel is replaced by the new scenario's before its effects would run.
     saveThread(scenarioId, messages.map((m) => (m.id === id ? ({ ...m, status: 'running', note: undefined } as Message) : m)))
+    // The same plan run again opens the scenario it already is, with its own conversation.
+    if (result.reused) return
     saveThread(result.id, [
       { id: 1, from: 'you', text: prompt, kind: 'scenario' },
       { id: 2, from: 'assistant', tone: 'info', text: `Started this scenario from your request in “${scenarioTitle}”. Ask for changes to it here.` },
@@ -282,7 +288,7 @@ function MessageView({ message, venues, busy, onRun, onApply, onAskAgain, onDisc
   message: Message
   venues: VenueOption[]
   busy: boolean
-  onRun: (id: number, plan: ScenarioPlan, prompt: string) => void
+  onRun: (id: number, plan: ScenarioPlan, prompt: string, name?: string) => void
   onApply: (id: number, change: CreateInterventionRequest, prompt: string) => void
   onAskAgain: (id: number, plan: ScenarioPlan, prompt: string, where: string | null) => void
   onDiscard: (id: number) => void
@@ -323,7 +329,7 @@ function MessageView({ message, venues, busy, onRun, onApply, onAskAgain, onDisc
           </div>
         ) : (
           <ProposalActions status={message.status} doneLabel="Running in the simulator"
-            onAccept={() => onRun(message.id, message.plan, message.prompt)} acceptLabel="Run it" onDiscard={() => onDiscard(message.id)} />
+            onAccept={() => onRun(message.id, message.plan, message.prompt, message.name)} acceptLabel="Run it" onDiscard={() => onDiscard(message.id)} />
         )}
       </li>
     )

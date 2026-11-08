@@ -238,3 +238,19 @@ test('a "why" question sends the run’s measurements and events, and shows the 
   const refused = await askPlanner(why, 'why', change.fetcher)
   assert.ok(refused.type === 'message' && /rather than an answer/.test(refused.text), 'a "why" question never changes the run')
 })
+
+test('falls and "a couple near the door" read plainly, and the conversation goes along with a follow-up', async () => {
+  const { recentChat } = await import('./assistantStore.ts')
+  const inventory = [{ id: 'street_exit_west', kind: 'portal' as const, label: 'West street exit', tags: ['exit'], componentNames: ['portal'] }]
+  const near = { kind: 'agent' as const, near: { targets: { ids: ['street_exit_west'] }, distance: 3 }, sample: { count: 2 } }
+  assert.deepEqual(describeOperations([
+    { op: 'set', targets: near, values: { components: { mobility: { speedMultiplier: 0 } }, appearance: { pose: 'fallen' } } },
+    { op: 'set', targets: near, values: { components: { mobility: { speedMultiplier: 1 } }, appearance: { pose: 'upright' } } },
+  ], inventory), ['Make 2 people near West street exit fall', 'Help 2 people near West street exit up'])
+  const chat = recentChat([
+    { id: 1, from: 'you', text: 'make a couple of people fall near the door at point A', kind: 'change' },
+    { id: 2, from: 'assistant', tone: 'info', text: 'That needs a new scenario.' },
+  ])
+  assert.match(chat, /Person: make a couple of people fall near the door at point A\nAssistant: That needs a new scenario\./)
+  assert.equal(recentChat([]), '')
+})

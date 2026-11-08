@@ -871,7 +871,6 @@ export class MockSimulation {
 
   private resolveEntities(selector: EntitySelector): string[] | Fail {
     const world = this.world!
-    if (selector.near) return { error: unsupported('near selectors') }
     const agents = this.agentsById()
     const kindOf = (id: string) => (agents.has(id) ? 'agent' : world.entityKinds.get(id))
     const positionOf = (id: string) => agents.get(id)?.position ?? world.centers.get(id)
@@ -906,6 +905,19 @@ export class MockSimulation {
         if (value !== undefined && compare(value, predicate.comparison, predicate.value)) kept.push(id)
       }
       ids = kept
+    }
+    if (selector.near) {
+      // Within `distance` of any of the targets (a door, a danger, a person), nearest first, so
+      // "two people near the door" are the two closest to it.
+      const targets = this.resolveEntities(selector.near.targets)
+      if (isFail(targets)) return targets
+      const { distance: within } = selector.near
+      const gapTo = (id: string) => {
+        const at = positionOf(id)
+        if (!at) return Infinity
+        return Math.min(...targets.filter((target) => target !== id).map((target) => this.distanceTo(target, at) ?? Infinity))
+      }
+      ids = ids.map((id) => ({ id, gap: gapTo(id) })).filter(({ gap }) => gap <= within + EPS).sort((a, b) => a.gap - b.gap).map(({ id }) => id)
     }
     if (selector.sample) {
       // Deterministic but not seeded: the mock takes the first matches in stable order.

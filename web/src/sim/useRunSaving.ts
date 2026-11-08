@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SaveState } from '../site/saveState.ts'
 import { useAuthFetch } from '../site/useAuthFetch.ts'
 import type { SimulationView } from '../worker/simulationClient.ts'
@@ -11,9 +11,10 @@ const FLUSH_MS = 4000
  * Saves the simulator's runs to the signed-in account as they play: a new run for each load or
  * reset, its metric samples, and each change applied. Returns the save state for the account menu.
  */
-export function useRunSaving(view: SimulationView, about: RunAbout): SaveState {
+export function useRunSaving(view: SimulationView, about: RunAbout): { state: SaveState; runId: string | null; flush: () => Promise<boolean> } {
   const authFetch = useAuthFetch()
   const [state, setState] = useState<SaveState>({ kind: 'off' })
+  const [runId, setRunId] = useState<string | null>(null)
   const recorder = useMemo(() => {
     const post: Poster = async (path, body) => {
       const response = await authFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -31,7 +32,10 @@ export function useRunSaving(view: SimulationView, about: RunAbout): SaveState {
 
   // Each new stream (a load or a reset) is a new run.
   useEffect(() => {
-    if (view.streamId && view.simulationId) recorder.start(view.simulationId, aboutRef.current)
+    if (!view.streamId || !view.simulationId) return
+    recorder.start(view.simulationId, aboutRef.current)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRunId(recorder.current()?.runId ?? null)
   }, [recorder, view.streamId, view.simulationId])
 
   useEffect(() => {
@@ -57,5 +61,11 @@ export function useRunSaving(view: SimulationView, about: RunAbout): SaveState {
     }
   }, [recorder])
 
-  return state
+  /** Sends everything measured so far; true once the run on screen is saved to the account. */
+  const flush = useCallback(async () => {
+    await recorder.flush()
+    return recorder.current()?.saved ?? false
+  }, [recorder])
+
+  return { state, runId, flush }
 }

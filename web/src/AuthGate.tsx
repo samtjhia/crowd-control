@@ -6,6 +6,7 @@ import { currentPlace, navigate } from './site/navigate.ts'
 import { explainSignInError } from './site/signInErrors.ts'
 import { useAuthFetch } from './site/useAuthFetch.ts'
 import { syncVenues } from './site/venueSync.ts'
+import { syncScenarios } from './site/scenarioSync.ts'
 import './auth.css'
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN
@@ -76,8 +77,9 @@ function AccountSync({ children }: { children: ReactNode }) {
     let done = false
     const finish = () => { if (!done) { done = true; setReady(true) } }
     const timer = window.setTimeout(finish, SYNC_WAIT_MS)
-    void syncVenues(authFetch).then((result) => {
-      if (result.error) console.warn(`[floor plans] Couldn’t sync with your account: ${result.error}`)
+    void Promise.all([syncVenues(authFetch), syncScenarios(authFetch)]).then(([venues, scenarios]) => {
+      if (venues.error) console.warn(`[floor plans] Couldn’t sync with your account: ${venues.error}`)
+      if (scenarios.error) console.warn(`[scenarios] Couldn’t sync with your account: ${scenarios.error}`)
     }).finally(() => {
       window.clearTimeout(timer)
       finish()
@@ -87,7 +89,7 @@ function AccountSync({ children }: { children: ReactNode }) {
   if (!ready) {
     return (
       <AuthFrame busy>
-        <p className="auth-loading" role="status"><LoaderCircle className="auth-spin" size={18} aria-hidden="true" /> Loading your floor plans…</p>
+        <p className="auth-loading" role="status"><LoaderCircle className="auth-spin" size={18} aria-hidden="true" /> Loading your floor plans and scenarios…</p>
       </AuthFrame>
     )
   }
@@ -119,7 +121,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       cacheLocation="localstorage"
       useRefreshTokens
       useRefreshTokensFallback
-      onRedirectCallback={(state?: AppState) => navigate(typeof state?.returnTo === 'string' ? state.returnTo : '/sim')}
+      onRedirectCallback={(state?: AppState) => navigate(typeof state?.returnTo === 'string' ? state.returnTo : '/history')}
     >
       <AuthScreen>{children}</AuthScreen>
     </Auth0Provider>

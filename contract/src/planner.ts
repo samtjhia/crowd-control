@@ -31,7 +31,7 @@ export const InventoryItemSchema = z.strictObject({ id: IdSchema, kind: EntityKi
 export const InterventionSummarySchema = z.strictObject({ id: IdSchema, revision: PositiveIntegerSchema, label: z.string(), at: SimTimeSchema, deleted: z.boolean() });
 export const PlannerRequestSchema = HeaderSchema.extend({ requestId: IdSchema, prompt: z.string().min(1), context: z.strictObject({ capabilities: CapabilitiesSchema, layout: LayoutSourceSchema.optional(), inventory: z.array(InventoryItemSchema), summary: MetricSampleSchema.optional(), metricSamples: z.array(MetricSampleSchema).max(100).optional(), events: z.array(EventRecordSchema).max(100).optional(), interventions: z.array(InterventionSummarySchema), selectedInterventionId: IdSchema.optional(), askWhy: z.boolean().optional() }) });
 export const PlannerReplySchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('scenario'), plan: ScenarioPlanSchema }), z.strictObject({ kind: z.literal('followup'), request: FollowupRequestSchema }), z.strictObject({ kind: z.literal('query'), query: ReadQuerySchema }),
+  z.strictObject({ kind: z.literal('scenario'), plan: ScenarioPlanSchema, title: z.string().min(1).max(80).optional() }), z.strictObject({ kind: z.literal('followup'), request: FollowupRequestSchema }), z.strictObject({ kind: z.literal('query'), query: ReadQuerySchema }),
   z.strictObject({ kind: z.literal('clarification'), message: z.string().min(1), candidateIds: z.array(IdSchema).optional() }), z.strictObject({ kind: z.literal('answer'), text: z.string().min(1), evidenceEventIds: z.array(IdSchema) }),
 ]);
 export type SpacePlan = z.infer<typeof SpacePlanSchema>;

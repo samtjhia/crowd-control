@@ -7,13 +7,13 @@ export function navigate(to: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-/** Where to come back to after signing in: the page asked for, or the simulator. */
+/** Where to come back to after signing in: the page asked for, or Past runs (the home page). */
 export function currentPlace(): string {
   const { pathname, search, hash } = window.location
   // Sign-in's own return parameters are never part of the place to come back to.
   const params = new URLSearchParams(search)
   for (const key of ['code', 'state', 'error', 'error_description', 'iss']) params.delete(key)
   const query = params.toString()
-  const path = pathname === '/' ? '/sim' : pathname
+  const path = pathname === '/' ? '/history' : pathname
   return `${path}${query ? `?${query}` : ''}${hash}`
 }

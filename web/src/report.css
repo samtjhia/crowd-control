@@ -51,3 +51,16 @@
   .report-sheet { padding: 0; box-shadow: none; }
   .report-findings > li, .report-figures div { break-inside: avoid; }
 }
+
+/* The report inside a side panel or Past runs: same content, tighter. */
+.report-body.is-compact { font-size: 13px; line-height: 1.55; }
+.report-body.is-compact .report-head { margin-bottom: 12px; padding-bottom: 12px; }
+.report-body.is-compact .report-head h1 { font-size: 19px; }
+.report-body.is-compact .report-meta { font-size: 12px; }
+.report-body.is-compact .report-summary { margin-bottom: 14px; font-size: 13.5px; }
+.report-body.is-compact .report-figures { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+.report-body.is-compact .report-figures div { padding: 8px 10px; }
+.report-body.is-compact .report-figures dd { font-size: 16px; }
+.report-body.is-compact h2 { margin: 18px 0 8px; font-size: 14.5px; }
+.report-body.is-compact .report-findings > li { padding: 10px 12px; }
+.report-body.is-compact .report-caveats { margin-top: 18px; font-size: 12px; }

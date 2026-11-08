@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, LoaderCircle, Play, RefreshCw, RotateCcw, Trash2, TrendingDown, TrendingUp } from 'lucide-react'
-import { RunAnalyticsSchema, RunSummariesSchema, type RunAnalytics, type RunSummary } from '@crowd-control/contract'
+import { FileText, LoaderCircle, MessageSquareText, Plus, Printer, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { RunSummariesSchema, type RunSummary } from '@crowd-control/contract'
+import { ReportView } from './ReportView.tsx'
+import { loadReport, writeReport, type SavedReport } from './reports.ts'
 import { SiteHeader } from './site/Site.tsx'
 import { useAuthFetch } from './site/useAuthFetch.ts'
-import { formatClock } from './sim/incidents.ts'
-import { readable, runIdentity } from './sim/runNames.ts'
+import { runIdentity } from './sim/runNames.ts'
 import './history.css'
 
 /**
- * Past runs: the signed-in person's saved runs, newest first. Choosing one shows where it
- * got busiest and what each change did to crowding, from the analytics the server keeps.
+ * Past runs, the home page: the signed-in person's saved runs, newest first, and the way to
+ * start a new one. Choosing a run shows its safety report (written in the simulator's Analysis
+ * tab, or here), with Replay and Delete.
  */
 
 type Load<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; value: T }
@@ -30,14 +32,40 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 /** A run's name: the title it was saved with, else what its simulation ID is known as here. */
 const titleOf = (run: RunSummary) => run.title?.replace(/^Assistant: /, '') ?? runIdentity(run.simulationId).title
 
-/** The server's reason for a failed request, or its status. */
-async function readJson(response: Response, key: string): Promise<unknown> {
-  const payload: unknown = await response.json().catch(() => null)
-  if (!response.ok) {
-    const detail = typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`
-    throw new Error(detail)
-  }
-  return typeof payload === 'object' && payload !== null && key in payload ? (payload as Record<string, unknown>)[key] : undefined
+/** Runs saved with their scenario replay anywhere; older ones only if the scenario is known here. */
+const replayable = (run: RunSummary) => run.title !== undefined || runIdentity(run.simulationId).scenario !== null
+
+/** The two ways to start: trace your own venue, or describe the scenario to the assistant. */
+function NewSimulation() {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape) }
+  }, [open])
+  return (
+    <div className="hist-new" ref={root}>
+      <button type="button" className="hist-button" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}>
+        <Plus size={16} aria-hidden="true" /> New simulation
+      </button>
+      {open && (
+        <div className="hist-new-menu" role="menu" aria-label="New simulation">
+          <a href="/editor" role="menuitem">
+            <Upload size={18} aria-hidden="true" />
+            <span><strong>Upload a floor plan</strong><span>Trace your venue’s walls, rooms and doors, then run crowds on it.</span></span>
+          </a>
+          <a href="/sim?new" role="menuitem">
+            <MessageSquareText size={18} aria-hidden="true" />
+            <span><strong>Just describe it</strong><span>Tell the assistant what happens; it uses one of our venues or makes up a building.</span></span>
+          </a>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function HistoryApp() {
@@ -45,14 +73,15 @@ export default function HistoryApp() {
   const [runs, setRuns] = useState<Load<RunSummary[]>>({ state: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
   const [selected, setSelected] = useState<RunSummary | null>(null)
-  const [analytics, setAnalytics] = useState<Load<RunAnalytics> | null>(null)
-  const latest = useRef(0)
   const hasRuns = runs.state === 'ready' && runs.value.length > 0
 
   const loadRuns = useCallback(async () => {
     setRefreshing(true)
     try {
-      const parsed = RunSummariesSchema.safeParse(await readJson(await authFetch('/api/runs'), 'runs'))
+      const response = await authFetch('/api/runs')
+      const payload = await response.json().catch(() => null) as { runs?: unknown; error?: string } | null
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`)
+      const parsed = RunSummariesSchema.safeParse(payload?.runs)
       if (!parsed.success) throw new Error('the server sent a list it couldn’t read.')
       setRuns({ state: 'ready', value: parsed.data })
     } catch (error) {
@@ -67,19 +96,6 @@ export default function HistoryApp() {
     return () => window.clearTimeout(timer)
   }, [loadRuns])
 
-  const open = useCallback(async (run: RunSummary) => {
-    const request = ++latest.current
-    setSelected(run)
-    setAnalytics({ state: 'loading' })
-    try {
-      const parsed = RunAnalyticsSchema.safeParse(await readJson(await authFetch(`/api/runs/${run.runId}/analytics`), 'analytics'))
-      if (!parsed.success) throw new Error('the server sent analytics it couldn’t read.')
-      if (request === latest.current) setAnalytics({ state: 'ready', value: parsed.data })
-    } catch (error) {
-      if (request === latest.current) setAnalytics({ state: 'error', message: error instanceof Error ? error.message : 'something went wrong.' })
-    }
-  }, [authFetch])
-
   /** Deletes a run for good; returns why not, or null when it's gone. */
   const remove = async (run: RunSummary): Promise<string | null> => {
     try {
@@ -91,12 +107,14 @@ export default function HistoryApp() {
     } catch {
       return 'the server can’t be reached'
     }
-    latest.current++
     setRuns((current) => (current.state === 'ready' ? { state: 'ready', value: current.value.filter((r) => r.runId !== run.runId) } : current))
     setSelected(null)
-    setAnalytics(null)
     return null
   }
+  /** A report was written here: the list shows it has one. */
+  const reported = (run: RunSummary) => setRuns((current) => (current.state === 'ready'
+    ? { state: 'ready', value: current.value.map((r) => (r.runId === run.runId ? { ...r, hasReport: true } : r)) }
+    : current))
 
   return (
     <div className="hist-page">
@@ -105,22 +123,24 @@ export default function HistoryApp() {
         <div className="hist-head">
           <div>
             <h1>Past runs</h1>
-            <p>Runs you’ve played in the simulator, newest first. They save on their own as they play.</p>
+            <p>Every simulation you’ve played, newest first, with its safety report. Start a new one from your own floor plan or just by describing it.</p>
           </div>
-          <button type="button" className="hist-refresh" onClick={() => void loadRuns()} disabled={refreshing}>
-            <RefreshCw size={15} className={refreshing ? 'hist-spin' : undefined} aria-hidden="true" />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <div className="hist-head-actions">
+            <button type="button" className="hist-refresh" onClick={() => void loadRuns()} disabled={refreshing} aria-label="Refresh the list" title="Refresh the list">
+              <RefreshCw size={15} className={refreshing ? 'hist-spin' : undefined} aria-hidden="true" />
+            </button>
+            <NewSimulation />
+          </div>
         </div>
 
         {/* The details column only appears once there are runs to choose from. */}
         <div className={`hist-body${hasRuns ? '' : ' is-single'}`}>
           <section className="hist-list" aria-label="Your runs">
-            <RunList runs={runs} selected={selected} onOpen={(run) => void open(run)} onRetry={() => void loadRuns()} />
+            <RunList runs={runs} selected={selected} onOpen={setSelected} onRetry={() => void loadRuns()} />
           </section>
           {hasRuns && (
             <section className="hist-detail" aria-live="polite" aria-label="Run details">
-              <Details key={selected?.runId ?? 'none'} run={selected} analytics={analytics} onRetry={() => selected && void open(selected)} onDelete={remove} />
+              <Details key={selected?.runId ?? 'none'} run={selected} onDelete={remove} onReported={reported} />
             </section>
           )}
         </div>
@@ -144,17 +164,13 @@ function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>
     return (
       <div className="hist-empty">
         <h2>No runs yet</h2>
-        <p>Open a scenario in the simulator and press Play. Each run saves here as it plays, with every change you make.</p>
-        <a className="hist-button" href="/sim"><Play size={15} aria-hidden="true" /> Open the simulator</a>
+        <p>Press <strong>New simulation</strong> to start one. Every run saves here as it plays, with the changes you make and its safety report.</p>
       </div>
     )
   }
   return (
     <ol className="hist-runs">
       {runs.value.map((run) => {
-        const identity = runIdentity(run.simulationId)
-        // Runs saved with their scenario replay anywhere; older ones only if the scenario is known here.
-        const replayable = run.title !== undefined || identity.scenario !== null
         const current = selected?.runId === run.runId
         return (
           <li key={run.runId} className={current ? 'is-current' : undefined}>
@@ -162,10 +178,11 @@ function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>
               <span className="hist-run-name">{titleOf(run)}</span>
               <span className="hist-run-when">{when(run.startedAt)}</span>
               <span className="hist-run-meta">
-                {plural(run.interventionCount, 'change', 'changes')} · {plural(run.sampleCount, 'measurement', 'measurements')}
+                {plural(run.interventionCount, 'change', 'changes')}
+                {run.hasReport && <span className="hist-has-report"><FileText size={12} aria-hidden="true" /> Report</span>}
               </span>
             </button>
-            {replayable && (
+            {replayable(run) && (
               <a className="hist-open" href={`/sim?replay=${encodeURIComponent(run.runId)}`}
                 title={run.interventionCount > 0 ? `Run ${titleOf(run)} again, with your ${plural(run.interventionCount, 'change', 'changes')} at the same moments` : `Run ${titleOf(run)} again`}>
                 <RotateCcw size={14} aria-hidden="true" /> Replay
@@ -178,34 +195,55 @@ function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>
   )
 }
 
-function Details({ run, analytics, onRetry, onDelete }: {
-  run: RunSummary | null; analytics: Load<RunAnalytics> | null; onRetry: () => void; onDelete: (run: RunSummary) => Promise<string | null>
-}) {
+type ReportState = { state: 'loading' | 'writing' | 'none' } | { state: 'error'; message: string } | { state: 'ready'; saved: SavedReport }
+
+/** The chosen run: its report (or a way to write one), Replay, Print and Delete. */
+function Details({ run, onDelete, onReported }: { run: RunSummary | null; onDelete: (run: RunSummary) => Promise<string | null>; onReported: (run: RunSummary) => void }) {
+  const authFetch = useAuthFetch()
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
-  if (!run || !analytics) {
-    return <p className="hist-placeholder">Choose a run to see where it got busiest and what each change did, write a safety report, or delete it.</p>
+  const [report, setReport] = useState<ReportState>({ state: 'loading' })
+  const metres = run ? runIdentity(run.simulationId).metres === true : false
+
+  useEffect(() => {
+    if (!run) return
+    let cancelled = false
+    void loadReport(authFetch, run.runId)
+      .then((saved) => { if (!cancelled) setReport(saved ? { state: 'ready', saved } : { state: 'none' }) })
+      .catch((error: unknown) => { if (!cancelled) setReport({ state: 'error', message: error instanceof Error ? error.message : 'something went wrong' }) })
+    return () => { cancelled = true }
+  }, [authFetch, run])
+
+  if (!run) return <p className="hist-placeholder">Choose a run to read its safety report, replay it, or delete it.</p>
+
+  const write = async () => {
+    setReport({ state: 'writing' })
+    try {
+      const saved = await writeReport(authFetch, run.runId, metres)
+      setReport({ state: 'ready', saved })
+      onReported(run)
+    } catch (error) {
+      setReport({ state: 'error', message: error instanceof Error ? error.message : 'something went wrong' })
+    }
   }
   const reallyDelete = async () => {
     setDeleting({ busy: true, error: null })
     const error = await onDelete(run)
     if (error) setDeleting({ busy: false, error })
   }
-  const identity = runIdentity(run.simulationId)
-  const unit = identity.metres ? 'people/m²' : ''
-  const density = (value: number | null) => (value === null ? '—' : value.toFixed(2))
+  const printable = `/report?run=${encodeURIComponent(run.runId)}${metres ? '&units=m' : ''}`
+
   return (
     <>
       <header className="hist-detail-head">
         <h2>{titleOf(run)}</h2>
-        <p>{when(run.startedAt)}</p>
+        <p>{when(run.startedAt)} · {plural(run.interventionCount, 'change', 'changes')}</p>
         <div className="hist-detail-actions">
-          <a className="hist-button" href={`/report?run=${encodeURIComponent(run.runId)}${identity.metres ? '&units=m' : ''}`}>
-            <FileText size={15} aria-hidden="true" /> Write safety report
-          </a>
+          {replayable(run) && <a className="hist-button" href={`/sim?replay=${encodeURIComponent(run.runId)}`}><RotateCcw size={15} aria-hidden="true" /> Replay</a>}
+          {report.state === 'ready' && <a className="hist-quiet" href={printable}><Printer size={14} aria-hidden="true" /> Print</a>}
           {confirming ? (
             <span className="hist-confirm" role="group" aria-label="Confirm delete">
-              <span>Delete this run and its measurements for good?</span>
+              <span>Delete this run and its report for good?</span>
               <button type="button" className="hist-danger" onClick={() => void reallyDelete()} disabled={deleting.busy}>{deleting.busy ? 'Deleting…' : 'Delete'}</button>
               <button type="button" className="hist-link" onClick={() => setConfirming(false)} disabled={deleting.busy}>Cancel</button>
             </span>
@@ -215,66 +253,22 @@ function Details({ run, analytics, onRetry, onDelete }: {
         </div>
         {deleting.error && <p className="hist-problem" role="alert">Couldn’t delete it: {deleting.error}</p>}
       </header>
-      {analytics.state === 'loading' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading this run…</p>}
-      {analytics.state === 'error' && (
-        <div role="alert" className="hist-problem">
-          <p>Couldn’t load this run: {analytics.message}</p>
-          <button type="button" className="hist-link" onClick={onRetry}>Try again</button>
+
+      {report.state === 'loading' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading the report…</p>}
+      {report.state === 'writing' && <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Writing the safety report… this usually takes 10 to 30 seconds.</p>}
+      {report.state === 'none' && (
+        <div className="hist-report-empty">
+          <p>No safety report for this run yet. Write one from what was measured while it played.</p>
+          <button type="button" className="hist-button" onClick={() => void write()}><FileText size={15} aria-hidden="true" /> Write the report</button>
         </div>
       )}
-      {analytics.state === 'ready' && (
-        <>
-          <h3>Busiest spots</h3>
-          {analytics.value.peakDensityByZone.length > 0 ? (
-            <table className="hist-table">
-              <thead><tr><th scope="col">Area</th><th scope="col" className="num">Peak density{unit && <span> {unit}</span>}</th><th scope="col" className="num">At</th></tr></thead>
-              <tbody>
-                {[...analytics.value.peakDensityByZone].sort((a, b) => b.peakDensity - a.peakDensity).map((zone) => (
-                  <tr key={zone.zoneId}>
-                    <th scope="row">{readable(zone.zoneId)}</th>
-                    <td className="num">{density(zone.peakDensity)}</td>
-                    <td className="num">{formatClock(zone.at, false)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="hist-note">Nothing was measured in this run yet.</p>}
-
-          <h3>Changes and what they did</h3>
-          {analytics.value.interventions.length > 0 ? (
-            <ol className="hist-changes">
-              {analytics.value.interventions.map((change) => (
-                <li key={change.requestId}>
-                  <p className="hist-change-what"><time>{formatClock(change.at, false)}</time> {change.prompt}</p>
-                  {change.comparisons.length > 0 ? (
-                    <table className="hist-table is-compact">
-                      <thead><tr><th scope="col">Area</th><th scope="col" className="num">Before</th><th scope="col" className="num">After</th></tr></thead>
-                      <tbody>
-                        {change.comparisons.map((zone) => {
-                          const delta = zone.beforeDensity !== null && zone.afterDensity !== null ? zone.afterDensity - zone.beforeDensity : null
-                          const trend = delta === null || Math.abs(delta) < 0.005 ? null : delta < 0 ? 'down' : 'up'
-                          return (
-                            <tr key={zone.zoneId}>
-                              <th scope="row">{readable(zone.zoneId)}</th>
-                              <td className="num">{density(zone.beforeDensity)}</td>
-                              <td className={`num${trend ? ` is-${trend}` : ''}`}>
-                                {trend === 'down' && <TrendingDown size={13} aria-label="less crowded" />}
-                                {trend === 'up' && <TrendingUp size={13} aria-label="more crowded" />}
-                                {density(zone.afterDensity)}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  ) : <p className="hist-note">Not enough was measured around this change to compare.</p>}
-                </li>
-              ))}
-            </ol>
-          ) : <p className="hist-note">No changes were made in this run.</p>}
-          <p className="hist-fine">{plural(analytics.value.sampleCount, 'measurement', 'measurements')} saved. Densities are averages over each area.</p>
-        </>
+      {report.state === 'error' && (
+        <div role="alert" className="hist-problem">
+          <p>Couldn’t show the report: {report.message}</p>
+          <button type="button" className="hist-link" onClick={() => void write()}>Write it again</button>
+        </div>
       )}
+      {report.state === 'ready' && <ReportView {...report.saved} compact />}
     </>
   )
 }

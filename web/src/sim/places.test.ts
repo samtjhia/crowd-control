@@ -121,3 +121,15 @@ test('the assistant is told what each place does, grouped, and single-target goa
   const { output } = compiled('concert-floor')
   assert.match(placesNote(placesInScene({ map: output.scene.map, entities: [], agents: [] })), /Bar counter \(bar_counter\): 4 at a time, 15 s each/)
 })
+
+test('the mock can pick the people nearest a door, for "a couple of people near the door"', () => {
+  const sim = run('concert-floor')
+  sim.at(10)
+  const fall = { op: 'set', targets: { kind: 'agent', near: { targets: { ids: ['bar_counter'] }, distance: 4 }, sample: { count: 2 } }, values: { components: { mobility: { speedMultiplier: 0 } }, appearance: { pose: 'fallen' } } }
+  const reply = sim.send({ type: 'apply_request', request: { ...sim.head, requestId: 'near', operations: [fall] } })
+  assert.ok(reply.some((m) => m.type === 'ack'), JSON.stringify(reply.find((m) => m.type === 'error')))
+  const { frame } = sim.at(12)
+  const down = frame.agents.filter((a) => a.state === 'immobile')
+  assert.equal(down.length, 2, 'exactly a couple')
+  assert.ok(down.every((a) => a.x > 41), 'both by the bar counter')
+})

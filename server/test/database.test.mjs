@@ -44,7 +44,7 @@ test('initializes runs, metrics hypertable, and intervention tables', async () =
 
   await initializeDatabase(pool)
 
-  assert.equal(pool.calls.length, 9)
+  assert.equal(pool.calls.length, 11)
   assert.match(pool.calls[1].text, /ADD COLUMN IF NOT EXISTS owner_sub/)
   assert.match(pool.calls[2].text, /crowd_runs_owner_started_at_idx/)
   assert.match(pool.calls[4].text, /create_hypertable/)
