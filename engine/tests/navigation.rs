@@ -586,3 +586,80 @@ fn completion_waits_for_future_work_and_excludes_continuous_goals() {
         false
     );
 }
+
+#[test]
+fn wall_side_arrivals_choose_free_width_instead_of_joining_a_corner_queue() {
+    let mut v = load();
+    v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
+    let (w, h) = (32, 12);
+    let mut blocked = vec![0; w * h];
+    let mut zones = vec![0; w * h];
+    let mut portals = vec![0; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 || (x == 20 && !(3..9).contains(&y)) {
+                blocked[i] = 1;
+            } else if x == 20 {
+                portals[i] = 1;
+            } else {
+                zones[i] = if x < 20 { 1 } else { 2 };
+            }
+        }
+    }
+    v["compiled"]["scene"]["map"] = json!({"width":w,"height":h,"cellSize":1,"units":"model",
+        "rooms":[{"id":"hall","x":1,"y":1,"width":19,"height":10},{"id":"outside","x":21,"y":1,"width":10,"height":10}],
+        "portals":[{"id":"door","connects":["hall","outside"],"x":20,"y":3,"width":1,"height":6,"open":true}],
+        "grid":{"width":w,"height":h,"cellSize":1,"units":"model","blocked":blocked,"zoneIndex":zones,"portalIndex":portals,
+        "traversalCost":vec![1;w*h],"zoneIds":[null,"hall","outside"],"portalIds":[null,"door"]}});
+
+    v["compiled"]["scene"]["controllers"]["hold"] = json!({"kind":"wait","duration":600});
+    let template = v["compiled"]["scene"]["agents"][0].clone();
+    let mut agents = Vec::new();
+    for i in 0..6 {
+        let mut a = template.clone();
+        a["id"] = json!(format!("arrival{i}"));
+        a["x"] = json!(18.0 - (i % 2) as f64 * 0.7);
+        a["y"] = json!(1.25 + (i / 2) as f64 * 0.7);
+        a["components"] = json!({"physical":{"radius":0.25}});
+        agents.push(a);
+    }
+    for i in 0..3 {
+        let mut a = template.clone();
+        a["id"] = json!(format!("waiting{i}"));
+        a["x"] = json!(19.25);
+        a["y"] = json!(2.0 + i as f64 * 0.6);
+        a["components"] = json!({"physical":{"radius":0.25}});
+        a["controller"] = json!("hold");
+        agents.push(a);
+    }
+    v["compiled"]["scene"]["agents"] = json!(agents);
+    let mut e = init(v);
+    step(&mut e, 1);
+    let s = snapshot(&mut e);
+    assert!(
+        s["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| a["id"].as_str().unwrap().starts_with("arrival"))
+            .any(|a| a["navigation"]["targetPoint"]["y"]
+                .as_f64()
+                .is_some_and(|y| y > 4.0)),
+        "approach should use the free middle of the gate: {}",
+        s["agents"]
+    );
+    step(&mut e, 400);
+
+    for a in snapshot(&mut e)["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| a["id"].as_str().unwrap().starts_with("arrival"))
+    {
+        assert_eq!(
+            a["state"], "departed",
+            "people must pass the corner queue through the free aperture: {a}"
+        );
+    }
+}

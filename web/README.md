@@ -1,6 +1,7 @@
 # Web
 
-React + Vite app. Run `npm run dev` at the repository root.
+React + Vite app. Run `npm run dev` at the repository root to start both Vite and
+the API. Use `npm run dev:web` for frontend only with a separately managed API.
 The shared contract is built automatically before the dev server starts, and
 Vite proxies `/api` requests to the local Node server.
 
@@ -123,3 +124,29 @@ Long gaps on large maps can still require replay; no physics ticks are skipped.
 Local Wasm seek benchmark (430 concert agents, 180 s recorded): seeking to
 90.05 s improved from 7,178 ms to 155 ms; repeating 30.05 s took 19 ms.
 These measure engine dispatch, excluding browser rendering and transport.
+
+Wide gates (v8.12): compare up to eight crossing points using travel length and
+nearby congestion, with a per-tick summed occupancy grid. Every alternative still
+goes through the portal; no retreat/rally waypoints. Preserve near-threshold lanes,
+narrow/timed-door semantics, one-way access, terrain costs and physical collisions.
+A clear direct velocity stays first. When it is obstructed, compare safe passing
+velocities on goal progress while retaining the separation preference. Regressions
+cover overtaking a slow leader then reaching the original goal, passing a wall-side
+queue through free gate width, and all worked-example evacuees actually departing.
+
+Dense groups keep coordinated separation steering when both passing sides are
+blocked. The v8.12 concert seed-42 trace, 430 agents: departures 148 at 90 s, 290 at 120 s, all 430 at 180 s
+in the local Wasm trace. This is a liveness regression, not a calibrated prediction.
+
+Passing space (v8.13): nearby-agent count alone cannot disable overtaking. With
+three or more close neighbours and an obstructed forward velocity, test left/right
+side-and-forward corridors against
+walls, portal permissions and body positions. A clear corridor adds a passing
+velocity with an avoidance preference toward that side; packed groups with neither
+side open retain separation steering. Acceleration, speed and swept collision
+checks still apply. Original goals are unchanged.
+
+Alley seed-42 trace with v8.13: 70 of 80 downhill agents reached the station by
+180 s (64 previously); both groups of 80 reached their destinations by 240 s.
+The concert dense-crowd guard checks full clearance by 210 s, allowing overtaking
+paths to change travel times while still detecting persistent blobs.

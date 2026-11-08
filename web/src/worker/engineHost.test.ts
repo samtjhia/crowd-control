@@ -15,7 +15,7 @@ function setup(stepCostMs = 0, withDensity = false, completeAt = Infinity) {
   let tick = 0, destroyed = false
   const batches: number[] = [], received: WorkerMessage[] = []
   const bindings: WasmEngineBindings = {
-    abi_version: () => 1, engine_version: () => 'contact-engine-v8.7', create_engine: () => 1, destroy_engine() { destroyed = true },
+    abi_version: () => 1, engine_version: () => 'contact-engine-v8.13', create_engine: () => 1, destroy_engine() { destroyed = true },
     dispatch(_handle, json) {
       const command = JSON.parse(json) as WorkerCommand
       if (command.simulationId !== 'engine-demo') return JSON.stringify([{ schemaVersion: 1, simulationId: command.simulationId, type: 'error', commandId: command.commandId, error: { code: 'INVALID_SCHEMA', message: 'wrong simulation' } }])

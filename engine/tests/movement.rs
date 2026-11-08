@@ -333,3 +333,69 @@ fn open_flow_preserves_parallel_lanes_instead_of_snapping_people_to_cell_centres
     assert!((y(&s["agents"][0]) - 4.2).abs() < 1e-8, "{}", s["agents"]);
     assert!((y(&s["agents"][1]) - 7.8).abs() < 1e-8, "{}", s["agents"]);
 }
+
+#[test]
+fn a_faster_walker_passes_a_slow_leader_and_still_reaches_its_goal() {
+    let fast = agent("fast", 3.5, 5.5, "east");
+    let mut slow = agent("slow", 4.3, 5.5, "east");
+    slow["components"] = json!({"navigation":{"preferredSpeed":0.2}});
+    let mut e = load(input(vec![fast, slow]));
+    let mut sideways = false;
+    for _ in 0..200 {
+        step(&mut e, 1);
+        let s = snapshot(&mut e);
+        let agents = s["agents"].as_array().unwrap();
+        let fast = &agents[0];
+        let slow = &agents[1];
+        sideways |= (y(fast) - 5.5).abs() > 0.2;
+        assert!(
+            (x(fast) - x(slow)).hypot(y(fast) - y(slow)) >= 0.4 - 1e-8,
+            "must pass without overlapping"
+        );
+    }
+    let s = snapshot(&mut e);
+    assert!(sideways, "use the free space beside the slow walker");
+    assert!(
+        x(&s["agents"][0]) > x(&s["agents"][1]) + 2.0,
+        "should overtake instead of staying behind the slower person: {}",
+        s["agents"]
+    );
+    step(&mut e, 600);
+    let s = snapshot(&mut e);
+    assert_eq!(
+        s["agents"][0]["currentGoal"]["status"], "completed",
+        "overtaking must preserve the original goal"
+    );
+    assert_eq!(s["agents"][0]["zoneId"], "east");
+}
+
+#[test]
+fn nearby_people_on_one_side_do_not_disable_passing_on_the_open_side() {
+    let mut fast = agent("fast", 3.5, 5.5, "east");
+    fast["components"] = json!({"physical":{"radius":0.25},"navigation":{"personalSpace":0.5}});
+    let mut agents = vec![fast];
+    for (id, x, y) in [
+        ("leader", 4.2, 5.5),
+        ("right-front", 4.2, 6.05),
+        ("right", 3.6, 6.05),
+    ] {
+        let mut slow = agent(id, x, y, "east");
+        slow["components"] = json!({"physical":{"radius":0.25},"navigation":{"preferredSpeed":0.2,"personalSpace":0.5}});
+        agents.push(slow);
+    }
+    let mut e = load(input(agents));
+    for _ in 0..160 {
+        step(&mut e, 1);
+    }
+    let s = snapshot(&mut e);
+    let a = s["agents"].as_array().unwrap();
+    assert!(
+        x(&a[0]) > x(&a[1]) + 2.0,
+        "nearby neighbours must not force following when the other side is clear: {a:?}"
+    );
+    step(&mut e, 640);
+    assert_eq!(
+        snapshot(&mut e)["agents"][0]["currentGoal"]["status"],
+        "completed"
+    );
+}

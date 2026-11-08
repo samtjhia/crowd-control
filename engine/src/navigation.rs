@@ -10,6 +10,16 @@ use std::{
     collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
 };
 
+// Congestion cost rises when people stop; these weights never change collision geometry or metrics.
+fn crowd_weight(a: &AgentRuntime) -> u32 {
+    if geometry::norm(a.velocity.x.0, a.velocity.y.0)
+        < a.components.navigation.preferred_speed.0 * 0.25
+    {
+        4
+    } else {
+        1
+    }
+}
 const NONE: u32 = u32::MAX;
 type PortalInfo = (u32, u32, bool, f64, [f64; 4]);
 const DIRS: [(isize, isize); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
@@ -46,6 +56,7 @@ pub struct Navigator {
     intents: Vec<Option<Intent>>,
     bodies: Vec<Body>,
     visible: Vec<Option<(Point, Point)>>,
+    crowd_prefix: Vec<u32>,
 }
 #[derive(Debug, Clone)]
 pub struct Intent {
@@ -962,6 +973,27 @@ impl Navigator {
         metrics: &mut crate::metrics::Metrics,
         contact: Option<(&crate::contact::Config, &mut crate::contact::State)>,
     ) -> Result<(), Failure> {
+        if grid.portal_ids.len() > 1 {
+            let stride = grid.width + 1;
+            self.crowd_prefix.resize(stride * (grid.height + 1), 0);
+            self.crowd_prefix.fill(0);
+            for a in agents
+                .iter()
+                .filter(|a| a.departed_at.is_none() && a.components.physical.blocks_movement)
+            {
+                let cell = index(grid, &a.position);
+                self.crowd_prefix[(cell / grid.width + 1) * stride + cell % grid.width + 1] +=
+                    crowd_weight(a);
+            }
+            for y in 1..=grid.height {
+                let mut row = 0;
+                for x in 1..=grid.width {
+                    row += self.crowd_prefix[y * stride + x];
+                    self.crowd_prefix[y * stride + x] =
+                        row + self.crowd_prefix[(y - 1) * stride + x];
+                }
+            }
+        }
         crate::movement::advance(self, grid, agents, dt, tick, metrics, contact)
     }
     pub fn progress_cost(&self, grid: &GridData, a: &AgentRuntime, i: usize) -> f64 {
@@ -1021,6 +1053,33 @@ impl Navigator {
             a.state_reason = None;
             true
         }
+    }
+    fn crowd_in(&self, grid: &GridData, bounds: [f64; 4], subject: &AgentRuntime) -> f64 {
+        if self.crowd_prefix.is_empty() {
+            return 0.0;
+        }
+        let [left, top, right, bottom] = bounds;
+        let x0 = (left / grid.cell_size)
+            .floor()
+            .clamp(0.0, grid.width as f64) as usize;
+        let y0 = (top / grid.cell_size)
+            .floor()
+            .clamp(0.0, grid.height as f64) as usize;
+        let x1 = (right / grid.cell_size)
+            .ceil()
+            .clamp(0.0, grid.width as f64) as usize;
+        let y1 = (bottom / grid.cell_size)
+            .ceil()
+            .clamp(0.0, grid.height as f64) as usize;
+        let stride = grid.width + 1;
+        let count = self.crowd_prefix[y1 * stride + x1] + self.crowd_prefix[y0 * stride + x0]
+            - self.crowd_prefix[y0 * stride + x1]
+            - self.crowd_prefix[y1 * stride + x0];
+        let cell = index(grid, &subject.position);
+        let inside = subject.components.physical.blocks_movement
+            && (x0..x1).contains(&(cell % grid.width))
+            && (y0..y1).contains(&(cell / grid.width));
+        f64::from(count.saturating_sub(if inside { crowd_weight(subject) } else { 0 }))
     }
     fn opening_waypoint(
         &self,
@@ -1194,8 +1253,73 @@ impl Navigator {
                 },
             )
         };
-        // Only shortcut within the same room and this portal, retaining terrain and one-way routing.
-        for point in [through, align] {
+        let mut candidates = Vec::with_capacity(17);
+        candidates.push((0.0, through.clone()));
+
+        let (lo, hi, lateral, near, longitudinal) = if horizontal {
+            (
+                y + radius,
+                y + height - radius,
+                a.position.y.0,
+                if positive { x } else { x + width },
+                a.position.x.0,
+            )
+        } else {
+            (
+                x + radius,
+                x + width - radius,
+                a.position.x.0,
+                if positive { y } else { y + height },
+                a.position.y.0,
+            )
+        };
+        if aperture >= 6.0 * radius
+            && (sign * (near - longitudinal) > 2.0 * radius || lateral < lo || lateral > hi)
+        {
+            let lanes = (((hi - lo) / (2.0 * radius)).ceil() as usize).clamp(1, 6);
+            for lane in 0..=lanes {
+                let lateral = lo + (hi - lo) * lane as f64 / lanes as f64;
+                let mut point = through.clone();
+                if horizontal {
+                    point.y = Number(lateral);
+                } else {
+                    point.x = Number(lateral);
+                }
+                candidates.push((0.0, point));
+            }
+            let score = |p: &Point| {
+                let lateral = if horizontal { p.y.0 } else { p.x.0 };
+                let back = near - sign * 6.0 * radius;
+                let front = near + sign * 4.0 * radius;
+                let bounds = if horizontal {
+                    [
+                        back.min(front),
+                        lateral - 4.0 * radius,
+                        back.max(front),
+                        lateral + 4.0 * radius,
+                    ]
+                } else {
+                    [
+                        lateral - 4.0 * radius,
+                        back.min(front),
+                        lateral + 4.0 * radius,
+                        back.max(front),
+                    ]
+                };
+                let congestion = self.crowd_in(grid, bounds, a);
+                let switch = a.navigation.target_point.as_ref().map_or(0.0, |saved| {
+                    let old = if horizontal { saved.y.0 } else { saved.x.0 };
+                    (lateral - old).abs() * 0.2
+                });
+                distance(&a.position, p) + congestion * 2.0 * radius + switch
+            };
+            for (cost, point) in &mut candidates {
+                *cost = score(point);
+            }
+            candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
+        candidates.push((0.0, align));
+        for (_, point) in candidates {
             let distance = distance(&a.position, &point);
             if distance > grid.cell_size * 1e-7
                 && point.x.0 >= radius
@@ -1265,7 +1389,6 @@ impl Navigator {
             }
             return Ok(Some((point.clone(), remaining)));
         }
-        let field = &self.fields[route.key.as_ref().unwrap()];
         let epsilon = grid.cell_size * 1e-7;
         let cell = index(grid, &a.position);
         if a.navigation
@@ -1283,6 +1406,8 @@ impl Navigator {
             a.navigation.target_point = Some(point.clone());
             return Ok(Some((point, remaining)));
         }
+        let route = self.routes[i].as_ref().unwrap();
+        let field = &self.fields[route.key.as_ref().unwrap()];
         if !field.distance[cell].is_finite() {
             if let Some(i) = entry(
                 grid,

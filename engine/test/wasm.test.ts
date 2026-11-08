@@ -434,7 +434,7 @@ test('concert evacuation keeps making progress across different crowd seeds', as
   const preset = JSON.parse(readFileSync(new URL('../../contract/fixtures/compile-output.json', import.meta.url), 'utf8')).resolvedModel
   const scenario = scenarios(worked, movementPreset(preset)).find((s) => s.id === 'concert-floor')!
   const bindings = await engine()
-  for (const seed of [7, 99]) {
+  for (const seed of [7, 99, 42]) {
     const compiled = startScenario({ ...scenario.plan, seed }, scenario.model)
     assert.ok(compiled.ok)
     const handle = bindings.create_engine()
@@ -452,6 +452,7 @@ test('concert evacuation keeps making progress across different crowd seeds', as
         assert.equal(frame.frame.agents.length, 430)
         const count = frame.frame.agents.filter((a) => a.state === 'departed').length
         assert.ok(count > departed || departed === 430, `seed ${seed}: exits stopped making progress at ${time}s (${count}/430)`)
+        if (seed === 42 && time === 210) assert.equal(count, 430, 'the dense crowd must clear instead of leaving a stationary blob')
         departed = count
       }
       assert.equal(departed, 430, `seed ${seed}: people left behind`)

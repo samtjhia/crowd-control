@@ -346,13 +346,85 @@ pub fn advance(
                 (-0.8660254037844386, -0.5),
                 (-1.0, 0.0),
             ];
+            // Overtaking needs free space; packed crowds retain coordinated separation steering.
+            let mut passing_room = nearby
+                .iter()
+                .filter(|&&j| {
+                    j != i
+                        && old[j].p.sub(me.p).len()
+                            < me.radius + old[j].radius + a.components.navigation.personal_space.0
+                })
+                .take(3)
+                .count()
+                < 3;
+            let mut passing_velocity = None;
+            let mut preferred_velocity = v;
             let mut accepted = V::default();
-            for candidate in 0..16 {
+            let mut best_progress = f64::NEG_INFINITY;
+            for candidate in 0..17 {
+                if candidate == 1 {
+                    if !passing_room {
+                        let lateral = 2.0 * me.radius
+                            + a.components.navigation.personal_space.0.min(me.radius);
+                        let forward = desired_speed * 0.75 + 2.0 * me.radius;
+                        for side in [-1.0, 1.0] {
+                            let beside = me.p.add(
+                                V {
+                                    x: -direction.y,
+                                    y: direction.x,
+                                }
+                                .mul(side * lateral),
+                            );
+                            let ahead = beside.add(direction.mul(forward));
+                            let start = me.p.point();
+                            let bend = beside.point();
+                            let end = ahead.point();
+                            if !geometry::clear(grid, &[], &start, &bend, me.radius, &mut work)?
+                                || !geometry::clear(grid, &[], &bend, &end, me.radius, &mut work)?
+                                || !nav.permits_agent(grid, &start, &bend, i)
+                                || !nav.permits_agent(grid, &bend, &end, i)
+                            {
+                                continue;
+                            }
+                            let mut open = true;
+                            for &j in &nearby {
+                                if i == j {
+                                    continue;
+                                }
+                                charge(&mut work, 1)?;
+                                let other = old[j];
+                                let sum = me.radius + other.radius;
+                                if geometry::point_segment(other.p.x, other.p.y, &start, &bend)
+                                    < sum - sum * 1e-10
+                                    || geometry::point_segment(other.p.x, other.p.y, &bend, &end)
+                                        < sum - sum * 1e-10
+                                {
+                                    open = false;
+                                    break;
+                                }
+                            }
+                            if open {
+                                passing_room = true;
+                                let aim = ahead.sub(me.p).limit(speed);
+                                passing_velocity = Some(
+                                    me.v.add(aim.sub(me.v).limit(acceleration * h))
+                                        .limit(hard_max)
+                                        .limit(d / h)
+                                        .limit(remaining / h),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    preferred_velocity = passing_velocity.unwrap_or(v);
+                }
                 let v = match candidate {
                     0 => direct,
-                    1 => v,
-                    2..=12 => {
-                        let (cos, sin) = turns[candidate - 2];
+                    1 => passing_velocity.unwrap_or(v),
+                    2 if passing_velocity.is_none() => continue,
+                    2 => v,
+                    3..=13 => {
+                        let (cos, sin) = turns[candidate - 3];
                         let detour = V {
                             x: direction.x * cos - direction.y * sin,
                             y: direction.x * sin + direction.y * cos,
@@ -363,10 +435,15 @@ pub fn advance(
                             .limit(d / h)
                             .limit(remaining / h)
                     }
-                    13 => V { x: v.x, y: 0.0 },
-                    14 => V { x: 0.0, y: v.y },
+                    14 => V { x: v.x, y: 0.0 },
+                    15 => V { x: 0.0, y: v.y },
                     _ => V::default(),
                 };
+                let progress =
+                    v.dot(direction) + v.len() * 0.05 - v.sub(preferred_velocity).len() * 0.5;
+                if progress <= best_progress {
+                    continue;
+                }
                 let end = me.p.add(v.mul(h));
                 if !geometry::clear(grid, &[], &me.p.point(), &end.point(), me.radius, &mut work)?
                     || !nav.permits_agent(grid, &me.p.point(), &end.point(), i)
@@ -404,7 +481,11 @@ pub fn advance(
                 }
                 if clear {
                     accepted = v;
-                    break;
+                    best_progress = progress;
+                    // No sampled velocity can beat full-speed progress straight toward the waypoint.
+                    if !passing_room || candidate == 0 || progress >= speed * 1.05 - 1e-10 {
+                        break;
+                    }
                 }
             }
             let a = &mut agents[i];
