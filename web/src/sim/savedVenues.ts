@@ -1,9 +1,9 @@
 import { PreparedMapSchema, type ModelPreset, type Operation, type PreparedMap, type ScenarioPlan } from '@crowd-control/contract'
 
 /**
- * Floor plans saved by the editor, kept in this browser until sign-in and "My venues" exist
- * (Role C's save API). Storage can be unavailable or full, so every access is guarded and the
- * app works without it.
+ * Floor plans saved by the editor. This browser keeps a copy (so pages can read them at once,
+ * and saving works offline); site/venueSync.ts keeps it in step with the signed-in account.
+ * Storage can be unavailable or full, so every access is guarded and the app works without it.
  */
 
 export type SavedVenue = { name: string; floor: string; savedAt: string; map: PreparedMap }
@@ -38,6 +38,16 @@ export function saveVenue(venue: SavedVenue): string | null {
     return null
   } catch {
     return 'This browser wouldn’t store the venue (storage may be full or turned off). Try removing an older saved venue.'
+  }
+}
+
+/** Replaces this browser's copy with `venues` (after syncing with the account). */
+export function replaceSavedVenues(venues: SavedVenue[]): boolean {
+  try {
+    store().setItem(KEY, JSON.stringify(venues))
+    return true
+  } catch {
+    return false
   }
 }
 

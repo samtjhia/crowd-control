@@ -83,7 +83,10 @@ export function describeOperation(operation: Operation, inventory: InventoryItem
     const placement = operation.placement
     const region = placement && 'inside' in placement ? placement.inside : placement && 'near' in placement ? placement.near : undefined
     const where = region?.ids ? ` ${placement && 'near' in placement ? 'near' : 'in'} ${region.ids.map((id) => nameIn(id, inventory)).join(' or ')}` : ''
-    return `Place ${what}${where}`
+    // Placed by shape (at a marked point): say where, to the nearest whole unit.
+    const shape = operation.entity.shape
+    const at = !where && shape?.kind === 'rectangle' ? ` at (${Math.round(shape.x + shape.width / 2)}, ${Math.round(shape.y + shape.height / 2)})` : ''
+    return `Place ${what}${where}${at}`
   }
   if (operation.op === 'emit') return operation.event.name === 'alarm' ? 'Sound the alarm' : `Signal “${displayName(operation.event.name)}”`
   if (operation.op === 'remove_rule') return `Stop the rule “${displayName(operation.id)}”`

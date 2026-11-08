@@ -928,3 +928,29 @@
   .sim *::before,
   .sim *::after { transition-duration: 0ms !important; }
 }
+
+/* ---- Points the person marked: lettered pins, tip on the spot ---- */
+.map-points { position: absolute; inset: 0; pointer-events: none; }
+.sim .map-point {
+  position: absolute;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  background: var(--blue);
+  box-shadow: 0 3px 8px rgb(20 30 20 / 0.28);
+  color: #ffffff;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate(0, -100%) rotate(-45deg);
+  transform-origin: 0 100%;
+  transition: background 140ms var(--ease), box-shadow 140ms var(--ease);
+}
+.sim .map-point span { font: 700 11px/1 'Manrope Variable', 'Manrope', sans-serif; transform: rotate(45deg); }
+.sim .map-point:hover { background: #4a6c98; }
+.sim .map-point.is-selected { background: #2f6feb; box-shadow: 0 0 0 4px rgb(47 111 235 / 0.25), 0 3px 8px rgb(20 30 20 / 0.28); }
+.sim .map-point:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sim-point-tip { color: var(--muted); }
+.sim-point-tip q { color: var(--text); font-style: normal; }

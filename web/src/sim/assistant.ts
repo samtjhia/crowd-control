@@ -33,12 +33,13 @@ export const SCENARIO_CAPABILITIES: Capabilities = { ...CAPABILITIES, editableHi
  * goals (including queueing at a desk and using a table or counter), sound events, add or remove
  * rules, and schedule any of these. (Follow needs a person's ID, which the planner can't see, so
  * it is left out.) Any layout source is allowed, since the change is made to whatever map is
- * loaded (a prepared venue or an uploaded plan as well as a generated building).
+ * loaded (a prepared venue or an uploaded plan as well as a generated building). Objects can be
+ * placed by a rectangle, so "a check-in desk at point A" lands on the spot that was marked.
  */
 export const CHANGE_CAPABILITIES: Capabilities = {
   operations: ['add', 'spawn', 'set', 'schedule', 'assign_goal', 'clear_goal', 'emit', 'define_rule', 'remove_rule', 'remove'],
   goals: ['reach', 'avoid', 'wait', 'wander', 'queue', 'interact', 'sequence'],
-  geometry: [], layouts: ['generate', 'lookup', 'upload'], entityMetrics: [], editableHistory: false,
+  geometry: ['rectangle'], layouts: ['generate', 'lookup', 'upload'], entityMetrics: [], editableHistory: false,
 }
 
 export type AskKind = 'scenario' | 'change'
@@ -123,6 +124,8 @@ export function interpret(reply: Extract<ReturnType<typeof PlannerReplySchema.pa
       }
       const checked = parseContract(CreateInterventionRequestSchema, reply.request, { capabilities: CHANGE_CAPABILITIES })
       if (!checked.ok) return { type: 'message', tone: 'error', text: `That change didn’t pass the simulator’s checks: ${checked.error.message}` }
+      // Live changes can place objects (desks, stands, dangers), not walls, rooms or doors.
+      if (addsStructure(checked.value.operations)) return { type: 'message', tone: 'info', text: 'That change would add walls, rooms or doors, which can’t be changed while a run plays. Edit the floor plan instead, or place an object.' }
       return { type: 'change', request: checked.value }
     }
     case 'clarification':
@@ -181,6 +184,11 @@ export function placesNote(places: readonly Place[]): string {
 }
 
 type Op = CreateInterventionRequest['operations'][number]
+
+/** Whether any operation (at any depth) adds something other than an object. */
+function addsStructure(operations: readonly Op[]): boolean {
+  return operations.some((o) => (o.op === 'add' && o.entity.kind !== 'object') || ((o.op === 'schedule' || o.op === 'define_rule') && addsStructure(o.operations as Op[])))
+}
 type Goal = Extract<Op, { op: 'assign_goal' }>['goal']
 type Target = Extract<Goal, { kind: 'reach' }>['target']
 

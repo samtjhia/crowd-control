@@ -44,7 +44,7 @@ test('initializes runs, metrics hypertable, and intervention tables', async () =
 
   await initializeDatabase(pool)
 
-  assert.equal(pool.calls.length, 6)
+  assert.equal(pool.calls.length, 7)
   assert.match(pool.calls[1].text, /ADD COLUMN IF NOT EXISTS owner_sub/)
   assert.match(pool.calls[2].text, /crowd_runs_owner_started_at_idx/)
   assert.match(pool.calls[4].text, /create_hypertable/)
@@ -229,4 +229,37 @@ test('rejects invalid analytics run IDs and returns null for missing runs', asyn
   assert.equal(await getRunAnalytics(pool, ownerSub, '37c6729d-9e21-4c8f-a414-fdbf8c56d66c'), null)
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0].values, ['37c6729d-9e21-4c8f-a414-fdbf8c56d66c', ownerSub])
+})
+
+test('floor plans save per person under their map ID, list back, and delete', async () => {
+  const { deleteVenue, listVenues, saveVenue } = await import('../dist/database.js')
+  const map = {
+    id: 'upload-abc', revision: 'r1',
+    source: { mode: 'upload', assetId: 'upload-abc', revision: 'r1', page: 1, calibration: null, sourceToWorld: [1, 0, 0, 1, 0, 0] },
+    grid: { width: 2, height: 1, cellSize: 1, units: 'model', blocked: [0, 0], traversalCost: [1, 1], zoneIndex: [1, 1], portalIndex: [0, 0], zoneIds: [null, 'hall'], portalIds: [null] },
+    entities: [{ id: 'hall', kind: 'zone', label: 'Hall' }],
+    reviewed: true,
+  }
+  const venue = { name: 'My venue', floor: 'Ground', savedAt: '2026-11-07T12:00:00.000Z', map }
+  const pool = fakePool()
+  assert.equal(await saveVenue(pool, 'auth0|me', 'upload-abc', venue), 'saved')
+  const insert = pool.calls.at(-1)
+  assert.match(insert.text, /INSERT INTO crowd_venues/)
+  assert.match(insert.text, /WHERE crowd_venues\.saved_at <= EXCLUDED\.saved_at/, 'an older copy never replaces a newer one')
+  assert.deepEqual(insert.values.slice(0, 5), ['auth0|me', 'upload-abc', 'My venue', 'Ground', venue.savedAt])
+  assert.equal(await saveVenue(pool, 'auth0|me', 'someone-else', venue), 'invalid', 'the URL ID must be the map ID')
+  assert.equal(await saveVenue(pool, 'auth0|me', 'upload-abc', { ...venue, map: { ...map, reviewed: false } }), 'invalid')
+
+  const listing = {
+    async query(text, values) {
+      assert.match(text, /WHERE owner_sub = \$1/)
+      assert.deepEqual(values, ['auth0|me'])
+      return { rowCount: 2, rows: [{ name: 'My venue', floor: 'Ground', savedAt: new Date(venue.savedAt), map }, { name: 'Broken', floor: '', savedAt: new Date(), map: { id: 'x' } }] }
+    },
+  }
+  assert.deepEqual(await listVenues(listing, 'auth0|me'), [venue], 'unreadable rows are skipped')
+
+  assert.equal(await deleteVenue(pool, 'auth0|me', 'upload-abc'), true)
+  assert.deepEqual(pool.calls.at(-1).values, ['auth0|me', 'upload-abc'])
+  assert.equal(await deleteVenue(pool, 'auth0|me', ''), 'invalid')
 })

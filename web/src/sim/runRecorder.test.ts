@@ -82,3 +82,13 @@ test('a reset starts a new run while the old one finishes uploading', async () =
   assert.equal(new Set(runs).size, 2)
   assert.equal(sent.filter((s) => s.path.endsWith('/metrics')).length, 2)
 })
+
+test('sample batches stay under the server’s size limit on venues with many rooms', async () => {
+  const { nextBatch } = await import('./runRecorder.ts')
+  const big = (time: number) => ({ ...sample(time), zones: Array.from({ length: 60 }, (_, i) => ({ zoneId: `room_${i}`, occupancy: 3, density: 0.25 })) })
+  const samples = Array.from({ length: 100 }, (_, i) => big(i + 1))
+  const batch = nextBatch(samples)
+  assert.ok(batch.length > 1 && batch.length < 100, `${batch.length} samples`)
+  assert.ok(JSON.stringify({ simulationId: 's', samples: batch }).length < 64 * 1024)
+  assert.equal(nextBatch([sample(1), sample(2)]).length, 2, 'small samples go together')
+})

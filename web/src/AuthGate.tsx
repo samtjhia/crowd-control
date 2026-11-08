@@ -1,9 +1,11 @@
 import { Auth0Provider, useAuth0, type AppState } from '@auth0/auth0-react'
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { BrandMark } from './site/Site.tsx'
 import { currentPlace, navigate } from './site/navigate.ts'
 import { explainSignInError } from './site/signInErrors.ts'
+import { useAuthFetch } from './site/useAuthFetch.ts'
+import { syncVenues } from './site/venueSync.ts'
 import './auth.css'
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN
@@ -53,6 +55,39 @@ function AuthScreen({ children }: { children: ReactNode }) {
         <h1>Sign in to Crowd Control</h1>
         <p>Watch how a crowd moves through a venue, change things while it runs, and keep every run to look back on.</p>
         <button type="button" className="auth-button" onClick={signIn}>Sign in</button>
+      </AuthFrame>
+    )
+  }
+  return <AccountSync>{children}</AccountSync>
+}
+
+/** How long a page waits for the account's floor plans before opening without them. */
+const SYNC_WAIT_MS = 4000
+
+/**
+ * Brings the account's floor plans into this browser (and this browser's up to the account)
+ * before any page opens, since pages read the saved plans when they start. A slow or failed
+ * sync never blocks: after a few seconds the page opens with what this browser has.
+ */
+function AccountSync({ children }: { children: ReactNode }) {
+  const authFetch = useAuthFetch()
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    let done = false
+    const finish = () => { if (!done) { done = true; setReady(true) } }
+    const timer = window.setTimeout(finish, SYNC_WAIT_MS)
+    void syncVenues(authFetch).then((result) => {
+      if (result.error) console.warn(`[floor plans] Couldn’t sync with your account: ${result.error}`)
+    }).finally(() => {
+      window.clearTimeout(timer)
+      finish()
+    })
+    return () => window.clearTimeout(timer)
+  }, [authFetch])
+  if (!ready) {
+    return (
+      <AuthFrame busy>
+        <p className="auth-loading" role="status"><LoaderCircle className="auth-spin" size={18} aria-hidden="true" /> Loading your floor plans…</p>
       </AuthFrame>
     )
   }

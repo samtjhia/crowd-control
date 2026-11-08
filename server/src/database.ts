@@ -4,6 +4,7 @@ import {
   CreateInterventionRequestSchema,
   IdSchema,
   MetricSampleSchema,
+  PreparedMapSchema,
   RunAnalyticsSchema,
   RunSummariesSchema,
 } from '@crowd-control/contract'
@@ -161,6 +162,60 @@ export async function getRunAnalytics(pool: Pool, ownerSub: string, runId: strin
   })
 }
 
+/**
+ * A floor plan saved from the editor: its name and floor, when it was saved, and the reviewed
+ * map (walls, rooms, doors as a grid). The map's own ID is the venue's ID.
+ */
+const SavedVenueSchema = z.strictObject({
+  name: z.string().min(1).max(200),
+  floor: z.string().max(200),
+  savedAt: z.iso.datetime(),
+  map: PreparedMapSchema,
+})
+export type SavedVenueRecord = z.infer<typeof SavedVenueSchema>
+
+/** The signed-in person's saved floor plans, newest first. */
+export async function listVenues(pool: Pool, ownerSub: string): Promise<SavedVenueRecord[]> {
+  const result = await pool.query(
+    `SELECT name, floor, saved_at AS "savedAt", map
+     FROM crowd_venues
+     WHERE owner_sub = $1
+     ORDER BY saved_at DESC
+     LIMIT 100`,
+    [ownerSub],
+  )
+  return result.rows.flatMap((row) => {
+    const parsed = SavedVenueSchema.safeParse({ ...row, savedAt: row.savedAt instanceof Date ? row.savedAt.toISOString() : row.savedAt })
+    return parsed.success ? [parsed.data] : []
+  })
+}
+
+/**
+ * Saves a floor plan under its map ID. Saving again replaces it, unless the stored copy is
+ * newer (another device saved it since), so an old copy never overwrites a newer one.
+ */
+export async function saveVenue(pool: Pool, ownerSub: string, venueId: string, input: unknown): Promise<'invalid' | 'saved'> {
+  const parsed = SavedVenueSchema.safeParse(input)
+  if (!parsed.success || parsed.data.map.id !== venueId) return 'invalid'
+  const venue = parsed.data
+  await pool.query(
+    `INSERT INTO crowd_venues (owner_sub, venue_id, name, floor, saved_at, map)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (owner_sub, venue_id) DO UPDATE
+       SET name = EXCLUDED.name, floor = EXCLUDED.floor, saved_at = EXCLUDED.saved_at, map = EXCLUDED.map
+       WHERE crowd_venues.saved_at <= EXCLUDED.saved_at`,
+    [ownerSub, venueId, venue.name, venue.floor, venue.savedAt, JSON.stringify(venue.map)],
+  )
+  return 'saved'
+}
+
+/** Deletes one of the signed-in person's floor plans; false if there was none. */
+export async function deleteVenue(pool: Pool, ownerSub: string, venueId: string): Promise<'invalid' | boolean> {
+  if (!IdSchema.safeParse(venueId).success) return 'invalid'
+  const result = await pool.query('DELETE FROM crowd_venues WHERE owner_sub = $1 AND venue_id = $2', [ownerSub, venueId])
+  return (result.rowCount ?? 0) > 0
+}
+
 export async function initializeDatabase(pool: Pool): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS crowd_runs (
@@ -209,6 +264,17 @@ export async function initializeDatabase(pool: Pool): Promise<void> {
       acknowledgement JSONB NOT NULL,
       recorded_at TIMESTAMPTZ NOT NULL,
       PRIMARY KEY (run_id, request_id)
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crowd_venues (
+      owner_sub TEXT NOT NULL,
+      venue_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      floor TEXT NOT NULL,
+      saved_at TIMESTAMPTZ NOT NULL,
+      map JSONB NOT NULL,
+      PRIMARY KEY (owner_sub, venue_id)
     )
   `)
 }

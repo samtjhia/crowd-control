@@ -6,6 +6,7 @@ import { describeOperations, describePlan, displayName } from '../planner/descri
 import type { SimulationClient, SimulationView } from '../worker/simulationClient.ts'
 import { askPlanner, buildRequest, capacityNote, explainRefusal, pinGoalTargets, placesNote, titleFrom, type AskKind } from './assistant.ts'
 import { placesInScene } from './places.ts'
+import { loadPoints, pointsKeyForLayout, pointsKeyForSource, pointsNote, preparedGeometry, sceneGeometry } from './points.ts'
 import { loadAssistant, saveMessages, type Message } from './assistantStore.ts'
 import type { VenueOption } from './scenario.ts'
 
@@ -78,10 +79,13 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
     const venue = venueFor(place)
     const capacity = venue ? capacityNote(venue.capacities) : ''
     const places = venue ? placesNote(venue.places) : ''
+    // Points marked on that venue ("point A"), described by area, doors and objects.
+    const marked = venue ? pointsNote(loadPoints(pointsKeyForLayout(venue.layout)), preparedGeometry(venue.map)) : ''
     const wording = [
       prompt,
       ...(capacity ? [capacity] : []),
       ...(places ? [places] : []),
+      ...(marked ? [marked] : []),
       ...(problems.length > 0 ? [`Your previous plans could not be built by the simulator: ${problems.join(' ')}\nReturn a corrected complete plan that keeps to what was asked but fits.`] : []),
     ].join('\n\n')
     const request = buildRequest({
@@ -110,10 +114,10 @@ export function AssistantPanel({ client, view, venues, currentVenueId, onCheckPl
     const venue = venueFor(currentVenueId)
     // What the tables, desks and any dangers on the map do, so the change can use them by ID.
     const places = view.scene ? placesNote(placesInScene(view.scene)) : ''
+    // Points marked on this venue ("point A"), described by area, doors and objects.
+    const marked = view.scene && view.simulationId ? pointsNote(loadPoints(pointsKeyForSource(view.scene.map.source, view.simulationId)), sceneGeometry(view.scene)) : ''
     const request = buildRequest({
-      simulationId: view.simulationId ?? 'assistant', prompt: places ? `${prompt}
-
-${places}` : prompt, kind: 'change',
+      simulationId: view.simulationId ?? 'assistant', prompt: [prompt, places, marked].filter(Boolean).join('\n\n'), kind: 'change',
       ...(venue && { layout: venue.layout }), inventory, ...(view.metrics && { summary: view.metrics }), interventions,
     })
     if (!request.ok) return add({ from: 'assistant', text: `Couldn’t prepare that request: ${request.error.message}`, tone: 'error' })

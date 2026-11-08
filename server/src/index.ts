@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { SCHEMA_VERSION, type ContractError } from '@crowd-control/contract';
 import { Pool } from 'pg';
 import { createAuth0TokenVerifier } from './auth.ts';
-import { getOwnedRuns, getRunAnalytics, initializeDatabase, saveIntervention, saveMetricBatch, saveRun } from './database.ts';
+import { deleteVenue, getOwnedRuns, getRunAnalytics, initializeDatabase, listVenues, saveIntervention, saveMetricBatch, saveRun, saveVenue } from './database.ts';
 import { createGeminiPlanner } from './planner.ts';
 
 const port = Number(process.env.PORT ?? 3001);
@@ -11,6 +11,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const MAX_PLANNER_BODY_BYTES = 64 * 1024;
+/** A saved floor plan carries its whole grid, so it may be much larger than other requests. */
+const MAX_VENUE_BODY_BYTES = 8 * 1024 * 1024;
 const verifyAccessToken = createAuth0TokenVerifier(
   process.env.AUTH0_DOMAIN,
   process.env.AUTH0_AUDIENCE,
@@ -38,14 +40,14 @@ function sendJson(response: import('node:http').ServerResponse, status: number, 
   response.end(JSON.stringify(body));
 }
 
-async function readJsonBody(request: import('node:http').IncomingMessage): Promise<{ ok: true; value: unknown } | { ok: false; error: ContractError }> {
+async function readJsonBody(request: import('node:http').IncomingMessage, limit = MAX_PLANNER_BODY_BYTES): Promise<{ ok: true; value: unknown } | { ok: false; error: ContractError }> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += data.length;
-    if (bytes > MAX_PLANNER_BODY_BYTES) {
-      return { ok: false, error: { code: 'RESOURCE_LIMIT', message: 'Planner request exceeds the 64 KiB limit.' } };
+    if (bytes > limit) {
+      return { ok: false, error: { code: 'RESOURCE_LIMIT', message: `Request exceeds the ${Math.round(limit / 1024)} KiB limit.` } };
     }
     chunks.push(data);
   }
@@ -223,6 +225,44 @@ async function handleRequest(request: import('node:http').IncomingMessage, respo
         : 'UNKNOWN';
       console.error(`Tiger Data telemetry write failed (${code}).`);
       sendJson(response, 503, { ok: false, error: 'Could not save telemetry to Tiger Data.' });
+    });
+    return;
+  }
+
+  // Floor plans saved from the editor, per signed-in person.
+  const venueRoute = /^\/api\/venues(?:\/([^/]+))?$/.exec(telemetryPath);
+  if (venueRoute) {
+    void (async () => {
+      if (!database || !await databaseReady) {
+        sendJson(response, 503, { ok: false, error: 'Tiger Data is not available.' });
+        return;
+      }
+      const venueId = venueRoute[1] ? decodeURIComponent(venueRoute[1]) : undefined;
+      if (request.method === 'GET' && !venueId) {
+        sendJson(response, 200, { ok: true, venues: await listVenues(database, ownerSub) });
+      } else if (request.method === 'PUT' && venueId) {
+        if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) {
+          sendJson(response, 400, { ok: false, error: 'Content-Type must be application/json.' });
+          return;
+        }
+        const body = await readJsonBody(request, MAX_VENUE_BODY_BYTES);
+        if (!body.ok) {
+          sendJson(response, body.error.code === 'RESOURCE_LIMIT' ? 413 : 400, { ok: false, error: body.error.message });
+          return;
+        }
+        const saved = await saveVenue(database, ownerSub, venueId, body.value);
+        sendJson(response, saved === 'saved' ? 200 : 400, saved === 'saved' ? { ok: true } : { ok: false, error: 'Invalid floor plan.' });
+      } else if (request.method === 'DELETE' && venueId) {
+        const deleted = await deleteVenue(database, ownerSub, venueId);
+        if (deleted === 'invalid') sendJson(response, 400, { ok: false, error: 'Invalid floor plan ID.' });
+        else sendJson(response, deleted ? 200 : 404, deleted ? { ok: true } : { ok: false, error: 'Floor plan was not found.' });
+      } else {
+        sendJson(response, 405, { ok: false, error: 'Method not allowed.' });
+      }
+    })().catch((error: unknown) => {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'UNKNOWN';
+      console.error(`Tiger Data floor plan request failed (${code}).`);
+      sendJson(response, 503, { ok: false, error: 'Could not reach saved floor plans in Tiger Data.' });
     });
     return;
   }

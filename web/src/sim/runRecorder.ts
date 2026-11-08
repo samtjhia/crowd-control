@@ -25,8 +25,21 @@ type Run = {
   changes: (Change & { recordedAt: string })[]
 }
 
-/** The server takes at most this many samples per request. */
+/** The server takes at most 100 samples, and 64 KiB, per request; batches stay inside both. */
 const BATCH = 100
+const BATCH_BYTES = 48 * 1024
+
+/** The next samples to send: as many as fit, and always at least one. */
+export function nextBatch(samples: readonly MetricSample[]): MetricSample[] {
+  let bytes = 0
+  let count = 0
+  while (count < Math.min(BATCH, samples.length)) {
+    bytes += JSON.stringify(samples[count]).length + 1
+    if (count > 0 && bytes > BATCH_BYTES) break
+    count++
+  }
+  return samples.slice(0, count)
+}
 
 export class RunRecorder {
   private runs: Run[] = []
@@ -80,7 +93,7 @@ export class RunRecorder {
           run.created = true
         }
         while (run.samples.length > 0) {
-          const batch = run.samples.slice(0, BATCH)
+          const batch = nextBatch(run.samples)
           await this.expect(this.post(`/api/runs/${run.runId}/metrics`, { simulationId: run.simulationId, samples: batch }), 'its measurements')
           run.samples.splice(0, batch.length)
         }

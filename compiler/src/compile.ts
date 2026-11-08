@@ -6,6 +6,7 @@ import { rasterize, unreachable } from './rasterize/rows.ts'
 import { resolveProfiles } from './profiles/catalog.ts'
 import { fail } from './result.ts'
 import { finish } from './scene/finish.ts'
+import { placeStartingObjects } from './scene/objects.ts'
 import { mapFromPrepared } from './scene/prepared.ts'
 import { placeInitialAgents, rectArea, type SpawnArea } from './spawn/lattice.ts'
 
@@ -111,7 +112,10 @@ function compileUpload(input: CompileInput): Result<CompileOutput> {
 }
 
 /** Shared by every layout source: profiles, the starting crowd, behaviour, then the checked scene. */
-function populate(input: CompileInput, map: CompiledMap, areas: SpawnArea[]): Result<CompileOutput> {
+function populate(input: CompileInput, layoutMap: CompiledMap, areas: SpawnArea[]): Result<CompileOutput> {
+  const withObjects = placeStartingObjects(input.plan.initialOperations, layoutMap)
+  if (!withObjects.ok) return withObjects
+  const map = withObjects.value
   const profiles = resolveProfiles(input.plan, input.model)
   if (!profiles.ok) return profiles
   const agents = placeInitialAgents(input.plan.initialOperations, areas, profiles.value, input.model)

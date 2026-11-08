@@ -134,3 +134,20 @@ test('room capacities match what placement allows, so a crowd of that size alway
   assert.equal(code(compile(lookupExample(capacities.lobby))), null, 'exactly the capacity fits')
   assert.equal(code(compile(lookupExample(capacities.lobby! + 1))), 'NO_WALKABLE_SPACE', 'one more does not')
 })
+
+test('a scenario can place objects before it starts, on the floor, and send people to them', () => {
+  const input = lookupExample()
+  const desk = { op: 'add' as const, entity: { id: 'checkin_point_a', kind: 'object' as const, label: 'Check-in', components: { interaction: { duration: 4, slots: 1 } }, shape: { kind: 'rectangle' as const, x: 1, y: 1, width: 1, height: 1 } } }
+  input.plan.initialOperations = [desk, ...input.plan.initialOperations, { op: 'assign_goal', targets: { kind: 'agent' }, goal: { kind: 'interact', target: { ids: ['checkin_point_a'] } } }]
+  const result = compile(input)
+  assert.ok(result.ok, JSON.stringify(result))
+  assert.ok(result.value.scene.map.entities?.some((e) => e.id === 'checkin_point_a'), 'the desk is on the map')
+  assert.ok(Object.values(result.value.scene.controllers).some((goal) => goal.kind === 'interact' && goal.targetEntityId === 'checkin_point_a'))
+
+  const inWall = lookupExample()
+  inWall.plan.initialOperations = [{ ...desk, entity: { ...desk.entity, shape: { kind: 'rectangle', x: -5, y: -5, width: 1, height: 1 } } }, ...inWall.plan.initialOperations]
+  assert.equal(code(compile(inWall)), 'NO_WALKABLE_SPACE')
+  const noShape = lookupExample()
+  noShape.plan.initialOperations = [{ op: 'add', entity: { id: 'x', kind: 'object' }, placement: { inside: { ids: ['lobby'] } } }, ...noShape.plan.initialOperations]
+  assert.equal(code(compile(noShape)), 'UNSUPPORTED_CAPABILITY')
+})

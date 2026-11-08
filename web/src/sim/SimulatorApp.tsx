@@ -25,11 +25,13 @@ import { AssistantPanel } from './AssistantPanel.tsx'
 import { loadSavedVenues, presetFor } from './savedVenues.ts'
 import { AccountMenu, BrandMark } from '../site/Site.tsx'
 import { useRunSaving } from './useRunSaving.ts'
+import { PointPins } from './PointPins.tsx'
+import { loadPoints, nextPointId, pointsKeyForSource, savePoints, type MapPoint } from './points.ts'
 
-/** What each tool can click: Select anything, Trip people, Doors doors, Danger the floor. */
-const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'object', 'portal', 'zone'], box: ['agent', 'object', 'portal', 'zone'], trip: ['agent'], doors: ['portal'], danger: ['zone'] }
+/** What each tool can click: Select anything, Trip people, Doors doors, Point and Danger the floor. */
+const PICKABLE: Record<MapTool, readonly PickKind[]> = { select: ['agent', 'object', 'portal', 'zone'], box: ['agent', 'object', 'portal', 'zone'], point: ['zone'], trip: ['agent'], doors: ['portal'], danger: ['zone'] }
 /** Box always drags a selection box; Select does with Shift held; the others always pan. */
-const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', trip: 'off', doors: 'off', danger: 'off' }
+const BOX_MODE: Record<MapTool, BoxSelectMode> = { select: 'shift', box: 'always', point: 'off', trip: 'off', doors: 'off', danger: 'off' }
 import './simulator.css'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
@@ -216,6 +218,23 @@ export default function SimulatorApp() {
   const [tool, setTool] = useState<MapTool>('select')
   const [selection, setSelection] = useState<readonly Pick[]>([])
   const toolRef = useRef(tool)
+
+  // Points marked on this venue (A, B, C…), kept per venue in this browser for the assistant.
+  const pointsKey = view.scene && view.simulationId ? pointsKeyForSource(view.scene.map.source, view.simulationId) : null
+  const [pointsVersion, setPointsVersion] = useState(0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const points = useMemo(() => loadPoints(pointsKey), [pointsKey, pointsVersion])
+  const pointsRef = useRef({ key: pointsKey, points })
+  useEffect(() => { pointsRef.current = { key: pointsKey, points } }, [pointsKey, points])
+  const updatePoints = (key: string, next: MapPoint[]) => {
+    savePoints(key, next)
+    setPointsVersion((version) => version + 1)
+  }
+  const removePoint = (id: string) => {
+    if (!pointsKey) return
+    updatePoints(pointsKey, points.filter((p) => p.id !== id))
+    setSelection((current) => current.filter((pick) => !(pick.kind === 'point' && pick.id === id)))
+  }
   /** Applies a map action as a follow-up request; failures show in the event log. */
   const applyAction = (action: MapAction) => void client.apply(action.label, action.operations)
   /** What a click on the map does with the current tool. Read through a ref by the renderer. */
@@ -230,6 +249,15 @@ export default function SimulatorApp() {
         return
       }
       const current = client.getView()
+      if (toolRef.current === 'point') {
+        // A point goes wherever the floor was clicked, with the next free letter; then it is selected.
+        const { key, points: marked } = pointsRef.current
+        if (pick?.kind !== 'zone' || !key) return
+        const id = nextPointId(marked)
+        updatePoints(key, [...marked, { id, x: Math.round(at.x * 100) / 100, y: Math.round(at.y * 100) / 100 }])
+        setSelection([{ kind: 'point', id }])
+        return
+      }
       if (toolRef.current === 'danger') {
         // A danger goes wherever the floor was clicked; then it is selected, so its details show.
         if (pick?.kind !== 'zone' || !current.scene) return
@@ -341,6 +369,7 @@ export default function SimulatorApp() {
           case 'f': case 'F': setTool('trip'); return true
           case 'd': case 'D': setTool('doors'); return true
           case 'x': case 'X': setTool('danger'); return true
+          case 'p': case 'P': setTool('point'); return true
           case 'h': case 'H': setHeatmap((on) => !on); return true
           case 'Escape':
             if (window.innerWidth >= WIDE) { setSelection([]); return true }
@@ -369,6 +398,8 @@ export default function SimulatorApp() {
           {!ready && <p className="sim-loading">Loading the venue…</p>}
         </div>
         <PlanSigns scene={view.scene} frame={view.current?.frame ?? null} camera={camera} incidents={incidents} now={now} />
+        <PointPins points={points} camera={camera} selected={selection.length === 1 && selection[0]!.kind === 'point' ? selection[0]!.id : null}
+          onSelect={(id) => setSelection([{ kind: 'point', id }])} />
       </div>
 
       <header className="sim-float sim-topbar">
@@ -442,7 +473,7 @@ export default function SimulatorApp() {
       <SidePanel side="right" open={panels.right} title="Simulation" onToggle={() => toggle('right')}>
         <Overview view={view} />
         <Section title="Selected">
-          <SelectionDetails selection={selection} view={view} plan={compiled.ok ? scenario.plan : null} onAction={applyAction} onClear={() => setSelection([])} />
+          <SelectionDetails selection={selection} view={view} plan={compiled.ok ? scenario.plan : null} points={points} onAction={applyAction} onClear={() => setSelection([])} onRemovePoint={removePoint} />
         </Section>
         <Section title="Density">
           <DensityPanel view={view} on={heatmap} onToggle={() => setHeatmap((on) => !on)} />
@@ -569,7 +600,8 @@ function Legend() {
         <div><dt><kbd>\</kbd></dt><dd>Hide or show both panels</dd></div>
         <div><dt><kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd></dt><dd>Zoom in, out, fit</dd></div>
         <div><dt>Arrows, drag</dt><dd>Pan the map</dd></div>
-        <div><dt><kbd>V</kbd> <kbd>B</kbd> <kbd>F</kbd> <kbd>D</kbd> <kbd>X</kbd></dt><dd>Select, Box, Trip, Doors, Danger</dd></div>
+        <div><dt><kbd>V</kbd> <kbd>B</kbd> <kbd>P</kbd></dt><dd>Select, Box, Point</dd></div>
+        <div><dt><kbd>F</kbd> <kbd>D</kbd> <kbd>X</kbd></dt><dd>Trip, Doors, Danger</dd></div>
       </dl>
     </details>
   )

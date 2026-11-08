@@ -53,13 +53,18 @@ export function CheckStep({ check, onBack }: { check: Check; onBack: () => void 
       {check.saveError && <p className="sim-error" role="alert">{check.saveError}</p>}
       {check.saved ? (
         <div className="editor-saved">
-          <p className="editor-ok" role="status"><CircleCheck size={15} aria-hidden="true" /> Saved in this browser.</p>
+          <p className="editor-ok" role="status">
+            <CircleCheck size={15} aria-hidden="true" />
+            {check.saved.account === 'saved' ? 'Saved to your account.'
+              : check.saved.account === 'saving' ? 'Saved in this browser; saving to your account…'
+              : `Saved in this browser only: ${check.saved.account.failed}. It will upload the next time a page opens.`}
+          </p>
           <a className="sim-action" href={`/sim?scenario=${encodeURIComponent(check.saved.scenario)}`}>
             <ExternalLink size={14} aria-hidden="true" /> Open in the simulator
           </a>
         </div>
       ) : null}
-      <p className="editor-hint">Saved venues stay in this browser for now; signing in to keep them across devices comes later.</p>
+      <p className="editor-hint">Saved venues are kept in your account, so they’re there on any device you sign in on.</p>
 
       <div className="sim-actions editor-step-nav">
         <button type="button" className="sim-action editor-secondary" onClick={onBack}>Back</button>
