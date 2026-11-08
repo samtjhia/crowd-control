@@ -1,5 +1,6 @@
 import { parseCompileInput, type CompiledMap, type CompileInput, type CompileOutput, type Result } from '@crowd-control/contract'
 import { compileBehaviour } from './behaviour/compile.ts'
+import { spreadOverDesks } from './behaviour/spread.ts'
 import { chainLayout, designPopulation } from './layout/chain.ts'
 import { variedChainLayout } from './layout/varied.ts'
 import { rasterize, unreachable } from './rasterize/rows.ts'
@@ -116,11 +117,13 @@ function populate(input: CompileInput, layoutMap: CompiledMap, areas: SpawnArea[
   const withObjects = placeStartingObjects(input.plan.initialOperations, layoutMap)
   if (!withObjects.ok) return withObjects
   const map = withObjects.value
-  const profiles = resolveProfiles(input.plan, input.model)
+  // A group sent to several desks for one step is split evenly between them (behaviour/spread.ts).
+  const plan = spreadOverDesks(input.plan, map.entities ?? [])
+  const profiles = resolveProfiles(plan, input.model)
   if (!profiles.ok) return profiles
-  const agents = placeInitialAgents(input.plan.initialOperations, areas, profiles.value, input.model)
+  const agents = placeInitialAgents(plan.initialOperations, areas, profiles.value, input.model)
   if (!agents.ok) return agents
-  const behaviour = compileBehaviour(input.plan, { rooms: map.rooms, portals: map.portals, objects: map.entities ?? [], agents: agents.value })
+  const behaviour = compileBehaviour(plan, { rooms: map.rooms, portals: map.portals, objects: map.entities ?? [], agents: agents.value })
   if (!behaviour.ok) return behaviour
   return finish(input, map, profiles.value, behaviour.value)
 }

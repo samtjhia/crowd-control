@@ -66,7 +66,7 @@ function oneZone(selector: Selector, world: StaticWorld, path: string): Result<s
 function oneEntity(selector: Selector, world: StaticWorld, path: string): Result<string> {
   const found = resolve(selector, world, path)
   if (!found.ok) return found
-  if (found.value.length > 1) return fail('AMBIGUOUS_SELECTOR', `This goal needs one target but ${found.value.length} match. Name one ID; to send each person to the nearest of several, use a reach goal with all their IDs and "selection": "nearest"`, { path, affectedIds: found.value.map((entity) => entity.id) })
+  if (found.value.length > 1) return fail('AMBIGUOUS_SELECTOR', `This goal needs one target but ${found.value.length} match. Name one ID, or give this goal in the same step as the spawn of the people who use it, so they are split evenly between them; to walk each person to the nearest of several, use a reach goal with all their IDs and "selection": "nearest"`, { path, affectedIds: found.value.map((entity) => entity.id) })
   return ok(found.value[0]!.id)
 }
 

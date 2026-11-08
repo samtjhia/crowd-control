@@ -8,6 +8,7 @@ import { fail, ok } from '../result.ts'
 import { insideRoomId } from '../spawn/lattice.ts'
 import { ControllerTable } from './controllers.ts'
 import { compileGoal, isSimpleSelector, selectAgents, templateMatches, type StaticWorld } from './targets.ts'
+import { deskChoice } from './spread.ts'
 
 export type Behaviour = {
   agents: AgentBlueprint[]
@@ -128,6 +129,11 @@ function compileJob(schedule: ScheduleOperation, path: string, world: StaticWorl
       const folded = foldGoal(operation, here, world, table, allSpawns, compact)
       if (!folded.ok) return folded
       if (folded.value) continue
+      // The engine serves each person at one desk and would drop this whole step, spawn included.
+      const several = deskChoice(operation.goal, world.objects ?? [])
+      if (several.length > 0) {
+        return fail('AMBIGUOUS_SELECTOR', `This step sends people to ${several.length} desks at once (${several.join(', ')}). Give the goal in the same step as their spawn so they are split evenly between them, or name one desk`, { path: `${here}.goal`, affectedIds: several })
+      }
     }
     if (operation.op === 'emit' && Object.keys(operation.event).length === 1) {
       operations.push({ op: 'emit', event: operation.event.name })
