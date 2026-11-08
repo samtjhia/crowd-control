@@ -102,8 +102,8 @@ function GardenArtwork() {
     <path className="garden-sign-cap" d="M108 103Q287 66 486 100l-11-9Q276 57 97 94Z" fill="#fffcf2" />
     <path className="garden-sign-plinth" d="M108 246q184-30 378-3v8q-200-33-378 6Z" fill="#d3c8af" />
     <Planter x={91} y={276} width={89} pink /><Planter x={420} y={220} width={68} pink />
-    <Bench x={83} y={348} /><Bench x={270} y={426} /><Lamp x={662} y={381} />
-    <Shrubs x={655} y={335} scale={.65} /><Shrubs x={205} y={420} scale={.9} />
+    <Bench x={83} y={348} /><Bench x={270} y={426} />
+    <Shrubs x={650} y={365} scale={.65} /><Shrubs x={205} y={420} scale={.9} />
   </svg>
 }
 

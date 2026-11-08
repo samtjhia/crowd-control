@@ -30,9 +30,11 @@ export function PlazaLandscape({ geometry, sites }: { geometry: JourneyGeometry;
       const bottom = Math.max(at(0, 449).y, site.content ? site.content.y + site.content.height + 30 : 0)
       const contentLeft = site.content ? site.content.x - 25 : site.x
       const contentRight = site.content ? site.content.x + site.content.width + 25 : site.x + site.width
+      // Keep the garden terrace on its own side of the main path.
+      const terraceEdge = join.x + (index === 2 ? -radius : radius)
       const terrace = right
         ? `M${farX} ${at(0, 275).y}Q${site.x + site.width * .45} ${at(0, 250).y} ${join.x - radius} ${join.y - 40}L${join.x - radius} ${join.y + 25}C${join.x - radius + 30} ${join.y + 100} ${contentLeft - 40} ${bottom - 90} ${contentLeft} ${bottom + 5}Q${site.x + site.width * .4} ${bottom + 45} ${farX} ${bottom - 12}Z`
-        : `M0 ${at(0, 280).y}Q${site.x + site.width * .55} ${at(0, 255).y} ${join.x + radius} ${join.y - 40}L${join.x + radius} ${join.y + 25}C${join.x + radius - 30} ${join.y + 100} ${contentRight + 40} ${bottom - 90} ${contentRight} ${bottom + 5}Q${site.x + site.width * .48} ${bottom + 45} 0 ${bottom - 12}Z`
+        : `M0 ${at(0, 280).y}Q${site.x + site.width * .55} ${at(0, 255).y} ${terraceEdge} ${join.y - 40}L${terraceEdge} ${join.y + 25}C${terraceEdge - 30} ${join.y + 100} ${contentRight + 40} ${bottom - 90} ${contentRight} ${bottom + 5}Q${site.x + site.width * .48} ${bottom + 45} 0 ${bottom - 12}Z`
       const connector = `M${front.x} ${front.y}C${front.x + (join.x - front.x) * .5} ${front.y + 4} ${join.x} ${join.y} ${join.x} ${join.y}`
       return <g key={index} className="location-ground">
         <path d={`M${farX} ${site.y + 88}Q${site.x + site.width * .5} ${site.y - 10} ${shoulder} ${site.y + site.height * .62}L${shoulder} ${bottom + 15}Q${site.x + site.width * .5} ${bottom + (mobile ? 24 : 45)} ${farX} ${bottom - 15}Z`} fill={index === 2 ? '#e4ebd0' : '#e9eedb'} />

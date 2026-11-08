@@ -66,9 +66,21 @@ export function CityScenery() {
         <path d="m-24-38 4-28 23-12 22 17-3 28-24 9Z" fill="#bad28c" /><path d="m-24-38 22 14 24-9-3-17-21 10Z" fill="#98b972" />
       </g>
     })}
-    {[[970,210],[175,1190],[980,1740]].map(([x,y],i) => {
+    {[[970,210],[175,1190],[980,1610]].map(([x,y],i) => {
       const point = place(x, y, 4, 36, 92, 3)
-      return <g key={i} className={x > 620 ? 'city-east' : 'city-west'} transform={`translate(${point.x} ${point.y}) scale(${scale})`} stroke="#819783" strokeWidth="3" fill="none"><path d="M0 0v-65q0-12 13-12h12" /><path d="M17-77h19" strokeWidth="7" /></g>
+      let opposite: number | undefined
+      if (i === 2 && geometry) {
+        // A matched pair faces inward from opposite edges of the main path.
+        const roadside = geometry.points.filter(p => p.y >= geometry.story.y + point.y - 92 * scale && p.y <= geometry.story.y + point.y + 3 * scale)
+        if (roadside.length) {
+          const clearance = trailWidth(geometry.width) / 2 + 45 + 36 * scale
+          point.x = Math.min(...roadside.map(p => p.x)) - geometry.story.x - clearance
+          opposite = Math.max(...roadside.map(p => p.x)) - geometry.story.x + clearance
+        }
+      }
+      return <g key={i} className={x > 620 ? 'city-east' : 'city-west'}>
+        {[point.x, ...(opposite === undefined ? [] : [opposite])].map((lampX, side) => <g key={side} transform={`translate(${lampX} ${point.y}) scale(${side ? -scale : scale} ${scale})`} stroke="#819783" strokeWidth="3" fill="none"><path d="M0 0v-65q0-12 13-12h12" /><path d="M17-77h19" strokeWidth="7" /><path d="M18-74h17" stroke="#f3dc9f" strokeWidth="2" /></g>)}
+      </g>
     })}
     <Airship x={airship.x} y={airship.y} scale={width < 700 ? .63 : scale * .95} />
   </svg>
