@@ -154,8 +154,9 @@ export class SimulationClient {
       if (reply.type === 'ack') {
         const history = await this.command({ type: 'query', query: { kind: 'history' } })
         if (history.type === 'query_result' && history.result.kind === 'history' && history.stamp.streamId === this.view.streamId) {
-          this.update({ changes: history.result.history.records.filter((r) => !r.deleted && r.origin === 'followup')
-            .map((r) => ({ interventionId: r.id, label: r.label, at: r.at })) })
+          // Keep only the changes still in the engine's history, with the prompt and request we saved for them.
+          const kept = new Set(history.result.history.records.filter((r) => !r.deleted && r.origin === 'followup').map((r) => r.id))
+          this.update({ changes: this.view.changes.filter((change) => kept.has(change.interventionId)) })
         }
       }
       return reply

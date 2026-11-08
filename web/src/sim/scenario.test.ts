@@ -149,11 +149,13 @@ test('evacuation demos use seeded reaction cohorts and normal walking speed', ()
   }
 })
 
-test('hackathon has persistent, periodically refreshed wander before and after arrivals', () => {
+test('hackathon arrivals settle in, then keep roaming the hall without expiring', () => {
   const scenario = all.find((s) => s.id === 'hackathon-hall')!
   const result = startScenario(scenario.plan, scenario.model)
   assert.ok(result.ok)
-  for (const agent of result.value.scene.agents) {
+  const arrivals = result.value.scene.agents.filter((agent) => agent.tags.includes('arrival'))
+  assert.equal(arrivals.length, 40)
+  for (const agent of arrivals) {
     const controller: CompiledGoal = result.value.scene.controllers[agent.controller!]!
     const wander: CompiledGoal = controller.kind === 'sequence' ? controller.goals.at(-1)! : controller
     assert.equal(wander.kind, 'wander')

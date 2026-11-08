@@ -4,7 +4,7 @@ import '@fontsource-variable/dm-sans'
 import '@fontsource-variable/manrope'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Flame, Maximize2, Minus, PanelsLeftRight,
-  Pause, Play, Plus, Rewind, RotateCcw, SendHorizontal, Shuffle, Siren, StepForward,
+  Pause, Play, Plus, Rewind, RotateCcw, Shuffle, Siren, StepForward,
 } from 'lucide-react'
 import { RunReplaySchema, type Camera, type ModelPreset, type RunReplay, type ScenarioPlan, type Vec2 } from '@crowd-control/contract'
 import examplePreset from '../../../contract/fixtures/compile-output.json'
