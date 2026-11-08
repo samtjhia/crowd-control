@@ -25,6 +25,7 @@ struct Field {
     distance: Vec<f64>,
     next: Vec<u32>,
     hops: Vec<u32>,
+    first_portal: Vec<u32>,
 }
 #[derive(Debug, Clone)]
 struct Route {
@@ -450,6 +451,7 @@ impl Navigator {
             distance: vec![f64::INFINITY; grid.blocked.len()],
             next: vec![NONE; grid.blocked.len()],
             hops: vec![0; grid.blocked.len()],
+            first_portal: vec![NONE; grid.blocked.len()],
         };
         let hazards: Vec<_> = if matches!(intent.goal.kind, GoalKind::Avoid) {
             candidates(&intent.goal)
@@ -551,6 +553,9 @@ impl Navigator {
         for i in &seeds {
             f.distance[*i] = 0.0;
             f.next[*i] = *i as u32;
+            if grid.portal_index[*i] != 0 {
+                f.first_portal[*i] = *i as u32;
+            }
         }
         f.seeds = seeds.clone();
         let uniform = grid
@@ -591,6 +596,11 @@ impl Navigator {
                         }
                         f.distance[from] = distance;
                         f.next[from] = to as u32;
+                        f.first_portal[from] = if grid.portal_index[from] != 0 {
+                            from as u32
+                        } else {
+                            f.first_portal[to]
+                        };
                         f.hops[from] = f.hops[to] + 1;
                         queue.push_back(from);
                     }
@@ -621,6 +631,11 @@ impl Navigator {
                         if candidate < f.distance[from] {
                             f.distance[from] = candidate;
                             f.next[from] = to as u32;
+                            f.first_portal[from] = if grid.portal_index[from] != 0 {
+                                from as u32
+                            } else {
+                                f.first_portal[to]
+                            };
                             f.hops[from] = f.hops[to] + 1;
                             heap.push(Entry {
                                 cost: candidate,
@@ -1043,29 +1058,27 @@ impl Navigator {
             };
             cursor = anchor;
         }
-        let mut portal = grid.portal_index[cursor];
-        for _ in 0..8 {
-            if portal != 0 {
-                break;
-            }
-            let next = field.next[cursor];
-            if next == NONE || next == cursor as u32 {
-                return Ok(None);
-            }
-            cursor = next as usize;
-            portal = grid.portal_index[cursor];
-        }
-        if portal == 0
-            || a.navigation.target_entity_id.as_ref() == grid.portal_ids[portal as usize].as_ref()
-        {
+        let first = field.first_portal[cursor];
+        if first == NONE {
             return Ok(None);
         }
+        cursor = first as usize;
+        let portal = grid.portal_index[cursor];
+        if portal == 0 {
+            return Ok(None);
+        }
+        let terminal =
+            a.navigation.target_entity_id.as_ref() == grid.portal_ids[portal as usize].as_ref();
         let (_, _, _, delay, [x, y, width, height]) = self.portal_info[portal as usize].unwrap();
-        if delay > 0.0 {
+        if delay > 0.0 && grid.portal_index[index(grid, &a.position)] != portal {
             return Ok(None);
         }
         let mut exit = None;
         for _ in 0..32 {
+            if terminal {
+                exit = Some((cursor, cursor));
+                break;
+            }
             let next = field.next[cursor];
             if next == NONE || next == cursor as u32 {
                 return Ok(None);
@@ -1079,9 +1092,47 @@ impl Navigator {
         let Some((last, next)) = exit else {
             return Ok(None);
         };
-        let horizontal = last / grid.width == next / grid.width;
-        let positive = next > last;
+        let horizontal = if terminal {
+            let saved = a
+                .navigation
+                .target_point
+                .as_ref()
+                .filter(|p| grid.portal_index[index(grid, p)] == portal);
+            if let Some(p) = saved.filter(|p| {
+                (p.x.0 - x - width / 2.0).abs() > 1e-9 || (p.y.0 - y - height / 2.0).abs() > 1e-9
+            }) {
+                (p.x.0 - x - width / 2.0).abs() <= 1e-9
+            } else {
+                ((a.position.x.0 - x - width / 2.0) / width).abs()
+                    >= ((a.position.y.0 - y - height / 2.0) / height).abs()
+            }
+        } else {
+            last / grid.width == next / grid.width
+        };
+        let aperture = if horizontal { height } else { width };
+        // Narrow doors keep the existing approach; their width cannot support a broad front.
+        let current = index(grid, &a.position);
+        if aperture <= 4.0 * radius
+            && field.hops[current].saturating_sub(field.hops[first as usize]) > 8
+        {
+            return Ok(None);
+        }
+        let positive = if terminal {
+            if horizontal {
+                a.position.x.0 < x + width / 2.0
+            } else {
+                a.position.y.0 < y + height / 2.0
+            }
+        } else {
+            next > last
+        };
         let sign = if positive { 1.0 } else { -1.0 };
+        let discharge = radius
+            + if field.distance[next] > 0.0 {
+                grid.cell_size
+            } else {
+                0.0
+            };
         let (align, through) = if horizontal {
             if height < 2.0 * radius {
                 return Ok(None);
@@ -1091,8 +1142,8 @@ impl Navigator {
             if lo > hi {
                 return Ok(None);
             }
-            let lateral = a.position.y.0.clamp(lo, hi);
             let near = if positive { x } else { x + width };
+            let lateral = a.position.y.0.clamp(lo, hi);
             let far = if positive { x + width } else { x };
             (
                 Point {
@@ -1104,7 +1155,11 @@ impl Navigator {
                     y: Number(lateral),
                 },
                 Point {
-                    x: Number(far + sign * radius),
+                    x: Number(if terminal {
+                        x + width / 2.0
+                    } else {
+                        far + sign * discharge
+                    }),
                     y: Number(lateral),
                 },
             )
@@ -1117,8 +1172,8 @@ impl Navigator {
             if lo > hi {
                 return Ok(None);
             }
-            let lateral = a.position.x.0.clamp(lo, hi);
             let near = if positive { y } else { y + height };
+            let lateral = a.position.x.0.clamp(lo, hi);
             let far = if positive { y + height } else { y };
             (
                 Point {
@@ -1131,21 +1186,61 @@ impl Navigator {
                 },
                 Point {
                     x: Number(lateral),
-                    y: Number(far + sign * radius),
+                    y: Number(if terminal {
+                        y + height / 2.0
+                    } else {
+                        far + sign * discharge
+                    }),
                 },
             )
         };
-        // Preserve each person's lateral position across the usable aperture, including edge lanes.
+        // Only shortcut within the same room and this portal, retaining terrain and one-way routing.
         for point in [through, align] {
             let distance = distance(&a.position, &point);
             if distance > grid.cell_size * 1e-7
-                && geometry::clear(grid, &self.bodies, &a.position, &point, radius, work)?
+                && point.x.0 >= radius
+                && point.y.0 >= radius
+                && point.x.0 + radius <= grid.width as f64 * grid.cell_size
+                && point.y.0 + radius <= grid.height as f64 * grid.cell_size
+                && {
+                    let steps = (distance / (grid.cell_size * 0.5)).ceil() as usize;
+                    let start = index(grid, &a.position);
+                    let mut allowed = true;
+                    for step in 1..=steps {
+                        let t = step as f64 / steps as f64;
+                        let cell = index(
+                            grid,
+                            &Point {
+                                x: Number(a.position.x.0 + (point.x.0 - a.position.x.0) * t),
+                                y: Number(a.position.y.0 + (point.y.0 - a.position.y.0) * t),
+                            },
+                        );
+                        if (grid.portal_index[cell] != 0 && grid.portal_index[cell] != portal)
+                            || (grid.zone_index[cell] != grid.zone_index[start]
+                                && grid.portal_index[cell] != portal
+                                && grid.zone_index[cell] != grid.zone_index[next])
+                            || grid.traversal_cost[cell] != grid.traversal_cost[start]
+                            || grid.terrain_speed_multiplier[cell]
+                                != grid.terrain_speed_multiplier[start]
+                        {
+                            allowed = false;
+                            break;
+                        }
+                    }
+                    allowed
+                }
+                && geometry::line_clear(grid, &self.bodies, &a.position, &point, radius, work)?
             {
                 let to = index(grid, &point);
                 if field.distance[to].is_finite() {
                     return Ok(Some((
                         point,
-                        distance + f64::from(field.hops[to]) * grid.cell_size,
+                        distance
+                            + if terminal {
+                                0.0
+                            } else {
+                                f64::from(field.hops[to]) * grid.cell_size
+                            },
                     )));
                 }
             }
@@ -1173,6 +1268,17 @@ impl Navigator {
         let field = &self.fields[route.key.as_ref().unwrap()];
         let epsilon = grid.cell_size * 1e-7;
         let cell = index(grid, &a.position);
+        if a.navigation
+            .target_entity_id
+            .as_ref()
+            .is_some_and(|id| grid.portal_ids.iter().flatten().any(|p| p == id))
+            && a.navigation.target_point.as_ref().is_some_and(|p| {
+                distance(&a.position, p) <= epsilon && grid.portal_index[index(grid, p)] != 0
+            })
+        {
+            complete(a);
+            return Ok(None);
+        }
         if let Some((point, remaining)) = self.opening_waypoint(grid, a, i, work)? {
             a.navigation.target_point = Some(point.clone());
             return Ok(Some((point, remaining)));

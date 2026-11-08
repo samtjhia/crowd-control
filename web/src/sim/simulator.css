@@ -90,6 +90,7 @@
 .map-pulse {
   position: absolute;
   border: 3px solid var(--ring);
+  box-shadow: inset 0 0 45px 12px color-mix(in srgb, var(--ring) 35%, transparent), 0 0 24px var(--ring);
   border-radius: 6px;
   opacity: 0;
   animation: map-pulse 2.4s var(--ease) 1 both;
@@ -1043,3 +1044,26 @@
   background: #fff; color: #172033; border: 1px solid #9aa9a0; border-radius: 6px;
   font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
 }
+
+.sim-alarm-banner, .sim-complete {
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--top-h) + var(--gap) * 2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: #b42336;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 4px 20px #b4233640;
+  pointer-events: none;
+}
+.sim-alarm-banner { animation: sim-alarm-alert 0.8s ease-in-out 4; }
+.sim-complete { background: var(--green); }
+@keyframes sim-alarm-alert { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .sim-alarm-banner { animation: none; } }

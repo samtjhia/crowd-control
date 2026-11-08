@@ -122,3 +122,96 @@ pub fn clear(
     }
     Ok(true)
 }
+
+/// Long planning rays visit a strip of cells instead of the segment's entire bounding box.
+pub fn line_clear(
+    grid: &GridData,
+    bodies: &[Body],
+    a: &Point,
+    b: &Point,
+    radius: f64,
+    work: &mut usize,
+) -> Result<bool, Failure> {
+    let steps = (distance(a, b) / grid.cell_size).ceil().max(1.0) as usize;
+    if steps > 64_000_000 {
+        return Err((
+            "RESOURCE_LIMIT",
+            "Navigation ray exceeds work budget".into(),
+        ));
+    }
+    let mut previous = a.clone();
+    for step in 1..=steps {
+        let t = step as f64 / steps as f64;
+        let point = Point {
+            x: crate::protocol::Number(a.x.0 + (b.x.0 - a.x.0) * t),
+            y: crate::protocol::Number(a.y.0 + (b.y.0 - a.y.0) * t),
+        };
+        if !clear(grid, &[], &previous, &point, radius, work)? {
+            return Ok(false);
+        }
+        previous = point;
+    }
+    *work = work.saturating_add(bodies.len());
+    if *work > 64_000_000 {
+        return Err((
+            "RESOURCE_LIMIT",
+            "Navigation geometry work budget exceeded".into(),
+        ));
+    }
+    Ok(bodies.iter().all(|body| {
+        let sum = radius + body.radius;
+        sum - point_segment(body.x, body.y, a, b) <= sum * 1e-10
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        protocol::{Map, Number},
+        random,
+    };
+
+    #[test]
+    fn strip_rays_match_exact_sweeps_for_walls_bodies_and_tangencies() {
+        let input: serde_json::Value = serde_json::from_str(include_str!(
+            "../../contract/fixtures/engine-navigation-load.json"
+        ))
+        .unwrap();
+        let map: Map = serde_json::from_value(input["compiled"]["scene"]["map"].clone()).unwrap();
+        let grid = GridData::decode(&map).unwrap();
+        let bodies = [Body {
+            x: 5.0,
+            y: 2.0,
+            radius: 0.3,
+        }];
+        let mut seed = 42;
+        for _ in 0..1000 {
+            let mut point = || Point {
+                x: Number(8.0 * f64::from(random::next(&mut seed)) / 4_294_967_296.0),
+                y: Number(4.0 * f64::from(random::next(&mut seed)) / 4_294_967_296.0),
+            };
+            let a = point();
+            let b = point();
+            assert_eq!(
+                line_clear(&grid, &bodies, &a, &b, 0.25, &mut 0).unwrap(),
+                clear(&grid, &bodies, &a, &b, 0.25, &mut 0).unwrap(),
+                "{a:?} -> {b:?}"
+            );
+        }
+        for y in [2.25, 2.75, 2.249999, 2.750001] {
+            let a = Point {
+                x: Number(2.5),
+                y: Number(y),
+            };
+            let b = Point {
+                x: Number(4.5),
+                y: Number(y),
+            };
+            assert_eq!(
+                line_clear(&grid, &[], &a, &b, 0.25, &mut 0).unwrap(),
+                clear(&grid, &[], &a, &b, 0.25, &mut 0).unwrap()
+            );
+        }
+    }
+}

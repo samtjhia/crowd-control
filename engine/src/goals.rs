@@ -870,6 +870,19 @@ impl World {
                         if g.duration.is_some_and(|d| e.elapsed.0 + dt * 1e-9 >= d.0) {
                             done = true;
                         } else if a.zone_id.as_ref() == g.inside_zone.as_ref() {
+                            if let Some(target) = &e.target_point {
+                                let mut work = 0;
+                                if !geometry::line_clear(
+                                    ctx.grid,
+                                    &[],
+                                    &a.position,
+                                    target,
+                                    a.components.physical.radius.0,
+                                    &mut work,
+                                )? {
+                                    e.target_point = None;
+                                }
+                            }
                             if a.timers
                                 .wander_refresh_remaining
                                 .is_some_and(|t| t.0 == 0.0)

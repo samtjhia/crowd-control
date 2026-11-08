@@ -575,6 +575,11 @@ export default function SimulatorApp() {
         <AccountMenu save={save} />
       </header>
 
+      {alarm && !view.completed && <div key={alarm.id} className="sim-alarm-banner" role="status">
+        <Siren size={20} aria-hidden="true" /> Alarm active · Evacuating
+      </div>}
+      {view.completed && <p className="sim-complete" role="status">Simulation complete · {formatClock(now, false)}</p>}
+
       <MapToolbar tool={tool} onTool={setTool} />
 
       <div className="sim-float sim-draw-mode" role="radiogroup" aria-label="Show people as">
@@ -797,10 +802,10 @@ function PlaybackBar({ client, view, ready, now, incidents }: {
   return (
     <section className="sim-float sim-playback" aria-label="Playback and timeline">
       <div className="sim-transport" role="toolbar" aria-label="Playback">
-        <button type="button" className="sim-play" disabled={!ready} aria-pressed={view.playing} aria-keyshortcuts="Space"
+        <button type="button" className="sim-play" disabled={!ready || view.completed} aria-pressed={view.playing} aria-keyshortcuts="Space"
           onClick={() => void (view.playing ? client.pause() : client.play())}>
           {view.playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-          {view.playing ? 'Pause' : 'Play'}
+          {view.completed ? 'Complete' : view.playing ? 'Pause' : 'Play'}
         </button>
         <button type="button" className="sim-icon-btn" disabled={!ready || view.playing} aria-label="Step one tick" aria-keyshortcuts="."
           onClick={() => void client.step(1)}><StepForward size={16} /></button>

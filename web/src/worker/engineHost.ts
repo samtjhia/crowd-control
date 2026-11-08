@@ -9,6 +9,7 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
   const handle = bindings.create_engine()
   let disposed = false
   let playing = false
+  let completed = false
   let stopLoop: (() => void) | undefined
   let simulationId = 'unknown'
   let dt = 0.05
@@ -37,6 +38,10 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
     if (messages.some((m) => m.type === 'ack')) owedTicks -= ticks
     else stop()
     for (const message of messages) {
+      if (message.type === 'metrics') completed = message.completed ?? false
+    }
+    if (completed) { stop(); owedTicks = 0 }
+    for (const message of messages) {
       // Internal stepping has no UI command awaiting acknowledgement.
       if (message.type === 'error') { const { commandId: _id, ...error } = message; publish(error) }
       else if (message.type !== 'ack') {
@@ -62,6 +67,10 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
       if (disposed) throw new Error('Engine host is disposed')
       if (playing) pulse()
       const messages = dispatchCommand(bindings, handle, raw)
+      for (const message of messages) {
+        if (message.type === 'metrics') completed = message.completed ?? false
+      }
+      if (completed) { stop(); owedTicks = 0 }
       if (messages.some((m) => m.type === 'ack')) {
         // A successful dispatch has already validated this command at both boundaries.
         const command = raw as WorkerCommand
@@ -69,9 +78,9 @@ export function createEngineHost(bindings: WasmEngineBindings, publish: (message
           case 'load':
           case 'reset':
             if (command.type === 'load') { simulationId = command.simulationId; dt = command.compiled.scene.model.dt }
-            stop(); owedTicks = 0; tickCostMs = 0; multiplier = 1; last = clock.now(); lastDensityAt = last; break
+            stop(); completed = messages.some((m) => m.type === 'metrics' && m.completed === true); owedTicks = 0; tickCostMs = 0; multiplier = 1; last = clock.now(); lastDensityAt = last; break
           case 'resume':
-            if (!playing) { last = clock.now(); playing = true; stopLoop = clock.every(1000 / 60, pulse) }
+            if (!playing && !completed) { last = clock.now(); playing = true; stopLoop = clock.every(1000 / 60, pulse) }
             break
           case 'pause': stop(); break
           case 'speed': multiplier = command.multiplier; break

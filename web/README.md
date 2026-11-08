@@ -44,17 +44,41 @@ and wandering, without queue/service behavior. Use `/sim?engine=real` for Rust;
 Regressions cover departure/reset, sprite destruction, repeated cache churn and
 large zoom textures, preserved playback debt, and expensive-tick batch reduction.
 
-### Current movement and rendering (v8.3)
+### Current movement and rendering (v8.5)
 
-- Blend downhill flow directions in open space; retain validated near-goal,
-  terrain and delayed-portal waypoints. Door guidance uses the full body-clear
-  opening and aligns sideways without sending agents backward. Swept collision,
-  one-way, stop-distance and queue/interaction constraints remain enforced.
+- Flow fields cache the next portal. In visible rooms, reach goals steer directly
+  toward the nearest point across its body-clear opening, including from farther
+  than eight grid steps away for wide openings. Narrow doors keep their existing
+  approach. Preserve each person's lateral
+  lane. Hidden doors retain field routing; terrain, delays, one-way access, stop
+  distances and queue/interaction constraints still apply. Timed doors preserve
+  lateral lanes after their entry wait, avoiding centre-waypoint jams inside them.
+- Long planning rays check a strip of cells with exact swept-disc checks. Physical
+  collision checks remain unchanged. No per-frame random jitter or overlap is added.
+- Reach goals aimed at gates also use separate points across the opening. When
+  traversing an intermediate gate, continue past its far edge before turning.
+- School/concert alarm rules use seeded 0.5/1.5/2.5 s wait cohorts followed by
+  evacuation at normal walking speed. These are authored demo behavior, not an
+  engine-wide panic response. At 8×, eight simulated seconds pass per wall second.
+- Real metrics messages include `completed`. It is true only when agents have
+  departed or finished finite goals (with empty goal queues), and no runtime work
+  remains. Idle/no-goal agents, blocked goals, future jobs, active rules and endless
+  wandering prevent completion. Automatic playback stops, discards leftover clock
+  debt and shows Complete; reset or new work allows another run. Manual stepping
+  and `run_to` retain their explicit clock semantics.
+- Restore the alarm glow with a static shadow and opacity-only pulse, plus a
+  persistent screen-centred alarm banner. The completion banner replaces it.
+- Pixi requests high-performance WebGL and renders uncapped on browser animation
+  frames; only the heatmap has a 30 Hz cap. Debug mode measures browser RAF FPS
+  separately from Pixi FPS. The 60 FPS target still needs a real browser measurement;
+  browser/device power settings and GPU load can limit either rate.
 - Hard-exclusion motion advances front agents first, rotating ties. Predict
   followers against already-updated neighbour velocities; contact solving keeps
   its simultaneous order. Empty contact scenes can continue advancing.
 - Demo wandering is indefinite and refreshes targets every six seconds, including
-  arrivals after reaching the hall. An explicit no-goal/clear-goal means idle.
+  arrivals after reaching the hall. Recheck target visibility and immediately
+  resample when furniture blocks it; crowd avoidance alone does not cause a
+  resample. An explicit no-goal/clear-goal means idle.
 - Reuse Pixi geometry across moving/waiting/idle/reacting transitions. Pose changes
   animate; meaningful annotations and appearance changes still restyle. Alarm
   pulses animate opacity, without a map-sized animated shadow.
@@ -62,7 +86,8 @@ large zoom textures, preserved playback debt, and expensive-tick batch reduction
   Wasm asset URLs include the engine version. Rebuild and fully reload to update
   Rust; Reset only restarts the loaded instance.
 
-Regressions check two body-width lanes through a one-unit door, zero graphics
+Regressions check distinct distant doorway approach headings, two body-width
+lanes through a one-unit door, blocked wander target recovery, zero graphics
 rebuilds for 1,000 stop/start transitions, and continuing hackathon wandering.
 School classrooms must clear by 60 s and all 192 people by 120 s. Concert seeds
 7/99 must increase departures at each 30 s sample after 90 s and finish by 300 s.

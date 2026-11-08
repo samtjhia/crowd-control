@@ -44,6 +44,7 @@ export type SimulationView = {
   density: DensityGrid | null
   events: EventRecord[]
   playing: boolean
+  completed: boolean
   speed: number
   lastError: ContractError | null
   /** Changes applied in this stream; cleared when a new stream starts (load or reset). */
@@ -101,7 +102,7 @@ export class SimulationClient {
     this.scheduleNotification = scheduleNotification
     this.view = {
       endpointKind: endpoint.kind, simulationId: null, streamId: null, scene: null, sceneVersion: 0, historyRevision: 0,
-      current: null, previous: null, metrics: null, density: null, events: [], playing: false, speed: 1, lastError: null, changes: [],
+      current: null, previous: null, metrics: null, density: null, events: [], playing: false, completed: false, speed: 1, lastError: null, changes: [],
     }
     this.detach = endpoint.subscribe((message) => this.receive(message))
   }
@@ -207,7 +208,7 @@ export class SimulationClient {
       case 'metrics':
         if (this.acceptTelemetry(message.stamp) && message.stamp.tick >= this.metricsTick && message.stamp.tick >= (this.view.current?.frame.tick ?? 0)) {
           this.metricsTick = message.stamp.tick
-          this.update({ metrics: message.sample, density: message.density ?? this.view.density })
+          this.update({ metrics: message.sample, density: message.density ?? this.view.density, completed: message.completed ?? false, ...(message.completed ? { playing: false } : {}) })
         }
         return
       case 'events':
@@ -227,7 +228,7 @@ export class SimulationClient {
     if (!entry) return
     this.pending.delete(commandId)
     if (message.type === 'ack') {
-      if (entry.type === 'resume') this.update({ playing: true })
+      if (entry.type === 'resume') this.update({ playing: !this.view.completed })
       if (entry.type === 'pause' || entry.type === 'load' || entry.type === 'reset') this.update({ playing: false })
       if (entry.type === 'speed' && entry.multiplier !== undefined) this.update({ speed: entry.multiplier })
     }
@@ -244,7 +245,7 @@ export class SimulationClient {
       if (this.view.streamId) this.retired.add(this.view.streamId)
       // A new stream (load or reset) has its own history: a reset goes back to the initial
       // revision, so the old stream's higher revision must not make its frames look stale.
-      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [], historyRevision })
+      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [], completed: false, historyRevision })
     } else if (sceneVersion < this.view.sceneVersion) {
       return
     }

@@ -165,5 +165,12 @@ Part eight registers disc-impulse-v1 config/state schemas in contact.ts. Non-nul
 solver state validates by default for that version; custom schemas remain available
 for other registered integrations. PendingJob.subjectId is an optional runtime
 eligibility guard. Entity-rule progress remains in RuleRuntime.subjects; captured
-schedule children use stable IDs. Engine version is contact-engine-v8.3, schema/ABI
+schedule children use stable IDs. Engine version is contact-engine-v8.5, schema/ABI
 stay 1. engine-contact-load.json is the complete compression/recovery example.
+
+Real engine metrics messages include optional `completed: boolean` (legacy/mock
+messages may omit it). Completion requires no pending jobs/rules and all agents
+departed or terminal finite goals with empty queues; no-goal and endless wandering
+scenes remain live. The worker stops automatic ticking on true; the client clears
+its playing state and displays completion. Stale completion follows the same stamp
+checks as other metrics. Reset or later applied work recomputes completion.

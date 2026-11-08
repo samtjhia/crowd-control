@@ -188,3 +188,22 @@ test('many worker publications produce one view notification per paint without d
   paints.shift()!()
   assert.equal(notifications, 1, 'unmounted views receive no late paint notification')
 })
+
+test('completion pauses the UI, ignores stale completion and clears on reset', async () => {
+  const endpoint = createMockEndpoint({ clock: idleClock })
+  let emit: ((message: WorkerMessage) => void) | undefined
+  const proxy: WorkerEndpoint = { kind: 'mock', send: (c) => endpoint.send(c), subscribe(listener) { emit = listener; return endpoint.subscribe(listener) } }
+  const client = new SimulationClient(proxy)
+  await client.load(compiled)
+  await client.play()
+  const view = client.getView()
+  const stamp = view.current!.frame
+  const message: WorkerMessage = { schemaVersion: 1, simulationId: compiled.scene.simulationId, type: 'metrics', stamp: { streamId: stamp.streamId, tick: stamp.tick, time: stamp.time, topologyVersion: stamp.topologyVersion, sceneVersion: stamp.sceneVersion, historyRevision: stamp.historyRevision }, sample: view.metrics!, completed: true }
+  emit!(message)
+  assert.equal(client.getView().playing, false)
+  assert.equal(client.getView().completed, true)
+  await client.play(); assert.equal(client.getView().playing, false)
+  await client.reset(); assert.equal(client.getView().completed, false)
+  emit!(message); assert.equal(client.getView().completed, false)
+  client.dispose(); endpoint.dispose()
+})

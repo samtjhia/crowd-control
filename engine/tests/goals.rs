@@ -526,3 +526,30 @@ fn large_goal_batches_are_rejected_before_cloning_runtime_trees() {
     assert_eq!(result[0]["error"]["code"], "RESOURCE_LIMIT");
     assert_eq!(state(&mut e), before);
 }
+
+#[test]
+fn obstructed_wander_retargets_before_its_refresh_timer() {
+    let mut e = init(base(
+        json!({"kind":"wander","insideZone":"hall","changeTargetEvery":600}),
+    ));
+    step(&mut e, 1);
+    let before = state(&mut e);
+    let target = &before["agents"][0]["currentGoal"]["execution"]["targetPoint"];
+    let tx = target["x"].as_f64().unwrap().floor();
+    let ty = target["y"].as_f64().unwrap().floor();
+    apply(
+        &mut e,
+        "block-target",
+        json!([{"op":"add","entity":{"id":"table","kind":"barrier","shape":{"kind":"rectangle","x":tx,"y":ty,"width":1,"height":1}}}]),
+    );
+    step(&mut e, 180);
+    let after = state(&mut e);
+    assert_ne!(
+        after["agents"][0]["randomState"], before["agents"][0]["randomState"],
+        "must retarget instead of pushing at furniture for 600 seconds"
+    );
+    assert_ne!(
+        after["agents"][0]["currentGoal"]["execution"]["targetPoint"],
+        *target
+    );
+}

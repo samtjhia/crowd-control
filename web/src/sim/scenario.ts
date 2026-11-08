@@ -147,9 +147,17 @@ const spawn = (count: number, zone: string, tags: string[], fill: string, symbol
   ({ op: 'spawn', template: { kind: 'agent', tags, appearance: { fill, symbol } }, count, placement: { inside: inside(zone) } })
 const assign = (tag: string, goal: Extract<Operation, { op: 'assign_goal' }>['goal']): Operation => ({ op: 'assign_goal', targets: { kind: 'agent' as const, tags: [tag] }, goal })
 const alarmAt = (at: number) => [{ op: 'schedule' as const, id: 'alarm', at, operations: [{ op: 'emit' as const, event: { name: 'alarm' } }] }]
-const evacuate = (tag: string, target: { tags: string[] } | { ids: string[] }, urgency = 0) => [{
-  op: 'define_rule' as const, id: 'evacuate', when: { kind: 'event' as const, name: 'alarm' }, once: true,
-  operations: [{ op: 'assign_goal' as const, targets: { kind: 'agent' as const, tags: [tag] }, goal: { kind: 'reach' as const, target, selection: 'lowest-cost' as const, departOnArrival: true, urgency } }],
+const evacuate = (tag: string, target: { tags: string[] } | { ids: string[] }): ScenarioPlan['rules'] => [{
+  op: 'define_rule', id: 'evacuate', when: { kind: 'event', name: 'alarm' }, once: true,
+  operations: [{ delay: 0.5 }, { delay: 1.5, fraction: 2 / 3 }, { delay: 2.5, fraction: 1 / 3 }].map(({ delay, fraction }) => ({
+    op: 'assign_goal' as const,
+    targets: { kind: 'agent' as const, tags: [tag], ...(fraction === undefined ? {} : { sample: { fraction } }) },
+    goal: { kind: 'sequence' as const, goals: [
+      { kind: 'wait' as const, duration: delay },
+      { kind: 'reach' as const, target, selection: 'lowest-cost' as const, departOnArrival: true },
+    ] },
+  })),
+}]
 }]
 const lookup = (venue: string, floor: string) => ({ mode: 'lookup' as const, venue, floor })
 const header = (simulationId: string) => ({ schemaVersion: 1 as const, simulationId, seed: 42 })
@@ -196,7 +204,7 @@ export function scenarios(workedPlan: ScenarioPlan, workedModel: ModelPreset): S
           // The bar crowd takes turns at the counter (four served at once), then mills about.
           assign('at-bar', { kind: 'sequence', repeat: 5, goals: [{ kind: 'interact', target: inside('bar_counter') }, { kind: 'wander', inside: inside('bar'), changeTargetEvery: 6, duration: 20 }] }),
         ],
-        timeline: alarmAt(45), rules: evacuate('audience', { tags: ['outside'] }, 0.4),
+        timeline: alarmAt(45), rules: evacuate('audience', { tags: ['outside'] }),
       },
     },
     {

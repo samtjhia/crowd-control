@@ -378,15 +378,31 @@ test('prepared fire drill, concert and hackathon demos finish their advertised b
         const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(command)))
         assert.ok(messages.every((m) => m.type !== 'error'))
       }
+      if (scenario.id === 'concert-floor') {
+        const advanced: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('run_to', { time: 46 }))))
+        assert.ok(advanced.every((m) => m.type !== 'error'))
+        const response: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'reacting' }))))
+        const report = response.find((m) => m.type === 'snapshot')
+        assert.ok(report?.type === 'snapshot')
+        const waiting = report.snapshot.agents.filter((a) => a.currentGoal?.cursor[0]?.childIndex === 0)
+        assert.ok(waiting.length > 0 && waiting.length < 430, 'seeded reaction waits stagger the response instead of changing everyone at once')
+        assert.equal(new Set(report.snapshot.agents.map((a) => {
+          const spec = a.currentGoal?.spec
+          return spec?.kind === 'sequence' && spec.goals[0]?.kind === 'wait' ? spec.goals[0].duration : null
+        })).size, 3)
+      }
       if (scenario.id === 'school-wing') {
         const reports: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'classrooms-clear' }))))
         const report = reports.find((m) => m.type === 'snapshot')
         assert.ok(report?.type === 'snapshot')
-        assert.ok(report.snapshot.agents.every((a) => !a.zoneId?.startsWith('room_')), 'every classroom empties by 60 seconds, rather than waiting out a long completion budget')
+        assert.ok(report.snapshot.agents.every((a) => !a.zoneId?.startsWith('room_')), 'every classroom empties by 60 seconds, including the new 0.5–2.5 second reaction waits')
       }
       for (const command of [h('run_to', { time: scenario.id === 'school-wing' ? 120 : scenario.id === 'concert-floor' ? 300 : scenario.id === 'hillside-alley' ? 180 : 600 })]) {
         const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(command)))
         assert.ok(messages.every((m) => m.type !== 'error'), `${scenario.id}: ${JSON.stringify(messages.find((m) => m.type === 'error'))}`)
+        const metrics = messages.find((m) => m.type === 'metrics')
+        assert.ok(metrics?.type === 'metrics')
+        assert.equal(metrics.completed, ['school-wing', 'concert-floor'].includes(scenario.id), 'only finite, finished scenarios complete')
       }
       const messages: WorkerMessage[] = JSON.parse(bindings.dispatch(handle, JSON.stringify(h('snapshot', { snapshotId: 'finished' }))))
       const snapshot = messages.find((m) => m.type === 'snapshot')

@@ -146,7 +146,7 @@ export class CrowdRenderer {
   static async create(host: HTMLElement, client: SimulationClient, options: RendererOptions = {}): Promise<CrowdRenderer> {
     const app = new Application()
     await app.init({
-      resizeTo: host, antialias: true, preference: 'webgl',
+      resizeTo: host, antialias: true, preference: 'webgl', powerPreference: 'high-performance',
       ...(options.background ? { background: options.background } : { backgroundAlpha: 0 }),
       resolution: window.devicePixelRatio || 1, autoDensity: true,
     })
@@ -154,6 +154,7 @@ export class CrowdRenderer {
   }
 
   private constructor(app: Application, host: HTMLElement, client: SimulationClient, options: RendererOptions) {
+    app.ticker.maxFPS = 0 // Render on every browser animation frame, independently of worker/heatmap rates.
     this.app = app
     this.client = client
     this.options = options

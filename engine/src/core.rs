@@ -1,7 +1,7 @@
 use crate::{protocol::*, world::World};
 use serde_json::{Value, json};
 
-pub const ENGINE_VERSION: &str = "contact-engine-v8.3";
+pub const ENGINE_VERSION: &str = "contact-engine-v8.5";
 pub const ABI_VERSION: u32 = 1;
 pub const MAX_TICKS_PER_COMMAND: u64 = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -225,7 +225,7 @@ impl Engine {
         let mut frame = self.stamp();
         frame["agents"] = world.frame_agents();
         out.push(json!({"schemaVersion":1,"simulationId":simulation,"type":"frame","frame":frame}));
-        let mut metrics = json!({"schemaVersion":1,"simulationId":simulation,"type":"metrics","stamp":self.stamp(),"sample":world.metric_sample()});
+        let mut metrics = json!({"schemaVersion":1,"simulationId":simulation,"type":"metrics","stamp":self.stamp(),"sample":world.metric_sample(),"completed":world.completed()});
         if scene
             || self
                 .published_density_tick

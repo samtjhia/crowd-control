@@ -130,15 +130,22 @@ test('a scenario the assistant wrote gets a simulation ID of its own, once', asy
   assert.equal(ownSimulationId(own), own, 'an ID it already has is kept')
 })
 
-test('evacuation demos select agents despite shared room tags and explicitly depart', () => {
+test('evacuation demos use seeded reaction cohorts and normal walking speed', () => {
   for (const id of ['school-wing', 'concert-floor']) {
     const scenario = all.find((s) => s.id === id)!
-    const operation = scenario.plan.rules[0]!.operations[0]!
-    assert.equal(operation.op, 'assign_goal')
-    if (operation.op !== 'assign_goal') throw new Error('expected evacuation')
-    assert.equal('kind' in operation.targets && operation.targets.kind, 'agent')
-    assert.equal(operation.goal.kind === 'reach' && operation.goal.departOnArrival, true)
-    if (operation.goal.kind === 'reach') assert.equal(operation.goal.urgency, id === 'concert-floor' ? 0.4 : 0)
+    const operations = scenario.plan.rules[0]!.operations
+    assert.equal(operations.length, 3)
+    for (const [i, operation] of operations.entries()) {
+      assert.equal(operation.op, 'assign_goal')
+      if (operation.op !== 'assign_goal') throw new Error('expected evacuation')
+      assert.equal('kind' in operation.targets && operation.targets.kind, 'agent')
+      assert.equal(operation.goal.kind, 'sequence')
+      if (operation.goal.kind !== 'sequence') throw new Error('expected reaction followed by evacuation')
+      assert.deepEqual(operation.goal.goals[0], { kind: 'wait', duration: [0.5,1.5,2.5][i] })
+      const reach = operation.goal.goals[1]!
+      assert.equal(reach.kind === 'reach' && reach.departOnArrival, true)
+      if (reach.kind === 'reach') assert.equal(reach.urgency ?? 0, 0)
+    }
   }
 })
 

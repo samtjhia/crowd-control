@@ -40,6 +40,17 @@ pub struct World {
 }
 
 impl World {
+    pub fn completed(&self) -> bool {
+        (!self.agents.is_empty() || self.removed_count > 0)
+            && !self.has_runtime_work()
+            && self.agents.iter().all(|a| {
+                a.departed_at.is_some()
+                    || (a.goal_queue.is_empty()
+                        && a.current_goal
+                            .as_ref()
+                            .is_some_and(|g| matches!(g.status.as_str(), "completed" | "failed")))
+            })
+    }
     pub fn load(initial: Compiled, simulation_id: &Id) -> Result<Self, Failure> {
         let s = &initial.scene;
         let model = &initial.resolved_model;

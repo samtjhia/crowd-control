@@ -31,7 +31,7 @@ export const WorkerMessageSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...messageHeader, type: z.literal('ack'), commandId: IdSchema, stamp: StampSchema, applied: ApplyAckSchema.optional() }),
   z.strictObject({ ...messageHeader, type: z.literal('error'), commandId: IdSchema.optional(), error: ContractErrorSchema }),
   z.strictObject({ ...messageHeader, type: z.literal('frame'), frame: FrameSchema }), z.strictObject({ ...messageHeader, type: z.literal('scene'), stamp: StampSchema, scene: RenderSceneSchema }),
-  z.strictObject({ ...messageHeader, type: z.literal('metrics'), stamp: StampSchema, sample: MetricSampleSchema, density: DensityGridSchema.optional() }), z.strictObject({ ...messageHeader, type: z.literal('events'), stamp: StampSchema, events: z.array(EventRecordSchema) }),
+  z.strictObject({ ...messageHeader, type: z.literal('metrics'), stamp: StampSchema, sample: MetricSampleSchema, completed: z.boolean().optional(), density: DensityGridSchema.optional() }), z.strictObject({ ...messageHeader, type: z.literal('events'), stamp: StampSchema, events: z.array(EventRecordSchema) }),
   z.strictObject({ ...messageHeader, type: z.literal('query_result'), commandId: IdSchema, stamp: StampSchema, result: ReadReplySchema }), z.strictObject({ ...messageHeader, type: z.literal('snapshot'), commandId: IdSchema, snapshot: EngineSnapshotSchema }),
 ]).refine((v) => v.type !== 'snapshot' || v.snapshot.simulationId === v.simulationId, 'Snapshot simulationId mismatch');
 export type ReadReply = z.infer<typeof ReadReplySchema>;
