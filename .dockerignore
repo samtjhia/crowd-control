@@ -13,6 +13,5 @@ docs
 .github
 *.log
 .DS_Store
-deploy
 Dockerfile
 docker-compose.yml
