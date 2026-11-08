@@ -46,9 +46,9 @@ fn navigates_around_wall_without_cutting_corners_or_inventing_departures() {
         let x = a["position"]["x"].as_f64().unwrap();
         let y = a["position"]["y"].as_f64().unwrap();
         assert!((1.2..=6.8).contains(&x) && (1.2..=2.8).contains(&y));
-        if x > 2.8 && x < 4.2 {
-            assert!(y >= 2.2, "corner cut: {x},{y}");
-        }
+        let dx = (3.0 - x).max(0.0).max(x - 4.0);
+        let dy = (1.0 - y).max(0.0).max(y - 2.0);
+        assert!(dx.hypot(dy) >= 0.2 - 1e-8, "corner cut: {x},{y}");
         assert_eq!(a["currentGoal"]["id"], goal);
     }
     let s = snapshot(&mut e);
@@ -414,4 +414,175 @@ fn recorded_request_memory_is_bounded_without_mutating_the_world() {
     c["request"] = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"too-large","label":"x".repeat(2*1024*1024),"operations":[{"op":"set","targets":{"ids":["door"]},"values":{"components":{"portal":{"open":false}}}}]});
     assert_eq!(send(&mut e, c)[0]["error"]["code"], "RESOURCE_LIMIT");
     assert_eq!(snapshot(&mut e), before);
+}
+
+#[test]
+fn doorway_guidance_uses_both_body_width_lanes_in_a_one_unit_opening() {
+    let mut v = load();
+    v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
+    let mut a = v["compiled"]["scene"]["agents"][0].clone();
+    a["x"] = json!(2.5);
+    a["y"] = json!(2.25);
+    a["components"] = json!({"physical":{"radius":0.25}});
+    let mut b = a.clone();
+    b["id"] = json!("a2");
+    b["y"] = json!(2.75);
+    v["compiled"]["scene"]["agents"] = json!([a, b]);
+    let mut e = init(v);
+    step(&mut e, 80);
+    let s = snapshot(&mut e);
+    for (i, a) in s["agents"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(a["state"], "departed", "{}", s["agents"]);
+        assert!(
+            (a["position"]["y"].as_f64().unwrap() - (2.25 + i as f64 * 0.5)).abs() < 1e-6,
+            "body-clear edge lanes must not converge onto a shared cell centre: {a}"
+        );
+    }
+}
+
+#[test]
+fn distant_agents_approach_a_wide_door_with_distinct_continuous_headings() {
+    let mut v = load();
+    v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
+    let (w, h) = (32, 12);
+    let mut blocked = vec![0; w * h];
+    let mut zones = vec![0; w * h];
+    let mut portals = vec![0; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 || (x == 20 && !(3..9).contains(&y)) {
+                blocked[i] = 1;
+            } else if x == 20 {
+                portals[i] = 1;
+            } else {
+                zones[i] = if x < 20 { 1 } else { 2 };
+            }
+        }
+    }
+    v["compiled"]["scene"]["map"] = json!({"width":w,"height":h,"cellSize":1,"units":"model",
+        "rooms":[{"id":"hall","x":1,"y":1,"width":19,"height":10},{"id":"outside","x":21,"y":1,"width":10,"height":10}],
+        "portals":[{"id":"door","connects":["hall","outside"],"x":20,"y":3,"width":1,"height":6,"open":true}],
+        "grid":{"width":w,"height":h,"cellSize":1,"units":"model","blocked":blocked,"zoneIndex":zones,"portalIndex":portals,
+        "traversalCost":vec![1;w*h],"zoneIds":[null,"hall","outside"],"portalIds":[null,"door"]}});
+    let template = v["compiled"]["scene"]["agents"][0].clone();
+    v["compiled"]["scene"]["agents"] = Value::Array(
+        (0..4)
+            .map(|i| {
+                let mut a = template.clone();
+                a["id"] = json!(format!("a{i}"));
+                a["x"] = json!(3.5);
+                a["y"] = json!([1.5, 2.25, 9.25, 10.0][i]);
+                a
+            })
+            .collect(),
+    );
+    let mut e = init(v);
+    step(&mut e, 1);
+    let s = snapshot(&mut e);
+    let headings: Vec<f64> = s["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| {
+            let vx = a["velocity"]["x"].as_f64().unwrap();
+            assert!(vx > 0.0, "{a}");
+            a["velocity"]["y"].as_f64().unwrap() / vx
+        })
+        .collect();
+    for pair in headings.windows(2) {
+        assert!(
+            (pair[0] - pair[1]).abs() > 0.001,
+            "shared grid headings: {headings:?}"
+        );
+    }
+    step(&mut e, 800);
+    for a in snapshot(&mut e)["agents"].as_array().unwrap() {
+        assert_eq!(a["state"], "departed", "{a}");
+    }
+}
+
+#[test]
+fn agents_inside_a_timed_door_keep_separate_lanes_after_entry_wait() {
+    let mut v = load();
+    v["compiled"]["scene"]["map"]["portals"][0]["traversalTime"] = json!(4);
+    v["compiled"]["scene"]["controllers"]["leave"]["departOnArrival"] = json!(true);
+    let mut a = v["compiled"]["scene"]["agents"][0].clone();
+    a["x"] = json!(3.5);
+    a["y"] = json!(2.25);
+    a["components"] = json!({"physical":{"radius":0.25}});
+    let mut b = a.clone();
+    b["id"] = json!("a2");
+    b["y"] = json!(2.75);
+    v["compiled"]["scene"]["agents"] = json!([a, b]);
+    let mut e = init(v);
+    step(&mut e, 80);
+    for (i, a) in snapshot(&mut e)["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(a["state"], "departed", "{a}");
+        assert!(
+            (a["position"]["y"].as_f64().unwrap() - (2.25 + i as f64 * 0.5)).abs() < 1e-6,
+            "{a}"
+        );
+    }
+}
+
+#[test]
+fn reaching_a_gate_uses_separate_points_across_its_width() {
+    let mut v = load();
+    v["compiled"]["scene"]["controllers"]["leave"] =
+        json!({"kind":"reach","targetEntityId":"door"});
+    let mut a = v["compiled"]["scene"]["agents"][0].clone();
+    a["x"] = json!(2.5);
+    a["y"] = json!(2.25);
+    a["components"] = json!({"physical":{"radius":0.25}});
+    let mut b = a.clone();
+    b["id"] = json!("a2");
+    b["y"] = json!(2.75);
+    v["compiled"]["scene"]["agents"] = json!([a, b]);
+    let mut e = init(v);
+    step(&mut e, 100);
+    for (i, a) in snapshot(&mut e)["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(a["currentGoal"]["status"], "completed", "{a}");
+        assert!(
+            (a["position"]["y"].as_f64().unwrap() - (2.25 + i as f64 * 0.5)).abs() < 1e-6,
+            "{a}"
+        );
+        assert_eq!(a["zoneId"], Value::Null);
+    }
+}
+
+#[test]
+fn completion_waits_for_future_work_and_excludes_continuous_goals() {
+    let mut e = init(load());
+    let mut request = command("apply_request");
+    request["request"] = json!({"schemaVersion":1,"simulationId":"engine-demo","requestId":"future","operations":[{"op":"schedule","id":"later","at":30,"operations":[{"op":"emit","event":{"name":"later"}}]}]});
+    assert_eq!(send(&mut e, request)[0]["type"], "ack");
+    let out = step(&mut e, 400);
+    assert_eq!(
+        out.iter().find(|m| m["type"] == "metrics").unwrap()["completed"],
+        false
+    );
+    let out = step(&mut e, 220);
+    assert_eq!(
+        out.iter().find(|m| m["type"] == "metrics").unwrap()["completed"],
+        true
+    );
+    let mut v = load();
+    v["compiled"]["scene"]["controllers"]["leave"] = json!({"kind":"wander","insideZone":"hall"});
+    let mut e = init(v);
+    let out = step(&mut e, 100);
+    assert_eq!(
+        out.iter().find(|m| m["type"] == "metrics").unwrap()["completed"],
+        false
+    );
 }

@@ -176,7 +176,12 @@ fn crossing_streams_steer_without_overlap_and_complete_their_goals() {
                     "overlap: {agents:?}"
                 );
             }
-            if a["id"] == "e" && (y(a) - 5.5).abs() > 0.1 {
+            let lateral = if a["id"] == "e" || a["id"] == "w" {
+                (y(a) - 5.5).abs()
+            } else {
+                (x(a) - 16.5).abs()
+            };
+            if lateral > 0.1 {
                 deflected = true;
             }
         }
@@ -209,7 +214,8 @@ fn immobility_anchors_a_body_suspends_timers_and_explicit_recovery_retains_inten
     assert_eq!(body["appearance"]["pose"], "fallen");
     assert!(
         x(&s["agents"][0]) > 8.0,
-        "moving agent must route around the body"
+        "moving agent must route around the body: {}",
+        s["agents"]
     );
     let recovered = change(&mut e, "recover", vec!["body"], 1.0);
     assert_eq!(recovered[0]["type"], "ack");
@@ -297,4 +303,33 @@ fn crossing_motion_is_independent_of_batching_and_input_order() {
     assert_eq!(one, two);
     assert_eq!(one["agents"], three["agents"]);
     assert_eq!(one["random"], three["random"]);
+}
+
+#[test]
+fn valid_wall_tangent_start_joins_a_nearby_clearance_cell() {
+    let mut a = agent("a", 1.6, 1.6, "east");
+    a["components"] = json!({"physical":{"radius":0.6}});
+    let mut v = input(vec![a]);
+    // The destination must also fit this larger body.
+    for row in 1..11 {
+        v["compiled"]["scene"]["map"]["grid"]["zoneIndex"][row * 32 + 29] = json!(2);
+    }
+    let mut e = load(v);
+    step(&mut e, 200);
+    let s = snapshot(&mut e);
+    assert!(x(&s["agents"][0]) > 6.0, "{}", s["agents"]);
+}
+
+#[test]
+fn open_flow_preserves_parallel_lanes_instead_of_snapping_people_to_cell_centres() {
+    let mut e = load(input(vec![
+        agent("a", 3.2, 4.2, "east"),
+        agent("b", 3.2, 7.8, "east"),
+    ]));
+    step(&mut e, 40);
+    let s = snapshot(&mut e);
+    assert!(x(&s["agents"][0]) > 4.0);
+    assert!(x(&s["agents"][1]) > 4.0);
+    assert!((y(&s["agents"][0]) - 4.2).abs() < 1e-8, "{}", s["agents"]);
+    assert!((y(&s["agents"][1]) - 7.8).abs() < 1e-8, "{}", s["agents"]);
 }

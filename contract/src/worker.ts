@@ -17,7 +17,7 @@ export const WorkerCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...commandHeader, type: z.literal('pause') }), z.strictObject({ ...commandHeader, type: z.literal('resume') }),
   z.strictObject({ ...commandHeader, type: z.literal('step'), ticks: PositiveIntegerSchema }), z.strictObject({ ...commandHeader, type: z.literal('speed'), multiplier: PositiveSchema }),
   z.strictObject({ ...commandHeader, type: z.literal('query'), query: ReadQuerySchema }), z.strictObject({ ...commandHeader, type: z.literal('snapshot'), snapshotId: IdSchema }),
-  z.strictObject({ ...commandHeader, type: z.literal('restore'), snapshot: EngineSnapshotSchema }), z.strictObject({ ...commandHeader, type: z.literal('run_to'), time: SimTimeSchema }),
+  z.strictObject({ ...commandHeader, type: z.literal('restore'), snapshot: EngineSnapshotSchema }), z.strictObject({ ...commandHeader, type: z.literal('run_to'), time: SimTimeSchema }), z.strictObject({ ...commandHeader, type: z.literal('seek'), time: SimTimeSchema }),
 ]).refine((v) => (v.type !== 'load' || v.compiled.scene.simulationId === v.simulationId) && (v.type !== 'apply_request' || v.request.simulationId === v.simulationId) && (v.type !== 'restore' || v.snapshot.simulationId === v.simulationId), 'Nested simulationId must match command');
 export const StampSchema = z.strictObject({ streamId: IdSchema, tick: TickSchema, time: SimTimeSchema, topologyVersion: CounterSchema, sceneVersion: CounterSchema, historyRevision: CounterSchema });
 export const FrameAgentSchema = z.strictObject({ id: IdSchema, x: FiniteSchema, y: FiniteSchema, profile: IdSchema, controller: IdSchema.nullable(), state: AgentStateSchema });
@@ -31,7 +31,7 @@ export const WorkerMessageSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...messageHeader, type: z.literal('ack'), commandId: IdSchema, stamp: StampSchema, applied: ApplyAckSchema.optional() }),
   z.strictObject({ ...messageHeader, type: z.literal('error'), commandId: IdSchema.optional(), error: ContractErrorSchema }),
   z.strictObject({ ...messageHeader, type: z.literal('frame'), frame: FrameSchema }), z.strictObject({ ...messageHeader, type: z.literal('scene'), stamp: StampSchema, scene: RenderSceneSchema }),
-  z.strictObject({ ...messageHeader, type: z.literal('metrics'), stamp: StampSchema, sample: MetricSampleSchema, density: DensityGridSchema.optional() }), z.strictObject({ ...messageHeader, type: z.literal('events'), stamp: StampSchema, events: z.array(EventRecordSchema) }),
+  z.strictObject({ ...messageHeader, type: z.literal('metrics'), stamp: StampSchema, sample: MetricSampleSchema, completed: z.boolean().optional(), density: DensityGridSchema.optional() }), z.strictObject({ ...messageHeader, type: z.literal('events'), stamp: StampSchema, events: z.array(EventRecordSchema) }),
   z.strictObject({ ...messageHeader, type: z.literal('query_result'), commandId: IdSchema, stamp: StampSchema, result: ReadReplySchema }), z.strictObject({ ...messageHeader, type: z.literal('snapshot'), commandId: IdSchema, snapshot: EngineSnapshotSchema }),
 ]).refine((v) => v.type !== 'snapshot' || v.snapshot.simulationId === v.simulationId, 'Snapshot simulationId mismatch');
 export type ReadReply = z.infer<typeof ReadReplySchema>;
@@ -48,4 +48,5 @@ export type WorkerEndpoint = {
   kind: 'real' | 'mock';
   send(command: WorkerCommand): void;
   subscribe(listener: (message: WorkerMessage) => void): () => void;
+  dispose?(): void;
 };

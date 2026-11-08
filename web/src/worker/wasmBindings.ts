@@ -1,6 +1,6 @@
 import { ABI_VERSION, type WasmEngineBindings } from '@crowd-control/contract'
 
-export const ENGINE_VERSION = 'contact-engine-v8'
+export const ENGINE_VERSION = 'contact-engine-v8.6'
 type RawExports = WebAssembly.Exports & {
   memory: WebAssembly.Memory
   abi_version(): number
@@ -59,7 +59,7 @@ export async function instantiateEngine(bytes: BufferSource): Promise<WasmEngine
 }
 
 export async function loadWasmEngine(url: string): Promise<WasmEngineBindings> {
-  const response = await fetch(url)
+  const response = await fetch(url, { cache: 'no-cache' })
   if (!response.ok) throw new Error(`Cannot load engine (${response.status}); run npm run build:wasm`)
   return instantiateEngine(await response.arrayBuffer())
 }

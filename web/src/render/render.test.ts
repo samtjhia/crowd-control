@@ -123,3 +123,12 @@ test('display positions interpolate within a stream and never across a reset', (
   assert.equal(displayPositions(previous, current, 200).get('a1')!.x, 1)
   assert.equal(displayPositions({ ...previous, frame: frame('s0', 1, 0) }, current, 124).get('a1')!.x, 1)
 })
+
+test('departed agents leave the displayed positions immediately and return on reset', () => {
+  const frame: Frame = { streamId: 'run', tick: 2, time: 0.1, topologyVersion: 0, sceneVersion: 1, historyRevision: 0,
+    agents: [{ id: 'a1', x: 20, y: 3, profile: 'person', controller: null, state: 'departed' }] }
+  const previous = { frame: { ...frame, tick: 1, agents: frame.agents.map((a) => ({ ...a, state: 'moving' as const })) }, receivedAt: 100 }
+  assert.equal(displayPositions(previous, { frame, receivedAt: 116 }, 116).has('a1'), false)
+  const reset = { ...frame, streamId: 'reset', tick: 0, agents: frame.agents.map((a) => ({ ...a, x: 1, state: 'moving' as const })) }
+  assert.deepEqual(displayPositions({ frame, receivedAt: 116 }, { frame: reset, receivedAt: 120 }, 120).get('a1'), { x: 1, y: 3 })
+})

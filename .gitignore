@@ -1,4 +1,5 @@
 docs
+graphify-out
 
 node_modules/
 dist/
@@ -12,6 +13,7 @@ web/public/engine/*.wasm
 .env.*
 !.env.example
 node_modules
+graphify-out/
 
 .agents/
 .claude/

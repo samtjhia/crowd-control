@@ -42,7 +42,14 @@ function inspectJson(input: unknown): Result<true> {
       const descriptor = Object.getOwnPropertyDescriptor(v, key)!;
       if (!('value' in descriptor) || !descriptor.enumerable) return fail('INVALID_SCHEMA', 'Accessors and hidden properties are unsupported');
       if (Array.isArray(v) && (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= v.length)) return fail('INVALID_SCHEMA', 'Unexpected array property');
-      stack.push({ value: descriptor.value, depth: item.depth + 1 });
+      const child: unknown = descriptor.value;
+      if (child === null || typeof child === 'boolean' || typeof child === 'string' || typeof child === 'number') {
+        // Primitive-heavy density grids need no temporary traversal object per cell.
+        if (++nodes > JSON_BUDGET.maxNodes || item.depth + 1 > JSON_BUDGET.maxDepth) return fail('RESOURCE_LIMIT', 'JSON nesting or node budget exceeded');
+        if (typeof child === 'number' && !Number.isFinite(child)) return fail('INVALID_SCHEMA', 'Numbers must be finite');
+      } else {
+        stack.push({ value: child, depth: item.depth + 1 });
+      }
     }
   }
   return { ok: true, value: true };

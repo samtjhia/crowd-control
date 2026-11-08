@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import type { CompileOutput, Frame, ScenarioPlan, WorkerCommand, WorkerMessage } from '@crowd-control/contract'
+import type { CompiledGoal, CompileOutput, Frame, ScenarioPlan, WorkerCommand, WorkerMessage } from '@crowd-control/contract'
 import { MockSimulation } from '../worker/mock/simulation.ts'
 import { describeScenario, scenarios, startScenario } from './scenario.ts'
 
@@ -128,4 +128,38 @@ test('a scenario the assistant wrote gets a simulation ID of its own, once', asy
   assert.notEqual(own.plan.simulationId, concert.plan.simulationId, 'its runs no longer look like the concert demo’s')
   assert.match(own.plan.simulationId, /^assistant-3-/)
   assert.equal(ownSimulationId(own), own, 'an ID it already has is kept')
+})
+
+test('evacuation demos use seeded reaction cohorts and normal walking speed', () => {
+  for (const id of ['school-wing', 'concert-floor']) {
+    const scenario = all.find((s) => s.id === id)!
+    const operations = scenario.plan.rules[0]!.operations
+    assert.equal(operations.length, 3)
+    for (const [i, operation] of operations.entries()) {
+      assert.equal(operation.op, 'assign_goal')
+      if (operation.op !== 'assign_goal') throw new Error('expected evacuation')
+      assert.equal('kind' in operation.targets && operation.targets.kind, 'agent')
+      assert.equal(operation.goal.kind, 'sequence')
+      if (operation.goal.kind !== 'sequence') throw new Error('expected reaction followed by evacuation')
+      assert.deepEqual(operation.goal.goals[0], { kind: 'wait', duration: [0.5,1.5,2.5][i] })
+      const reach = operation.goal.goals[1]!
+      assert.equal(reach.kind === 'reach' && reach.departOnArrival, true)
+      if (reach.kind === 'reach') assert.equal(reach.urgency ?? 0, 0)
+    }
+  }
+})
+
+test('hackathon has persistent, periodically refreshed wander before and after arrivals', () => {
+  const scenario = all.find((s) => s.id === 'hackathon-hall')!
+  const result = startScenario(scenario.plan, scenario.model)
+  assert.ok(result.ok)
+  for (const agent of result.value.scene.agents) {
+    const controller: CompiledGoal = result.value.scene.controllers[agent.controller!]!
+    const wander: CompiledGoal = controller.kind === 'sequence' ? controller.goals.at(-1)! : controller
+    assert.equal(wander.kind, 'wander')
+    if (wander.kind === 'wander') {
+      assert.equal(wander.changeTargetEvery, 6)
+      assert.equal(wander.duration, undefined, 'ambient movement does not expire')
+    }
+  }
 })

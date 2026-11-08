@@ -82,7 +82,7 @@ export function starterPlan(venue: SavedVenue, count?: number): ScenarioPlan {
   const page = source.mode === 'upload' ? source.page : 1
   const initialOperations: Operation[] = [
     { op: 'spawn', template: { kind: 'agent', tags: ['crowd'], appearance: { fill: '#2563EB' } }, count: people, placement: { inside: { ids: [room] } } },
-    { op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'wander', inside: { ids: [room] } } },
+    { op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'wander', changeTargetEvery: 6, inside: { ids: [room] } } },
   ]
   return {
     schemaVersion: 1, simulationId: `${venue.map.id}-demo`.slice(0, 200), seed: 42,
@@ -91,7 +91,7 @@ export function starterPlan(venue: SavedVenue, count?: number): ScenarioPlan {
     timeline: outside.size > 0 ? [{ op: 'schedule', id: 'alarm', at: 30, operations: [{ op: 'emit', event: { name: 'alarm' } }] }] : [],
     rules: outside.size > 0 ? [{
       op: 'define_rule', id: 'evacuate', when: { kind: 'event', name: 'alarm' }, once: true,
-      operations: [{ op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'reach', target: { ids: [...outside] }, selection: 'lowest-cost' } }],
+      operations: [{ op: 'assign_goal', targets: { kind: 'agent', tags: ['crowd'] }, goal: { kind: 'reach', target: { tags: ['outside'] }, selection: 'lowest-cost', departOnArrival: true } }],
     }] : [],
   }
 }

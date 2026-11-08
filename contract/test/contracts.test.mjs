@@ -279,3 +279,15 @@ test('registered disc contact validates parameters, state and captured subject j
   check(c.EngineSnapshotSchema, snapshot);
   snapshot.contactState.data = { warmStart: [] }; rejects(c.EngineSnapshotSchema, snapshot);
 });
+
+test('primitive-array inspection keeps finite, descriptor and depth checks', () => {
+  check(c.JsonValueSchema, { cells: Array.from({ length: 34000 }, (_, i) => i / 10) });
+  for (const bad of [NaN, Infinity, -Infinity, undefined, BigInt(1)]) rejects(c.JsonValueSchema, { cells: [1, bad, 3] });
+  let invoked = false;
+  const accessor = [1, 2, 3];
+  Object.defineProperty(accessor, '1', { enumerable: true, get() { invoked = true; return 2; } });
+  rejects(c.JsonValueSchema, accessor);
+  assert.equal(invoked, false);
+  let deep = [1]; for (let i = 0; i < 65; i++) deep = [deep];
+  rejects(c.JsonValueSchema, deep, 'RESOURCE_LIMIT');
+});

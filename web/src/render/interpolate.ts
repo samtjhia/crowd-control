@@ -15,6 +15,7 @@ export function displayPositions(previous: TimedFrame | null, current: TimedFram
   const alpha = usable ? Math.min(1, Math.max(0, (now - current.receivedAt) / (current.receivedAt - previous.receivedAt))) : 1
   const before = usable ? new Map(previous.frame.agents.map((agent) => [agent.id, agent])) : null
   for (const agent of current.frame.agents) {
+    if (agent.state === 'departed') continue
     const from = before?.get(agent.id)
     positions.set(agent.id, from && alpha < 1
       ? { x: from.x + (agent.x - from.x) * alpha, y: from.y + (agent.y - from.y) * alpha }

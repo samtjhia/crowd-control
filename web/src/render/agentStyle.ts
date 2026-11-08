@@ -38,6 +38,14 @@ export function resolveAgentStyle(appearance: Appearance, state: AgentState): Re
   }
 }
 
+/** Movement changes pose, not the marker's geometry or annotation. */
+export function visualState(state: AgentState | null): AgentState | null {
+  switch (state) {
+    case 'idle': case 'moving': case 'waiting': case 'reacting': return 'idle'
+    default: return state
+  }
+}
+
 export type Annotation = {
   /** Status ring colour drawn around the body, or null. */
   ring: string | null

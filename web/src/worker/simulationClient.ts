@@ -44,6 +44,9 @@ export type SimulationView = {
   density: DensityGrid | null
   events: EventRecord[]
   playing: boolean
+  completed: boolean
+  recordedUntil: number
+  seeking: boolean
   speed: number
   lastError: ContractError | null
   /** Changes applied in this stream; cleared when a new stream starts (load or reset). */
@@ -67,25 +70,41 @@ const EMPTY_HISTORY: HistoryState = { historyRevision: 0, records: [], outcomes:
  * - Frames are held until the scene metadata they reference has arrived.
  * - Frames from a superseded history revision are ignored.
  */
+type NotificationScheduler = (notify: () => void) => () => void
+const onNextPaint: NotificationScheduler = (notify) => {
+  if (typeof requestAnimationFrame === 'function') {
+    const handle = requestAnimationFrame(notify)
+    return () => cancelAnimationFrame(handle)
+  }
+  let cancelled = false
+  queueMicrotask(() => { if (!cancelled) notify() })
+  return () => { cancelled = true }
+}
+
 export class SimulationClient {
   private readonly endpoint: WorkerEndpoint
   private readonly now: () => number
+  private readonly scheduleNotification: NotificationScheduler
+  private cancelNotification: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
   private readonly retired = new Set<string>()
   private readonly pendingFrames = new Map<string, Frame>()
   private readonly pending = new Map<string, { type: CommandBody['type']; multiplier?: number; resolve: (message: WorkerMessage) => void }>()
   private readonly detach: () => void
   private metricsTick = -1
+  private viewOwners = 0
+  private disposed = false
   private nextCommand = 1
   private nextRequest = 1
   private view: SimulationView
 
-  constructor(endpoint: WorkerEndpoint, now: () => number = () => performance.now()) {
+  constructor(endpoint: WorkerEndpoint, now: () => number = () => performance.now(), scheduleNotification: NotificationScheduler = onNextPaint) {
     this.endpoint = endpoint
     this.now = now
+    this.scheduleNotification = scheduleNotification
     this.view = {
       endpointKind: endpoint.kind, simulationId: null, streamId: null, scene: null, sceneVersion: 0, historyRevision: 0,
-      current: null, previous: null, metrics: null, density: null, events: [], playing: false, speed: 1, lastError: null, changes: [],
+      current: null, previous: null, metrics: null, density: null, events: [], playing: false, completed: false, recordedUntil: 0, seeking: false, speed: 1, lastError: null, changes: [],
     }
     this.detach = endpoint.subscribe((message) => this.receive(message))
   }
@@ -110,6 +129,7 @@ export class SimulationClient {
    * joins `changes`; on failure the error is returned and shown as `lastError`.
    */
   async apply(label: string, operations: Operation[], when?: number, prompt = label): Promise<Result<ApplyAck>> {
+    if (this.disposed) return Promise.reject(new Error('Simulation client is disposed'))
     const simulationId = this.view.simulationId
     if (!simulationId) return { ok: false, error: { code: 'NOT_FOUND', message: 'No simulation is loaded' } }
     const requestId = `ui-${this.nextRequest++}-${Math.random().toString(36).slice(2, 8)}`
@@ -127,8 +147,25 @@ export class SimulationClient {
   setSpeed(multiplier: number) { return this.command({ type: 'speed', multiplier }) }
   reset() { return this.command({ type: 'reset' }) }
 
+  async seek(time: number): Promise<WorkerMessage> {
+    this.update({ seeking: true })
+    try {
+      const reply = await this.command({ type: 'seek', time })
+      if (reply.type === 'ack') {
+        const history = await this.command({ type: 'query', query: { kind: 'history' } })
+        if (history.type === 'query_result' && history.result.kind === 'history' && history.stamp.streamId === this.view.streamId) {
+          this.update({ changes: history.result.history.records.filter((r) => !r.deleted && r.origin === 'followup')
+            .map((r) => ({ interventionId: r.id, label: r.label, at: r.at })) })
+        }
+      }
+      return reply
+    } finally { this.update({ seeking: false }) }
+  }
+
+
   /** Sends a command and resolves with its correlated ack, error, query result or snapshot. */
   command(body: CommandBody): Promise<WorkerMessage> {
+    if (this.disposed) return Promise.reject(new Error('Simulation client is disposed'))
     const simulationId = this.view.simulationId
     if (!simulationId) return Promise.reject(new Error('Load a simulation before sending commands'))
     const commandId = `ui-${this.nextCommand++}`
@@ -138,10 +175,34 @@ export class SimulationClient {
     })
   }
 
+  /** The microtask grace period preserves React StrictMode's immediate remount. */
+  retain(): () => void {
+    if (this.disposed) throw new Error('Simulation client is disposed')
+    this.viewOwners++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.viewOwners--
+      queueMicrotask(() => { if (this.viewOwners === 0) this.dispose() })
+    }
+  }
+
   dispose() {
+    if (this.disposed) return
+    this.disposed = true
+    this.cancelNotification?.()
+    this.cancelNotification = null
     this.detach()
+    this.endpoint.dispose?.()
     this.listeners.clear()
+    for (const [commandId, pending] of this.pending) pending.resolve({
+      schemaVersion: SCHEMA_VERSION, simulationId: this.view.simulationId ?? 'unknown', type: 'error', commandId,
+      error: { code: 'UNSUPPORTED_CAPABILITY', message: 'Simulation client is disposed' },
+    })
     this.pending.clear()
+    this.pendingFrames.clear()
+    this.retired.clear()
   }
 
   private receive(message: WorkerMessage) {
@@ -165,7 +226,7 @@ export class SimulationClient {
       case 'metrics':
         if (this.acceptTelemetry(message.stamp) && message.stamp.tick >= this.metricsTick && message.stamp.tick >= (this.view.current?.frame.tick ?? 0)) {
           this.metricsTick = message.stamp.tick
-          this.update({ metrics: message.sample, density: message.density ?? this.view.density })
+          this.update({ metrics: message.sample, density: message.density ?? this.view.density, completed: message.completed ?? false, ...(message.completed ? { playing: false } : {}) })
         }
         return
       case 'events':
@@ -185,8 +246,9 @@ export class SimulationClient {
     if (!entry) return
     this.pending.delete(commandId)
     if (message.type === 'ack') {
-      if (entry.type === 'resume') this.update({ playing: true })
-      if (entry.type === 'pause' || entry.type === 'load' || entry.type === 'reset') this.update({ playing: false })
+      if (entry.type === 'resume') this.update({ playing: !this.view.completed })
+      if (entry.type === 'pause' || entry.type === 'seek' || entry.type === 'load' || entry.type === 'reset') this.update({ playing: false })
+      if (entry.type === 'load' || entry.type === 'reset') this.update({ recordedUntil: 0 })
       if (entry.type === 'speed' && entry.multiplier !== undefined) this.update({ speed: entry.multiplier })
     }
     entry.resolve(message)
@@ -202,7 +264,7 @@ export class SimulationClient {
       if (this.view.streamId) this.retired.add(this.view.streamId)
       // A new stream (load or reset) has its own history: a reset goes back to the initial
       // revision, so the old stream's higher revision must not make its frames look stale.
-      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [], historyRevision })
+      this.update({ streamId, current: null, previous: null, metrics: null, density: null, events: [], changes: [], completed: false, historyRevision })
     } else if (sceneVersion < this.view.sceneVersion) {
       return
     }
@@ -230,11 +292,18 @@ export class SimulationClient {
       previous: current,
       current: { frame, receivedAt: this.now() },
       historyRevision: frame.historyRevision,
+      recordedUntil: Math.max(this.view.recordedUntil, frame.time),
     })
   }
 
   private update(patch: Partial<SimulationView>) {
+    if (this.disposed) return
     this.view = { ...this.view, ...patch }
-    for (const listener of [...this.listeners]) listener()
+    // Keep every worker update immediately; repaint React only once per browser frame.
+    if (this.cancelNotification) return
+    this.cancelNotification = this.scheduleNotification(() => {
+      this.cancelNotification = null
+      if (!this.disposed) for (const listener of [...this.listeners]) listener()
+    })
   }
 }

@@ -1,7 +1,7 @@
 import { Application, BitmapText, Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import type { AgentState, Camera, Frame, RenderAgentMetadata, RenderScene, Shape, Vec2 } from '@crowd-control/contract'
 import type { SimulationClient } from '../worker/simulationClient.ts'
-import { HAIR_TONES, SKIN_TONES, figureLook, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, type AgentDrawMode } from './agentStyle.ts'
+import { HAIR_TONES, SKIN_TONES, figureLook, groupColor, markerShape, resolveAgentStyle, stableIndex, stateAnnotation, visualState, type AgentDrawMode } from './agentStyle.ts'
 import { FigureAtlas, type FigureLook, type FigurePose } from './figureAtlas.ts'
 import { fitCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera.ts'
 import { objectRects, pickAt, pickInBox, portalRects, zoneStrips, type Pick, type PickKind } from './hitTest.ts'
@@ -10,6 +10,7 @@ import { BADGE_COLORS, COLORS, layoutMap, type MapLayout } from './mapLayout.ts'
 import { blurOverFloor, gaussianKernel, heatGridFor, paintHeatmap, peakOf, smoothingSigma, splatPositions, type HeatGrid, type HeatScale } from './heatmap.ts'
 
 export type RendererOptions = {
+  measurePerformance?: boolean
   /** Largest automatic fit scale, so a tiny map is not blown up absurdly. */
   maxPixelsPerUnit?: number
   /** Breathing room between the map and the panel edge, in CSS pixels. */
@@ -110,10 +111,10 @@ export class CrowdRenderer {
   private readonly atlas: FigureAtlas
   private insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 }
   private tween: { from: Camera; start: number } | null = null
-  private atlasGeneration = 0
   private readonly font: string
   /** World positions drawn on the last frame, so clicks hit what the user sees. */
   private positions = new Map<string, Vec2>()
+  private timing = { frames: 0, totalMs: 0, worstMs: 0, submitMs: 0, submitWorstMs: 0, since: performance.now() }
   private pickable: readonly PickKind[] = []
   private readonly pickListeners = new Set<(pick: Pick | null, additive: boolean, at: Vec2) => void>()
   private readonly boxListeners = new Set<(picks: Pick[], additive: boolean) => void>()
@@ -145,7 +146,7 @@ export class CrowdRenderer {
   static async create(host: HTMLElement, client: SimulationClient, options: RendererOptions = {}): Promise<CrowdRenderer> {
     const app = new Application()
     await app.init({
-      resizeTo: host, antialias: true, preference: 'webgl',
+      resizeTo: host, antialias: true, preference: 'webgl', powerPreference: 'high-performance',
       ...(options.background ? { background: options.background } : { backgroundAlpha: 0 }),
       resolution: window.devicePixelRatio || 1, autoDensity: true,
     })
@@ -153,6 +154,7 @@ export class CrowdRenderer {
   }
 
   private constructor(app: Application, host: HTMLElement, client: SimulationClient, options: RendererOptions) {
+    app.ticker.maxFPS = 0 // Render on every browser animation frame, independently of worker/heatmap rates.
     this.app = app
     this.client = client
     this.options = options
@@ -171,7 +173,38 @@ export class CrowdRenderer {
     this.mapRoot.addChild(floor, heatmap, structures, mapLabels)
     app.stage.addChild(this.mapRoot, agents, this.selectionMark, annotations, labels)
     this.detachInput = this.attachPointerInput(app.canvas)
-    app.ticker.add(() => this.draw())
+    if (options.measurePerformance) {
+      let started = 0
+      const probe = {
+        prerender: (options: { container: unknown }) => { if (options.container === app.stage) started = performance.now() },
+        postrender: (options: { container: unknown }) => {
+          if (options.container !== app.stage) return
+          const elapsed = performance.now() - started
+          this.timing.submitMs += elapsed
+          this.timing.submitWorstMs = Math.max(this.timing.submitWorstMs, elapsed)
+        },
+      }
+      app.renderer.runners.prerender.add(probe)
+      app.renderer.runners.postrender.add(probe)
+    }
+    app.ticker.add(() => {
+      if (!options.measurePerformance) { this.draw(); return }
+      const start = performance.now()
+      this.draw()
+      const elapsed = performance.now() - start
+      this.timing.frames++
+      this.timing.totalMs += elapsed
+      this.timing.worstMs = Math.max(this.timing.worstMs, elapsed)
+    })
+  }
+
+  readPerformance() {
+    const now = performance.now()
+    const result = { fps: this.timing.frames * 1000 / Math.max(1, now - this.timing.since),
+      updateMs: this.timing.totalMs / Math.max(1, this.timing.frames), worstMs: this.timing.worstMs,
+      submitMs: this.timing.submitMs / Math.max(1, this.timing.frames), submitWorstMs: this.timing.submitWorstMs }
+    this.timing = { frames: 0, totalMs: 0, worstMs: 0, submitMs: 0, submitWorstMs: 0, since: now }
+    return result
   }
 
   /** Multiplies the zoom around the canvas centre (keyboard +/−). */
@@ -603,14 +636,12 @@ export class CrowdRenderer {
 
   private drawAgents(previous: Parameters<typeof displayPositions>[0], current: Parameters<typeof displayPositions>[1]) {
     const now = performance.now()
-    // The figure cache was emptied: re-point every sprite this frame, then free the old textures.
-    const generation = this.atlas.generation
-    if (generation !== this.atlasGeneration) for (const view of this.agentViews.values()) view.mode = null
     const positions = displayPositions(previous, current, now)
     this.positions = positions
     const ppu = this.camera.pixelsPerUnit
     const seen = new Set<string>()
     for (const agent of current.frame.agents) {
+      if (!positions.has(agent.id)) continue
       seen.add(agent.id)
       const metadata = this.metadata.get(agent.id) ?? null
       let view = this.agentViews.get(agent.id)
@@ -623,9 +654,10 @@ export class CrowdRenderer {
         this.layers.agents.addChild(view.body)
         this.agentViews.set(agent.id, view)
       }
-      if (view.state !== agent.state || view.metadata !== metadata || view.pixelsPerUnit !== ppu || view.mode !== this.drawMode) {
+      if (visualState(view.state) !== visualState(agent.state) || view.metadata !== metadata || view.pixelsPerUnit !== ppu || view.mode !== this.drawMode) {
         this.restyleAgent(view, agent.id, agent.state, metadata, ppu)
       }
+      view.state = agent.state
       const screen = worldToScreen(this.camera, positions.get(agent.id)!)
       const moved = view.last ? Math.hypot(screen.x - view.last.x, screen.y - view.last.y) : 0
       if (view.last && moved > 0.05) view.heading = Math.atan2(screen.y - view.last.y, screen.x - view.last.x)
@@ -651,10 +683,10 @@ export class CrowdRenderer {
       this.destroyAgentView(view)
       this.agentViews.delete(id)
     }
-    if (generation !== this.atlasGeneration && this.atlas.generation === generation) {
-      this.atlas.destroyRetired()
-      this.atlasGeneration = generation
+    const activeTextures = function* (views: Iterable<AgentView>) {
+      for (const view of views) if (view.figure?.visible) yield view.figure.texture
     }
+    this.atlas.retain(activeTextures(this.agentViews.values()))
   }
 
   private restyleAgent(view: AgentView, id: string, state: AgentState, metadata: RenderAgentMetadata | null, ppu: number) {

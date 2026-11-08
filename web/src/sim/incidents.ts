@@ -32,6 +32,7 @@ function describe(event: EventRecord): Omit<Incident, 'id' | 'startTime' | 'time
     case 'recover': return { sign: 'exit', title: 'Helped up', detail: source }
     case 'portal_closed': return { sign: 'closed', title: 'Door closed', detail: source }
     case 'portal_opened': return { sign: 'exit', title: 'Door opened', detail: source }
+    case 'departure':
     case 'departed': return { sign: 'exit', title: 'Left the venue', detail: source }
     case 'removed': return { sign: 'instruction', title: 'Removed', detail: source }
     case 'spawned': {
@@ -48,7 +49,7 @@ export function toIncidents(events: EventRecord[]): Incident[] {
   const incidents: Incident[] = []
   for (const event of events) {
     const last = incidents.at(-1)
-    if (event.name === 'departed' && last?.title === 'Left the venue') {
+    if ((event.name === 'departure' || event.name === 'departed') && last?.title === 'Left the venue') {
       last.count += 1
       last.time = event.time
       last.detail = `${last.count} people`
