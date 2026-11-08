@@ -158,7 +158,6 @@ const evacuate = (tag: string, target: { tags: string[] } | { ids: string[] }): 
     ] },
   })),
 }]
-}]
 const lookup = (venue: string, floor: string) => ({ mode: 'lookup' as const, venue, floor })
 const header = (simulationId: string) => ({ schemaVersion: 1 as const, simulationId, seed: 42 })
 
