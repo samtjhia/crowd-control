@@ -1,5 +1,6 @@
 /* Past runs: the simulator's green workspace, a list of runs and the chosen run's details. */
 .hist-page {
+  display: flow-root; /* keeps the header's top margin inside the page */
   min-height: 100dvh;
   padding-bottom: 48px;
   background: var(--cc-workspace);
@@ -190,3 +191,45 @@
 .hist-report-empty .hist-button { margin-top: 10px; }
 a.hist-quiet { text-decoration: none; }
 @media (max-width: 860px) { .hist-new-menu { right: auto; left: 0; width: min(340px, calc(100vw - 32px)); } }
+
+/* Deleting from the list: a delete button on every row, and Select for several at once. */
+.hist-list-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 2px 6px 8px 12px; border-bottom: 1px solid var(--cc-hair); margin-bottom: 6px; }
+.hist-list-count { color: var(--cc-muted); font-size: 13px; }
+.hist-list-bar-actions { display: inline-flex; align-items: center; gap: 12px; }
+.hist-list-bar .hist-danger:disabled { background: var(--cc-well-strong); color: var(--cc-faint); }
+.hist-check { display: inline-flex; align-items: center; gap: 8px; color: var(--cc-text); font-size: 13.5px; font-weight: 550; cursor: pointer; }
+.hist-page input[type='checkbox'] { width: 16px; height: 16px; margin: 0; accent-color: var(--cc-green); cursor: pointer; }
+.hist-row-check { flex: none; margin-left: 14px !important; }
+.hist-runs li.is-picked { background: var(--cc-green-soft); }
+.hist-row-actions { display: inline-flex; flex: none; align-items: center; gap: 2px; margin-right: 6px; }
+.hist-row-actions .hist-open { margin-right: 0; }
+.hist-page .hist-row-delete {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--cc-muted);
+  cursor: pointer;
+  transition: background 140ms var(--cc-ease), color 140ms var(--cc-ease);
+}
+.hist-page .hist-row-delete:hover { background: var(--cc-rose-soft); color: #96364e; }
+.hist-row-confirm { flex: none; margin-right: 8px; }
+.hist-list-problem { margin: 0 12px 8px; }
+
+/*
+ * On wide screens the list and the report each scroll inside their own panel, so the page
+ * itself stays put; the list's Select bar stays pinned at its top. Narrow screens stack the
+ * two and scroll the page as usual.
+ */
+@media (min-width: 861px) {
+  .hist-page:has(.hist-body:not(.is-single)) { padding-bottom: 20px; }
+  .hist-body { --hist-panel-height: max(360px, calc(100dvh - 250px)); }
+  .hist-list, .hist-detail { max-height: var(--hist-panel-height); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #d5d6d1 transparent; }
+  .hist-list { padding-top: 0; }
+  .hist-detail { position: static; }
+  .hist-list-bar { position: sticky; top: 0; z-index: 1; padding-top: 10px; background: var(--cc-card); }
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, LoaderCircle, MessageSquareText, Plus, Printer, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { CheckSquare, FileText, LoaderCircle, MessageSquareText, Plus, Printer, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { RunSummariesSchema, type RunSummary } from '@crowd-control/contract'
 import { ReportView } from './ReportView.tsx'
 import { loadReport, writeReport, type SavedReport } from './reports.ts'
@@ -136,7 +136,7 @@ export default function HistoryApp() {
         {/* The details column only appears once there are runs to choose from. */}
         <div className={`hist-body${hasRuns ? '' : ' is-single'}`}>
           <section className="hist-list" aria-label="Your runs">
-            <RunList runs={runs} selected={selected} onOpen={setSelected} onRetry={() => void loadRuns()} />
+            <RunList runs={runs} selected={selected} onOpen={setSelected} onRetry={() => void loadRuns()} onDelete={remove} />
           </section>
           {hasRuns && (
             <section className="hist-detail" aria-live="polite" aria-label="Run details">
@@ -149,7 +149,21 @@ export default function HistoryApp() {
   )
 }
 
-function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>; selected: RunSummary | null; onOpen: (run: RunSummary) => void; onRetry: () => void }) {
+/**
+ * The list of runs. Each row opens the run, replays it, or deletes it (confirmed in the row).
+ * "Select" switches to ticking several runs and deleting them together.
+ */
+function RunList({ runs, selected, onOpen, onRetry, onDelete }: {
+  runs: Load<RunSummary[]>; selected: RunSummary | null; onOpen: (run: RunSummary) => void; onRetry: () => void
+  onDelete: (run: RunSummary) => Promise<string | null>
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [confirmBulk, setConfirmBulk] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+
   if (runs.state === 'loading') return <p className="hist-note" role="status"><LoaderCircle size={16} className="hist-spin" aria-hidden="true" /> Loading your runs…</p>
   if (runs.state === 'error') {
     return (
@@ -168,30 +182,107 @@ function RunList({ runs, selected, onOpen, onRetry }: { runs: Load<RunSummary[]>
       </div>
     )
   }
+
+  const all = runs.value
+  const toggle = (id: string) => setPicked((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); setConfirmBulk(false); setProblem(null) }
+  /** Deletes one run, or every picked run in turn; a failure stops and says why. */
+  const remove = async (targets: RunSummary[]) => {
+    setBusy(true)
+    setProblem(null)
+    for (const run of targets) {
+      const error = await onDelete(run)
+      if (error) { setProblem(`Couldn’t delete “${titleOf(run)}”: ${error}`); break }
+    }
+    setBusy(false)
+    setConfirming(null)
+    setConfirmBulk(false)
+    setPicked(new Set())
+  }
+  const chosen = all.filter((run) => picked.has(run.runId))
+
   return (
-    <ol className="hist-runs">
-      {runs.value.map((run) => {
-        const current = selected?.runId === run.runId
-        return (
-          <li key={run.runId} className={current ? 'is-current' : undefined}>
-            <button type="button" className="hist-run" aria-pressed={current} onClick={() => onOpen(run)}>
-              <span className="hist-run-name">{titleOf(run)}</span>
-              <span className="hist-run-when">{when(run.startedAt)}</span>
-              <span className="hist-run-meta">
-                {plural(run.interventionCount, 'change', 'changes')}
-                {run.hasReport && <span className="hist-has-report"><FileText size={12} aria-hidden="true" /> Report</span>}
+    <>
+      <div className="hist-list-bar">
+        {selecting ? (
+          <>
+            <label className="hist-check">
+              <input type="checkbox" checked={picked.size === all.length} ref={(box) => { if (box) box.indeterminate = picked.size > 0 && picked.size < all.length }}
+                onChange={() => setPicked(picked.size === all.length ? new Set() : new Set(all.map((run) => run.runId)))} />
+              <span>{picked.size > 0 ? `${picked.size} selected` : 'Select all'}</span>
+            </label>
+            {confirmBulk ? (
+              <span className="hist-confirm" role="group" aria-label="Confirm delete">
+                <span>Delete {plural(chosen.length, 'run', 'runs')} and their reports?</span>
+                <button type="button" className="hist-danger" disabled={busy} onClick={() => void remove(chosen)}>{busy ? 'Deleting…' : 'Delete'}</button>
+                <button type="button" className="hist-link" disabled={busy} onClick={() => setConfirmBulk(false)}>Cancel</button>
               </span>
-            </button>
-            {replayable(run) && (
-              <a className="hist-open" href={`/sim?replay=${encodeURIComponent(run.runId)}`}
-                title={run.interventionCount > 0 ? `Run ${titleOf(run)} again, with your ${plural(run.interventionCount, 'change', 'changes')} at the same moments` : `Run ${titleOf(run)} again`}>
-                <RotateCcw size={14} aria-hidden="true" /> Replay
-              </a>
+            ) : (
+              <span className="hist-list-bar-actions">
+                <button type="button" className="hist-danger" disabled={picked.size === 0} onClick={() => setConfirmBulk(true)}>
+                  <Trash2 size={14} aria-hidden="true" /> Delete{picked.size > 0 ? ` ${picked.size}` : ''}
+                </button>
+                <button type="button" className="hist-link" onClick={stopSelecting}>Done</button>
+              </span>
             )}
-          </li>
-        )
-      })}
-    </ol>
+          </>
+        ) : (
+          <>
+            <span className="hist-list-count">{plural(all.length, 'run', 'runs')}</span>
+            <button type="button" className="hist-quiet" onClick={() => { setSelecting(true); setConfirming(null) }}>
+              <CheckSquare size={14} aria-hidden="true" /> Select
+            </button>
+          </>
+        )}
+      </div>
+      {problem && <p className="hist-problem hist-list-problem" role="alert">{problem}</p>}
+      <ol className="hist-runs">
+        {all.map((run) => {
+          const current = selected?.runId === run.runId
+          const ticked = picked.has(run.runId)
+          return (
+            <li key={run.runId} className={[current && !selecting ? 'is-current' : '', ticked ? 'is-picked' : ''].filter(Boolean).join(' ') || undefined}>
+              {selecting && (
+                <input type="checkbox" className="hist-row-check" checked={ticked} onChange={() => toggle(run.runId)} aria-label={`Select ${titleOf(run)}, ${when(run.startedAt)}`} />
+              )}
+              <button type="button" className="hist-run" aria-pressed={selecting ? ticked : current} onClick={() => (selecting ? toggle(run.runId) : onOpen(run))}>
+                <span className="hist-run-name">{titleOf(run)}</span>
+                <span className="hist-run-when">{when(run.startedAt)}</span>
+                <span className="hist-run-meta">
+                  {plural(run.interventionCount, 'change', 'changes')}
+                  {run.hasReport && <span className="hist-has-report"><FileText size={12} aria-hidden="true" /> Report</span>}
+                </span>
+              </button>
+              {!selecting && (confirming === run.runId ? (
+                <span className="hist-confirm hist-row-confirm" role="group" aria-label={`Confirm deleting ${titleOf(run)}`}>
+                  <span>Delete?</span>
+                  <button type="button" className="hist-danger" disabled={busy} onClick={() => void remove([run])}>{busy ? 'Deleting…' : 'Delete'}</button>
+                  <button type="button" className="hist-link" disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
+                </span>
+              ) : (
+                <span className="hist-row-actions">
+                  {replayable(run) && (
+                    <a className="hist-open" href={`/sim?replay=${encodeURIComponent(run.runId)}`}
+                      title={run.interventionCount > 0 ? `Run ${titleOf(run)} again, with your ${plural(run.interventionCount, 'change', 'changes')} at the same moments` : `Run ${titleOf(run)} again`}>
+                      <RotateCcw size={14} aria-hidden="true" /> Replay
+                    </a>
+                  )}
+                  <button type="button" className="hist-row-delete" onClick={() => setConfirming(run.runId)}
+                    aria-label={`Delete ${titleOf(run)}, ${when(run.startedAt)}`} title="Delete this run">
+                    <Trash2 size={15} aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+            </li>
+          )
+        })}
+      </ol>
+    </>
   )
 }
 
